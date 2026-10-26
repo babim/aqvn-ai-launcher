@@ -211,6 +211,61 @@ async fn listener_only_exists_when_master_toggle_is_on() {
     let _ = std::fs::remove_dir_all(&cwd);
 }
 
+/// Contract ruling R2: the SSH listener is cloud-reachable, so it must bind the
+/// wildcard address, never loopback only.
+#[tokio::test]
+async fn enabled_server_binds_wildcard_ephemeral_port() {
+    let cwd = temp_dir("wildcard-bind");
+    let config = base_config(0, &cwd);
+
+    let listener = ssh::server::bind_if_enabled(&config)
+        .await
+        .expect("bind check")
+        .expect("enabled server must bind");
+
+    let addr = listener.local_addr().expect("local addr");
+    assert!(
+        addr.ip().is_unspecified(),
+        "must bind the wildcard address (ruling R2): {addr}"
+    );
+    assert_ne!(addr.port(), 0, "ephemeral bind must resolve a real port");
+
+    let _ = std::fs::remove_dir_all(&cwd);
+}
+
+/// Security invariant: an enabled listener with no password must fail closed —
+/// an unauthenticated wildcard SSH listener must never exist.
+#[tokio::test]
+async fn enabled_server_refuses_to_bind_without_password() {
+    let cwd = temp_dir("no-password");
+    let mut config = base_config(0, &cwd);
+    config.ssh_password.clear();
+    assert!(
+        config.ssh_password.is_empty(),
+        "fixture must start without a password"
+    );
+
+    let error = ssh::server::bind_if_enabled(&config)
+        .await
+        .expect_err("empty password must fail closed, never bind");
+    assert!(
+        error.to_lowercase().contains("password"),
+        "log must name the reason: {error}"
+    );
+
+    // Whitespace-only is not a password either.
+    config.ssh_password.push_str("   ");
+    let error = ssh::server::bind_if_enabled(&config)
+        .await
+        .expect_err("whitespace password must fail closed, never bind");
+    assert!(
+        error.to_lowercase().contains("password"),
+        "log must name the reason: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(&cwd);
+}
+
 // ---------------------------------------------------------------- VAL-SSH-002
 
 #[tokio::test]

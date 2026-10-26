@@ -3,6 +3,12 @@
 //! This is NOT the security boundary — password authentication plus the master
 //! toggle are. It refuses the named destructive population so an agent shell
 //! cannot wipe the host through a typo or a hostile prompt injection.
+//!
+//! Known bypasses (accepted; see `docs/rfc-spec/security-notes.md`): backslash
+//! variants (`\rm`), wrapper prefixes (`busybox`, `nohup`, `env`, `timeout`,
+//! `xargs`), `bash -c` / `eval`, `$()` / backticks, control-key line-buffer
+//! desync (Ctrl-C/Ctrl-U), multi-line constructs, and anything not typed into
+//! the PTY. Do not widen these patterns without a security review.
 
 /// Returns the refusal reason when the command matches the denylist.
 ///

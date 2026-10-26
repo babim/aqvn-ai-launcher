@@ -11,6 +11,8 @@ UI strings, bundle metadata, comments, and commit content stay AQVN-branded.
 
 ## Planned notes
 
+- `security-notes.md` — exposure model, real security boundary, SSH denylist
+  blind spots (the guard is best-effort, not a boundary)
 - `rfc-wire.md` — `POST /api/rfc` envelope, HMAC-SHA256 hex, response shapes
 - `ssh-bridge.md` — password exchange (`_provide_root_password`), PTY behavior
 - `chat-wire.md` — login/CSRF, socket.io state push, message_async

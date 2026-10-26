@@ -19,9 +19,10 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
-/// The bridge is a local control service; never expose it on a routable
-/// interface (same posture as the RFC endpoint).
-const BIND_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+/// Cloud-reachable listener (contract ruling R2): bind the wildcard address so
+/// the remote agent can reach the host at `:55022`. Authentication is the
+/// boundary, and an empty `ssh_password` fails closed before any socket exists.
+const BIND_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
 /// Default geometry when a client opens a shell without a PTY request.
 const DEFAULT_COLS: u32 = 80;
@@ -353,14 +354,21 @@ impl Server for SshServer {
     }
 }
 
-/// Binds the listener only when the master toggle is on.
+/// Binds the listener only when the master toggle is on and a password exists.
 ///
-/// The listener follows the toggle alone: the password gate is enforced per
-/// connection, so an unconfigured password still yields a bound-but-unusable
-/// port (every auth attempt is rejected) rather than a silent no-op.
+/// `Ok(None)` means the toggle is off: no socket is created, so the port stays
+/// closed (validation assertion VAL-SSH-001). An enabled server with an
+/// empty password fails closed (`Err`) instead of exposing an unauthenticated
+/// wildcard SSH listener. Password auth is the real boundary; the denylist is
+/// only a best-effort secondary layer.
 pub async fn bind_if_enabled(config: &AppConfig) -> Result<Option<TcpListener>, String> {
     if !config.rfc_enabled {
         return Ok(None);
+    }
+    if config.ssh_password.trim().is_empty() {
+        return Err("SSH server refused to start: no SSH password configured; \
+             refusing to expose an unauthenticated wildcard listener"
+            .to_string());
     }
     let address = SocketAddr::new(BIND_ADDRESS, config.ssh_port);
     let listener = TcpListener::bind(address)

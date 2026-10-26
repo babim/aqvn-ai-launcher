@@ -1,6 +1,7 @@
 //! AQVN Workspace core library.
 
 pub mod config;
+pub mod proxy;
 pub mod rfc;
 pub mod ssh;
 
@@ -18,6 +19,25 @@ pub fn run() {
                 config::AppConfig::load_from_store(app.handle()).unwrap_or_default();
             let watcher = config::ConfigWatcher::new(initial_config.clone());
             app.manage(watcher.clone());
+
+            // Local bridge proxy: loopback-only, kernel-chosen port. Binds before
+            // the window exists so the resolved port can be injected into the
+            // page as `window.__AQVN_PROXY__`.
+            let (proxy_listener, proxy_state, proxy_info) =
+                tauri::async_runtime::block_on(proxy::server::bind(&initial_config.server_url))?;
+            app.manage(proxy_info.clone());
+
+            let serve_state = proxy_state.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = proxy::server::serve(proxy_listener, serve_state).await {
+                    eprintln!("Bridge proxy error: {err}");
+                }
+            });
+            let watch_state = proxy_state.clone();
+            let watch_config = watcher.clone();
+            tauri::async_runtime::spawn(async move {
+                proxy::server::watch_target(watch_config, watch_state).await;
+            });
 
             // RFC bridge: binds only when the master toggle is enabled (default OFF)
             // and restarts its listener on any settings change (hot reload).
@@ -67,6 +87,7 @@ pub fn run() {
                 .expect("main window config not found in tauri.conf.json");
 
             WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                .initialization_script(proxy::server::init_script(proxy_info.port))
                 .on_document_title_changed(|window, title| {
                     // Rust-side sync needs no `core:window:allow-set-title`.
                     let _ = window.set_title(&title);

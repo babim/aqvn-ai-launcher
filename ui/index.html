@@ -8,6 +8,16 @@
       // Rust mirrors this into the native window title (no JS IPC needed).
       document.title = "AQVN AI Workspace";
     </script>
+    <script src="bridge.js"></script>
+    <script>
+      // `window.__AQVN_PROXY__` is injected by Rust before page scripts run.
+      // Its port is chosen at launch; nothing here hardcodes it.
+      window.addEventListener("DOMContentLoaded", function () {
+        if (window.bridge && window.bridge.proxy) {
+          console.info("[AQVN] proxy bridge:", window.bridge.proxy.url);
+        }
+      });
+    </script>
     <style>
       :root {
         color-scheme: dark;

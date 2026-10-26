@@ -16,6 +16,7 @@ RFC_PORT="${AQVN_E2E_RFC_PORT:-55080}"
 SSH_PORT="${AQVN_E2E_SSH_PORT:-55022}"
 RFC_PASSWORD="${AQVN_E2E_RFC_PASSWORD:-rfc-e2e-test-password}"
 SSH_PASSWORD="${AQVN_E2E_SSH_PASSWORD:-ssh-e2e-test-password}"
+SERVER_URL="${AQVN_E2E_SERVER_URL:-https://a0.matmagoc.com}"
 APP_PID_FILE="$STATE_DIR/app.pid"
 XVFB_PID_FILE="$STATE_DIR/xvfb.pid"
 DISPLAY_FILE="$STATE_DIR/display"
@@ -100,13 +101,14 @@ pick_display() {
 write_settings() {
   mkdir -p "$CONFIG_HOME/net.aqvn.workspace" "$SANDBOX"
   python3 - "$CONFIG_HOME/net.aqvn.workspace/settings.json" \
-    "$SANDBOX" "$RFC_PASSWORD" "$SSH_PASSWORD" "$RFC_PORT" "$SSH_PORT" <<'PY'
+    "$SANDBOX" "$RFC_PASSWORD" "$SSH_PASSWORD" "$RFC_PORT" "$SSH_PORT" \
+    "$SERVER_URL" <<'PY'
 import json
 import sys
 
-path, sandbox, rfc_password, ssh_password, rfc_port, ssh_port = sys.argv[1:7]
+path, sandbox, rfc_password, ssh_password, rfc_port, ssh_port, server_url = sys.argv[1:8]
 settings = {
-    "server_url": "https://a0.matmagoc.com",
+    "server_url": server_url,
     "rfc_enabled": True,
     "rfc_password": rfc_password,
     "ssh_password": ssh_password,

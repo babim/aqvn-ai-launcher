@@ -12,6 +12,10 @@ target/
 node_modules/
 dist/
 
+# Python helper artifacts
+__pycache__/
+*.pyc
+
 # Android
 src-tauri/gen/android/.gradle/
 src-tauri/gen/android/app/build/

@@ -226,9 +226,23 @@
     return 'tauri (internals invoke)';
   }
 
+  /**
+   * Bridge proxy endpoint injected by Rust before any page script runs.
+   * The port is chosen at launch, so it must never be hardcoded here.
+   * Browser-mode (agent-browser against a static server) returns null.
+   */
+  function proxyInfo() {
+    const injected = typeof window !== 'undefined' ? window.__AQVN_PROXY__ : null;
+    if (!injected || typeof injected.port !== 'number') {
+      return null;
+    }
+    return { url: String(injected.url), port: injected.port };
+  }
+
   window.bridge = {
     isTauri: checkIsTauri(),
     getStore,
-    backendDescription
+    backendDescription,
+    proxy: proxyInfo()
   };
 })();

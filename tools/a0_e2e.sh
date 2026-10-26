@@ -23,7 +23,9 @@ if [ -z "$HARNESS_DIR" ]; then
 fi
 HARNESS_PID_FILE="$HARNESS_DIR/a0-ui.pid"
 
-port_listening() { (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1; }
+# Share the port/pid primitives with the subject-app lifecycle script.
+# shellcheck source=tools/_e2e_lib.sh
+source "$REPO_ROOT/tools/_e2e_lib.sh"
 
 fail() {
   echo "FAIL $*" >&2
@@ -32,21 +34,52 @@ fail() {
 
 app_started=0
 
-cleanup() {
-  local status=$?
-  if [ -f "$HARNESS_PID_FILE" ]; then
-    local pid
-    pid="$(cat "$HARNESS_PID_FILE" 2>/dev/null || true)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-      sleep 1
-      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+stop_harness() { # stops only the pidfile harness; keeps the pidfile on kill failure
+  local pid
+  pid="$(cat "$HARNESS_PID_FILE" 2>/dev/null || true)"
+
+  if [ -n "$pid" ] && pid_alive "$pid"; then
+    if ! pid_matches "$pid" "run_ui.py"; then
+      echo "warning: pid $pid in $HARNESS_PID_FILE is not the harness; refusing to kill" >&2
+      rm -f "$HARNESS_PID_FILE"
+    else
+      # stop_a0.sh drops its pidfile unconditionally, so verify the PID here.
+      "$HARNESS_DIR/stop_a0.sh" >/dev/null 2>&1 || true
+      if ! terminate_pid "$pid" 10; then
+        echo "error: harness pid=$pid survived; keeping $HARNESS_PID_FILE" >&2
+        printf '%s\n' "$pid" >"$HARNESS_PID_FILE"
+        return 1
+      fi
       echo "stopped harness pid=$pid"
+      rm -f "$HARNESS_PID_FILE"
     fi
+  else
     rm -f "$HARNESS_PID_FILE"
   fi
+
+  wait_port_closed 5000 10 || {
+    echo "error: port 5000 still open after harness stop" >&2
+    return 1
+  }
+  return 0
+}
+
+cleanup() {
+  local status=$?
+  if ! stop_harness; then
+    echo "cleanup: harness did not stop cleanly" >&2
+    if [ "$status" -eq 0 ]; then status=1; fi
+  fi
   if [ "$app_started" = 1 ]; then
-    bash "$REPO_ROOT/tools/_e2e_lib.sh" stop || true
+    if ! bash "$REPO_ROOT/tools/_e2e_lib.sh" stop; then
+      echo "cleanup: subject app or Xvfb did not stop cleanly" >&2
+      if [ "$status" -eq 0 ]; then status=1; fi
+    fi
+    app_started=0
+  fi
+  if [ -f "$APP_PID_FILE" ] || [ -f "$XVFB_PID_FILE" ] || [ -f "$HARNESS_PID_FILE" ]; then
+    echo "cleanup: pidfiles remain, processes may still be running" >&2
+    if [ "$status" -eq 0 ]; then status=1; fi
   fi
   if [ "$status" -ne 0 ]; then
     echo "cleanup complete (exit $status)" >&2
@@ -216,15 +249,17 @@ main()
 PY
 
 echo "== stopping harness =="
-"$HARNESS_DIR/stop_a0.sh" || true
-rm -f "$HARNESS_PID_FILE"
+stop_harness || fail "harness did not stop cleanly (pidfile: $HARNESS_PID_FILE)"
 
 echo "== stopping subject app =="
-bash "$REPO_ROOT/tools/_e2e_lib.sh" stop
+bash "$REPO_ROOT/tools/_e2e_lib.sh" stop || fail "subject app or Xvfb did not stop cleanly"
 app_started=0
 
-for port in 55080 55022 5000; do
-  port_listening "$port" && fail "port $port still open after cleanup"
+for port in "$RFC_PORT" "$SSH_PORT" 5000; do
+  wait_port_closed "$port" 10 || fail "port $port still open after cleanup"
+done
+for pidfile in "$APP_PID_FILE" "$XVFB_PID_FILE" "$HARNESS_PID_FILE"; do
+  [ ! -f "$pidfile" ] || fail "stale pidfile after cleanup: $pidfile"
 done
 
-echo "E2E PASS: harness left stopped, ports free"
+echo "E2E PASS: harness left stopped, ports free, no orphan processes"

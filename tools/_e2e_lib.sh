@@ -44,6 +44,28 @@ wait_port_closed() { # port timeout_seconds
 
 pid_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 
+pid_matches() { # pid expected-substring -> provenance gate before killing
+  local pid="${1:-0}" needle="${2:-}" args
+  [ -n "$needle" ] || return 1
+  args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+  case "$args" in
+    *"$needle"*) return 0 ;;
+  esac
+  return 1
+}
+
+terminate_pid() { # pid timeout_seconds -> 0 when the process is gone
+  local pid="$1" timeout="${2:-10}" i
+  kill "$pid" 2>/dev/null || true
+  for ((i = 0; i < timeout; i++)); do
+    pid_alive "$pid" || return 0
+    sleep 1
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  sleep 1
+  ! pid_alive "$pid"
+}
+
 app_binary() {
   if [ -n "${AQVN_APP_BIN:-}" ]; then
     printf '%s\n' "$AQVN_APP_BIN"
@@ -163,33 +185,41 @@ start() {
   echo "subject app pid=$(cat "$APP_PID_FILE") display=$display sandbox=$SANDBOX rfc=$RFC_PORT ssh=$SSH_PORT"
 }
 
+stop_pidfile() { # pidfile expected-substring label
+  local pidfile="$1" needle="$2" label="$3" pid
+  [ -f "$pidfile" ] || return 0
+  pid="$(cat "$pidfile" 2>/dev/null || true)"
+  if ! pid_alive "$pid"; then
+    rm -f "$pidfile"
+    return 0
+  fi
+  if ! pid_matches "$pid" "$needle"; then
+    echo "warning: pid $pid in $pidfile is not $label; refusing to kill" >&2
+    rm -f "$pidfile"
+    return 0
+  fi
+  if terminate_pid "$pid" 10; then
+    echo "stopped $label pid=$pid"
+    rm -f "$pidfile"
+    return 0
+  fi
+  echo "error: $label pid=$pid did not exit; keeping $pidfile" >&2
+  return 1
+}
+
 stop() {
-  if [ -f "$APP_PID_FILE" ]; then
-    local pid
-    pid="$(cat "$APP_PID_FILE")"
-    if pid_alive "$pid"; then
-      kill "$pid" 2>/dev/null || true
-      local i
-      for ((i = 0; i < 10; i++)); do
-        pid_alive "$pid" || break
-        sleep 1
-      done
-      pid_alive "$pid" && kill -9 "$pid" 2>/dev/null || true
-      echo "stopped subject app pid=$pid"
-    fi
-    rm -f "$APP_PID_FILE"
-  fi
-
-  if [ -f "$XVFB_PID_FILE" ]; then
-    local xpid
-    xpid="$(cat "$XVFB_PID_FILE")"
-    pid_alive "$xpid" && kill "$xpid" 2>/dev/null || true
-    rm -f "$XVFB_PID_FILE"
-  fi
-
-  wait_port_closed "$RFC_PORT" 10 || echo "warning: port $RFC_PORT still open" >&2
-  wait_port_closed "$SSH_PORT" 10 || echo "warning: port $SSH_PORT still open" >&2
-  return 0
+  local failed=0
+  stop_pidfile "$APP_PID_FILE" "aqvn-workspace" "subject app" || failed=1
+  stop_pidfile "$XVFB_PID_FILE" "Xvfb" "Xvfb" || failed=1
+  wait_port_closed "$RFC_PORT" 10 || {
+    echo "error: port $RFC_PORT still open" >&2
+    failed=1
+  }
+  wait_port_closed "$SSH_PORT" 10 || {
+    echo "error: port $SSH_PORT still open" >&2
+    failed=1
+  }
+  return "$failed"
 }
 
 status() {
@@ -203,12 +233,16 @@ status() {
   done
 }
 
-case "${1:-}" in
-  start) start ;;
-  stop) stop ;;
-  status) status ;;
-  *)
-    echo "usage: $0 {start|stop|status}" >&2
-    exit 2
-    ;;
-esac
+# Executed as a script: dispatch a subcommand. Sourced (by a0_e2e.sh): expose
+# the lifecycle helpers only, so callers share the same port/pid primitives.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  case "${1:-}" in
+    start) start ;;
+    stop) stop ;;
+    status) status ;;
+    *)
+      echo "usage: $0 {start|stop|status}" >&2
+      exit 2
+      ;;
+  esac
+fi

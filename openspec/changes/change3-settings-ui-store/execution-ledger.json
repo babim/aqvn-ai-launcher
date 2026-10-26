@@ -57,15 +57,16 @@
   },
   "posture": "implementation-heavy",
   "provenance": {
+    "action": "no-op",
     "command": [
       "node",
-      "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
-      "--feature-id",
-      "settings-ui-store"
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change3-settings-ui-store"
     ],
-    "generated_at": "2026-10-26T12:00:55.207Z",
-    "producer": "opsx-mission-bind.mjs",
-    "source": "mission c82a03df-dfc7-438f-b44b-9089dcc40a8f feature settings-ui-store"
+    "generated_at": "2026-10-26T15:06:39.658Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change3-settings-ui-store"
   },
   "schema_version": "aqvn_execution_ledger/v1.1",
   "tasks": [

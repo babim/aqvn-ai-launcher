@@ -1,6 +1,8 @@
 //! AQVN Workspace core library.
 
-use tauri::WebviewWindowBuilder;
+pub mod config;
+
+use tauri::{Manager, WebviewWindowBuilder};
 
 /// Runs the desktop application.
 pub fn run() {
@@ -10,6 +12,10 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
+            let initial_config =
+                config::AppConfig::load_from_store(app.handle()).unwrap_or_default();
+            app.manage(config::ConfigWatcher::new(initial_config));
+
             let window_config = app
                 .config()
                 .app

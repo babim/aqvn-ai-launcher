@@ -33,6 +33,7 @@
         color: #22d3ee;
         font-size: 0.9rem;
         text-decoration: none;
+        z-index: 10;
       }
       .nav:hover,
       .nav:focus-visible {
@@ -41,17 +42,234 @@
       main {
         max-width: 760px;
         margin: 0 auto;
-        padding: 72px 24px 24px;
+        padding: 72px 24px 48px;
       }
       h1 {
         margin: 0 0 0.25rem;
-        font-size: 1.4rem;
+        font-size: 1.5rem;
         letter-spacing: 0.02em;
       }
-      p {
-        margin: 0 0 1rem;
+      .subtitle {
+        margin: 0 0 1.5rem;
         color: #93a4bd;
         font-size: 0.9rem;
+      }
+      .card {
+        background: #0b1220cc;
+        border: 1px solid #1e2f45;
+        border-radius: 14px;
+        padding: 24px;
+        margin-bottom: 20px;
+      }
+      .card h2 {
+        margin: 0 0 1rem;
+        font-size: 1.15rem;
+        color: #22d3ee;
+      }
+      .form-group {
+        margin-bottom: 1.25rem;
+      }
+      .form-group:last-child {
+        margin-bottom: 0;
+      }
+      label {
+        display: block;
+        margin-bottom: 0.35rem;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #c5d5e8;
+      }
+      .help-text {
+        font-size: 0.8rem;
+        color: #93a4bd;
+        margin-top: 0.25rem;
+      }
+      input[type="text"],
+      input[type="url"],
+      input[type="password"],
+      input[type="number"] {
+        width: 100%;
+        padding: 10px 14px;
+        border: 1px solid #1e2f45;
+        border-radius: 8px;
+        background: #070d16;
+        color: #e6edf7;
+        font: inherit;
+        font-size: 0.9rem;
+      }
+      input:focus {
+        outline: none;
+        border-color: #22d3ee;
+        box-shadow: 0 0 0 2px #22d3ee33;
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .toggle-container {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 48px;
+        height: 26px;
+      }
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #1e2f45;
+        transition: 0.2s;
+        border-radius: 26px;
+      }
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 4px;
+        bottom: 4px;
+        background-color: #93a4bd;
+        transition: 0.2s;
+        border-radius: 50%;
+      }
+      input:checked + .slider {
+        background-color: #0284c7;
+      }
+      input:checked + .slider:before {
+        transform: translateX(22px);
+        background-color: #ffffff;
+      }
+      .toggle-label {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #e6edf7;
+        cursor: pointer;
+      }
+      .security-warning {
+        margin-top: 12px;
+        padding: 12px 14px;
+        border-left: 4px solid #f59e0b;
+        background: #78350f22;
+        color: #fde68a;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        border-radius: 4px;
+      }
+      .path-list {
+        list-style: none;
+        margin: 0 0 10px;
+        padding: 0;
+      }
+      .path-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        background: #070d16;
+        border: 1px solid #1e2f45;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        font-family: monospace;
+        font-size: 0.85rem;
+      }
+      .path-item .remove-path-btn {
+        background: transparent;
+        border: 1px solid #ef444455;
+        color: #ef4444;
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 0.75rem;
+      }
+      .path-item .remove-path-btn:hover {
+        background: #ef444422;
+      }
+      .path-input-row {
+        display: flex;
+        gap: 8px;
+      }
+      .path-input-row input {
+        flex: 1;
+      }
+      .path-input-row button {
+        padding: 0 16px;
+        border: 1px solid #22d3ee55;
+        border-radius: 8px;
+        background: #132c46;
+        color: #22d3ee;
+        font: inherit;
+        font-size: 0.85rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .path-input-row button:hover {
+        background: #1a3c61;
+      }
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 24px;
+      }
+      .primary-btn {
+        padding: 12px 28px;
+        border: 1px solid #22d3ee;
+        border-radius: 10px;
+        background: #0284c7;
+        color: #ffffff;
+        font: inherit;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .primary-btn:hover {
+        background: #0369a1;
+      }
+      .secondary-btn {
+        padding: 12px 20px;
+        border: 1px solid #1e2f45;
+        border-radius: 10px;
+        background: #0b1220;
+        color: #93a4bd;
+        font: inherit;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      .secondary-btn:hover {
+        background: #132c46;
+        color: #e6edf7;
+      }
+      .status-message {
+        margin-top: 14px;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        display: none;
+      }
+      .status-message.success {
+        display: block;
+        background: #065f4622;
+        border: 1px solid #10b98155;
+        color: #34d399;
+      }
+      .status-message.error {
+        display: block;
+        background: #991b1b22;
+        border: 1px solid #ef444455;
+        color: #f87171;
       }
     </style>
   </head>
@@ -59,7 +277,119 @@
     <a class="nav" id="back-to-chat" href="index.html">Back to chat</a>
     <main>
       <h1>Settings</h1>
-      <p>Configuration controls arrive in the settings milestone.</p>
+      <p class="subtitle">Configure AQVN Workspace client, upstream server, and agent control.</p>
+
+      <form id="settings-form">
+        <section class="card">
+          <h2>Server Configuration</h2>
+          <div class="form-group">
+            <label for="server-url">Server URL</label>
+            <input
+              type="url"
+              id="server-url"
+              name="server_url"
+              placeholder="https://a0.matmagoc.com"
+              required
+            />
+            <div class="help-text">Upstream workspace server endpoint.</div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Agent Control (RFC &amp; SSH)</h2>
+          <div class="form-group">
+            <div class="toggle-container">
+              <label class="toggle-switch">
+                <input type="checkbox" id="rfc-enabled" name="rfc_enabled" />
+                <span class="slider"></span>
+              </label>
+              <label for="rfc-enabled" class="toggle-label">Allow agent control</label>
+            </div>
+            <div class="security-warning" id="security-warning" role="alert">
+              <strong>Security Warning:</strong> Enabling agent control allows remote automated
+              agents to access files in allowed paths and execute commands via RFC and SSH bridges.
+              Keep this disabled unless you trust the remote agent and network environment.
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="rfc-password">RFC Password</label>
+              <input
+                type="password"
+                id="rfc-password"
+                name="rfc_password"
+                placeholder="Shared secret for RFC HMAC auth"
+                autocomplete="new-password"
+              />
+            </div>
+            <div class="form-group">
+              <label for="ssh-password">SSH Password</label>
+              <input
+                type="password"
+                id="ssh-password"
+                name="ssh_password"
+                placeholder="Root password for SSH terminal bridge"
+                autocomplete="new-password"
+              />
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="rfc-port">RFC Port</label>
+              <input
+                type="number"
+                id="rfc-port"
+                name="rfc_port"
+                min="1024"
+                max="65535"
+                value="55080"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="ssh-port">SSH Port</label>
+              <input
+                type="number"
+                id="ssh-port"
+                name="ssh_port"
+                min="1024"
+                max="65535"
+                value="55022"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Allowed Paths</label>
+            <div class="help-text" style="margin-bottom: 8px;">
+              Directories accessible to the agent.
+            </div>
+            <ul class="path-list" id="allowed-paths-list" aria-label="Allowed Paths"></ul>
+            <div class="path-input-row">
+              <input
+                type="text"
+                id="allowed-path-input"
+                name="allowed_paths_input"
+                placeholder="e.g. ~/Workspace or /path/to/dir"
+              />
+              <button type="button" id="add-allowed-path">Add Path</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="actions">
+          <button type="submit" id="save-settings" class="primary-btn">Save Settings</button>
+          <button type="button" id="reset-settings" class="secondary-btn">Reset to Defaults</button>
+        </div>
+
+        <div id="save-status" class="status-message" aria-live="polite"></div>
+      </form>
     </main>
+
+    <script src="bridge.js"></script>
+    <script src="settings.js"></script>
   </body>
 </html>

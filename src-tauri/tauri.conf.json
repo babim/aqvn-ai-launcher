@@ -8,6 +8,10 @@
     "removeUnusedCommands": true
   },
   "app": {
+    "withGlobalTauri": true,
+    "appDirectoriesOverride": {
+      "data": "$CONFIG/net.aqvn.workspace"
+    },
     "windows": [
       {
         "label": "main",

@@ -26,6 +26,9 @@ sha2 = "0.10"
 base64 = "0.22"
 thiserror = "2"
 
+[dev-dependencies]
+tauri = { version = "2", features = ["tray-icon", "test"] }
+
 [profile.release]
 codegen-units = 1
 lto = true

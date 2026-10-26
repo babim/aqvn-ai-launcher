@@ -12,6 +12,7 @@
       {
         "label": "main",
         "title": "AQVN Workspace",
+        "create": false,
         "width": 1100,
         "height": 720,
         "minWidth": 640,

@@ -4,6 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AQVN Workspace</title>
+    <script>
+      // Rust mirrors this into the native window title (no JS IPC needed).
+      document.title = "AQVN AI Workspace";
+    </script>
     <style>
       :root {
         color-scheme: dark;
@@ -14,51 +18,102 @@
       body {
         margin: 0;
         min-height: 100vh;
-        display: grid;
-        place-items: center;
+        display: flex;
+        flex-direction: column;
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
         background: radial-gradient(circle at 30% 20%, #10243a, #070d16 65%);
         color: #e6edf7;
       }
-      main {
-        padding: 2rem;
-        text-align: center;
-      }
-      .mark {
-        width: 72px;
-        height: 72px;
-        margin: 0 auto 1.25rem;
-        display: grid;
-        place-items: center;
+      .nav {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        padding: 10px 20px;
         border: 1px solid #22d3ee55;
-        border-radius: 18px;
-        background: linear-gradient(135deg, #0b1220, #132c46);
+        border-radius: 10px;
+        background: #0b1220;
         color: #22d3ee;
-        font-size: 2rem;
-        font-weight: 700;
+        font-size: 0.9rem;
+        text-decoration: none;
+      }
+      .nav:hover,
+      .nav:focus-visible {
+        background: #132c46;
+      }
+      main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        max-width: 760px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 72px 24px 24px;
       }
       h1 {
-        margin: 0 0 0.5rem;
-        font-size: 1.5rem;
+        margin: 0 0 0.25rem;
+        font-size: 1.4rem;
         letter-spacing: 0.02em;
       }
-      p {
-        margin: 0;
+      .subtitle {
+        margin: 0 0 1.5rem;
         color: #93a4bd;
+        font-size: 0.9rem;
       }
-      .status {
-        margin-top: 1.5rem;
+      .chat {
+        flex: 1;
+        min-height: 240px;
+        border: 1px solid #1e2f45;
+        border-radius: 14px;
+        background: #0b1220aa;
+        padding: 16px;
+        display: grid;
+        place-items: center;
+        color: #93a4bd;
+        font-size: 0.9rem;
+      }
+      .composer {
+        margin-top: 12px;
+        display: flex;
+        gap: 8px;
+      }
+      .composer textarea {
+        flex: 1;
+        resize: none;
+        min-height: 48px;
+        padding: 12px;
+        border: 1px solid #1e2f45;
+        border-radius: 10px;
+        background: #0b1220;
+        color: #e6edf7;
+        font: inherit;
+      }
+      .composer button {
+        padding: 0 20px;
+        border: 1px solid #22d3ee55;
+        border-radius: 10px;
+        background: #132c46;
         color: #22d3ee;
-        font-size: 0.8rem;
+        font: inherit;
+        cursor: not-allowed;
       }
     </style>
   </head>
   <body>
+    <a class="nav" id="open-settings" href="settings.html">Settings</a>
     <main>
-      <div class="mark" aria-hidden="true">A</div>
       <h1>AQVN Workspace</h1>
-      <p>Native workspace client scaffold</p>
-      <p class="status">UI shell placeholder &middot; ready</p>
+      <p class="subtitle">Chat shell placeholder</p>
+      <section class="chat" aria-label="Conversation">
+        <p>Chat connects in the OS-integration milestone.</p>
+      </section>
+      <form class="composer" onsubmit="return false">
+        <textarea
+          aria-label="Message"
+          placeholder="Message the assistant&hellip;"
+          disabled
+        ></textarea>
+        <button type="submit" disabled>Send</button>
+      </form>
     </main>
   </body>
 </html>

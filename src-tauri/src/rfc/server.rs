@@ -4,7 +4,7 @@
 //! plain-text bodies; method/path errors use the exact HTML text the caller
 //! expects (`Method <VERB> not allowed for: rfc`, `API endpoint not found: ...`).
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ConfigWatcher};
 use crate::rfc::auth;
 use crate::rfc::dispatch::{self, DispatchContext, DispatchError, RfcCall};
 use crate::rfc::sandbox::Sandbox;
@@ -39,6 +39,7 @@ pub fn build_state(config: &AppConfig) -> RfcState {
         password: config.rfc_password.clone(),
         context: DispatchContext {
             sandbox: Sandbox::from_allowed_paths(&config.allowed_paths),
+            ssh_password: config.ssh_password.clone(),
         },
     }
 }
@@ -178,4 +179,45 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
     serve(listener, build_state(&config))
         .await
         .map_err(|err| format!("RFC server error: {err}"))
+}
+
+/// Long-running supervisor: restarts the listener whenever the configuration
+/// changes (password, allowed paths, port, master toggle) without restarting
+/// the process.
+pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
+    let mut receiver = watcher.subscribe();
+    loop {
+        let config = receiver.borrow_and_update().clone();
+        if !config.rfc_enabled {
+            if receiver.changed().await.is_err() {
+                return Ok(());
+            }
+            continue;
+        }
+
+        let listener = match bind_if_enabled(&config).await {
+            Ok(Some(listener)) => listener,
+            Ok(None) => continue,
+            Err(err) => {
+                eprintln!("{err}");
+                if receiver.changed().await.is_err() {
+                    return Ok(());
+                }
+                continue;
+            }
+        };
+
+        let state = build_state(&config);
+        tokio::select! {
+            changed = receiver.changed() => {
+                if changed.is_err() {
+                    return Ok(());
+                }
+                // Dropping `serve` closes the listener before the next bind.
+            }
+            result = serve(listener, state) => {
+                return result.map_err(|err| format!("RFC server error: {err}"));
+            }
+        }
+    }
 }

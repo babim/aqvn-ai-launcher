@@ -8,7 +8,7 @@
 //!   ssh_port = 55022
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::watch;
@@ -21,6 +21,7 @@ pub const DEFAULT_ALLOWED_PATHS: &[&str] = &["~/Workspace"];
 pub const STORE_FILENAME: &str = "settings.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub server_url: String,
     pub rfc_enabled: bool,
@@ -146,6 +147,16 @@ impl ConfigWatcher {
     pub fn update(&self, new_config: AppConfig) {
         let _ = self.sender.send(new_config);
     }
+}
+
+/// Loads configuration straight from the on-disk store file.
+///
+/// The settings UI writes through the store plugin, so a periodic read of this
+/// file is enough to drive hot reload without restarting the app.
+pub fn load_from_file(path: &Path) -> Option<AppConfig> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    serde_json::from_value(value).ok()
 }
 
 /// Resolves the store file path using tauri-plugin-store.

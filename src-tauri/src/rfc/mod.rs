@@ -7,7 +7,11 @@
 
 pub mod auth;
 pub mod dispatch;
+pub mod exchange;
 pub mod sandbox;
 pub mod server;
+pub mod text_editor;
+pub mod util;
+pub mod workdir;
 
 mod files;

@@ -117,3 +117,27 @@ fn test_store_persistence_roundtrip() {
     // Clean up
     let _ = std::fs::remove_file(store_path);
 }
+
+#[test]
+fn load_from_file_applies_partial_settings() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "aqvn-settings-{}-{unique}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path, r#"{"rfc_enabled": true, "rfc_port": 55999}"#)
+        .expect("write settings fixture");
+
+    let loaded =
+        aqvn_workspace_lib::config::load_from_file(&path).expect("settings file must parse");
+    assert!(loaded.rfc_enabled);
+    assert_eq!(loaded.rfc_port, 55999);
+    // Missing keys keep their defaults instead of failing the parse.
+    assert_eq!(loaded.ssh_port, DEFAULT_SSH_PORT);
+    assert_eq!(loaded.allowed_paths, vec!["~/Workspace"]);
+
+    let _ = std::fs::remove_file(path);
+}

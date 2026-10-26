@@ -18,12 +18,16 @@ tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-store = "2"
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
+rand = "0.8"
+rsa = { version = "0.9", features = ["sha2"] }
+glob = "0.3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 thiserror = "2"
 
 [dev-dependencies]

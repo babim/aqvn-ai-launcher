@@ -1,6 +1,7 @@
 //! AQVN Workspace core library.
 
 pub mod config;
+pub mod rfc;
 
 use tauri::{Manager, WebviewWindowBuilder};
 
@@ -14,7 +15,15 @@ pub fn run() {
         .setup(|app| {
             let initial_config =
                 config::AppConfig::load_from_store(app.handle()).unwrap_or_default();
-            app.manage(config::ConfigWatcher::new(initial_config));
+            app.manage(config::ConfigWatcher::new(initial_config.clone()));
+
+            // RFC bridge: binds only when the master toggle is enabled (default OFF).
+            let rfc_config = initial_config;
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = rfc::server::run(rfc_config).await {
+                    eprintln!("{err}");
+                }
+            });
 
             let window_config = app
                 .config()

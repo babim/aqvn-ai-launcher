@@ -1,0 +1,158 @@
+{
+  "change_name": "change3-settings-ui-store",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change3-settings-ui-store/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "change_ref": "change3-settings-ui-store",
+      "lane": "executor",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-26T12:00:55.207Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change3-settings-ui-store",
+      "lane": "verifier",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-26T12:00:55.207Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change3-settings-ui-store",
+      "lane": "scout",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-26T12:00:55.207Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=settings-ui-store; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "--feature-id",
+      "settings-ui-store"
+    ],
+    "generated_at": "2026-10-26T12:00:55.207Z",
+    "producer": "opsx-mission-bind.mjs",
+    "source": "mission c82a03df-dfc7-438f-b44b-9089dcc40a8f feature settings-ui-store"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "All settings controls present in DOM with correct defaults (URL prefilled, toggle OFF)",
+      "mission_lineage": {
+        "feature_id": "settings-ui-store",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-SCAF-010"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C3-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Values persist across app restart via store plugin; store JSON contains changed keys",
+      "mission_lineage": {
+        "feature_id": "settings-ui-store",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-SCAF-011"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C3-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Store file path derived from identifier net.aqvn.workspace",
+      "mission_lineage": {
+        "feature_id": "settings-ui-store",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-SCAF-012"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C3-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Settings page loads and works in browser-mode fallback (agent-browser, zero console errors)",
+      "mission_lineage": {
+        "feature_id": "settings-ui-store",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-SCAF-010"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C3-004",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-26T12:00:55.207Z"
+}

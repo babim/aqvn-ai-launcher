@@ -1,0 +1,183 @@
+{
+  "change_name": "change4-rfc-server-core",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change4-rfc-server-core/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "change_ref": "change4-rfc-server-core",
+      "lane": "executor",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-26T12:00:55.317Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change4-rfc-server-core",
+      "lane": "verifier",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-26T12:00:55.317Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change4-rfc-server-core",
+      "lane": "scout",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-26T12:00:55.317Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=rfc-server-core; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "--feature-id",
+      "rfc-server-core"
+    ],
+    "generated_at": "2026-10-26T12:00:55.317Z",
+    "producer": "opsx-mission-bind.mjs",
+    "source": "mission c82a03df-dfc7-438f-b44b-9089dcc40a8f feature rfc-server-core"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "Worked-example request (spec §7) returns 200 + bare JSON",
+      "mission_lineage": {
+        "feature_id": "rfc-server-core",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-RFC-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C4-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Wrong hash / missing hash → 403; malformed rfc_input → 500; GET → 405; unknown route → 404 (exact bodies)",
+      "mission_lineage": {
+        "feature_id": "rfc-server-core",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-RFC-002"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C4-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Unknown module/function → 403 (whitelist enforced)",
+      "mission_lineage": {
+        "feature_id": "rfc-server-core",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-RFC-003"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C4-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Toggle OFF → port 55080 closed (ss -tln evidence)",
+      "mission_lineage": {
+        "feature_id": "rfc-server-core",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-RFC-004"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C4-004",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "HMAC constant-time (code review criterion)",
+      "mission_lineage": {
+        "feature_id": "rfc-server-core",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-RFC-005",
+          "VAL-RFC-006",
+          "VAL-RFC-007",
+          "VAL-RFC-008",
+          "VAL-RFC-025"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C4-005",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-26T12:00:55.317Z"
+}

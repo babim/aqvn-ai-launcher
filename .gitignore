@@ -1,0 +1,28 @@
+# Secrets — never commit
+.env
+*.pem
+*.keystore
+android/gen/**/*.keystore
+
+# Rust
+src-tauri/target/
+target/
+
+# Node
+node_modules/
+dist/
+
+# Android
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/build/
+local.properties
+
+# Local agent tooling state
+.factory/
+.aqvn/
+.serena/
+
+# OS / editor
+.DS_Store
+*.swp

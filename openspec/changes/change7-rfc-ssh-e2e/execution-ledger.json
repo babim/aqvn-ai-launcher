@@ -1,0 +1,158 @@
+{
+  "change_name": "change7-rfc-ssh-e2e",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change7-rfc-ssh-e2e/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "change_ref": "change7-rfc-ssh-e2e",
+      "lane": "executor",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-26T12:00:55.596Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change7-rfc-ssh-e2e",
+      "lane": "verifier",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-26T12:00:55.596Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change7-rfc-ssh-e2e",
+      "lane": "scout",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-26T12:00:55.596Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=rfc-ssh-e2e; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "--feature-id",
+      "rfc-ssh-e2e"
+    ],
+    "generated_at": "2026-10-26T12:00:55.596Z",
+    "producer": "opsx-mission-bind.mjs",
+    "source": "mission c82a03df-dfc7-438f-b44b-9089dcc40a8f feature rfc-ssh-e2e"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "spec_client Gate 3: correct hash → file content; wrong hash → 403; outside sandbox → 403",
+      "mission_lineage": {
+        "feature_id": "rfc-ssh-e2e",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-RFC-027"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C7-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Real A0 call_rfc (harness venv) succeeds against our server — wire-compatible proof",
+      "mission_lineage": {
+        "feature_id": "rfc-ssh-e2e",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-RFC-028"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C7-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "SSH exchange decrypts to exact ssh_password; paramiko session runs command end-to-end",
+      "mission_lineage": {
+        "feature_id": "rfc-ssh-e2e",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-SSH-007"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C7-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Harness left stopped, no orphans, ports free",
+      "mission_lineage": {
+        "feature_id": "rfc-ssh-e2e",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": [
+          "VAL-SSH-008"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C7-004",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-26T12:00:55.596Z"
+}

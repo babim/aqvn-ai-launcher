@@ -1,0 +1,420 @@
+{
+  "affected_surfaces": [
+    {
+      "coverage_status": "covered",
+      "owner_skill": "aqvn-opsx-doit",
+      "path": "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "reason": "Bridge surface for feature cross-area-integration.",
+      "required_task_ids": [
+        "C11-001",
+        "C11-002",
+        "C11-003",
+        "C11-004"
+      ],
+      "surface_id": "surf:11-cross-area-integration",
+      "type": "script"
+    }
+  ],
+  "bounded_assumptions": [],
+  "confidence": "high",
+  "config_source": "mission-bind",
+  "conflict_policy": {
+    "config_vs_evidence": "mission-bind scaffold; feature cross-area-integration"
+  },
+  "coverage_map": [
+    {
+      "change_name": "change11-cross-area-integration",
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_class": "declared-but-unproven",
+      "sync_class": "in-sync",
+      "trust_class": "low"
+    }
+  ],
+  "decision": {
+    "blocked": false,
+    "result_posture": "append-required",
+    "roadmap_mode": "append-roadmap"
+  },
+  "decision_table": [
+    {
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_score": 1,
+      "note": "mission bridge scaffold for cross-area-integration",
+      "sync_score": 1,
+      "trust_score": 1
+    }
+  ],
+  "dependency_graph": {
+    "acyclic": true,
+    "critical_path": [
+      "C11-001",
+      "C11-002",
+      "C11-003",
+      "C11-004"
+    ],
+    "edges": [
+      {
+        "from": "C11-001",
+        "reason": "sequential scaffold",
+        "to": "C11-002"
+      },
+      {
+        "from": "C11-002",
+        "reason": "sequential scaffold",
+        "to": "C11-003"
+      },
+      {
+        "from": "C11-003",
+        "reason": "sequential scaffold",
+        "to": "C11-004"
+      }
+    ]
+  },
+  "execution_posture_hints": [
+    {
+      "change_name": "change11-cross-area-integration",
+      "confidence": "high",
+      "implementation_lane_shape": "bounded-single-lane",
+      "posture": "implementation-heavy",
+      "reason": "bridge script with self-test"
+    }
+  ],
+  "execution_surface_hints": [
+    {
+      "change_name": "change11-cross-area-integration",
+      "confidence": "high",
+      "reason": "bridge script fits native-subagents surface",
+      "surface": "native-subagents"
+    }
+  ],
+  "final_preflight": {
+    "checks": [
+      {
+        "evidence_refs": [
+          "openspec/changes/change11-cross-area-integration/tasks.md"
+        ],
+        "name": "active_changes",
+        "notes": "scaffold-bound change not yet implemented",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change11-cross-area-integration/specs/"
+        ],
+        "name": "specs",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change11-cross-area-integration/tasks.md"
+        ],
+        "name": "semantic_gate",
+        "notes": "scaffold sections emitted; atoms unexecuted",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change11-cross-area-integration/roadmap-audit.json"
+        ],
+        "name": "schema_gate",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "handoff_packet",
+        "notes": "handoff completeness declared, not yet exercised",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "terminal_closeout",
+        "notes": "closeout happens at archive time",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change11-cross-area-integration/execution-ledger.json"
+        ],
+        "name": "audit_sync",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change11-cross-area-integration/roadmap-audit.json#numbering_policy"
+        ],
+        "name": "numbering_justification",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "overlap_matrix",
+        "notes": "new bridge scaffold; no archived change refreshed",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [],
+        "name": "residual_taxonomy",
+        "notes": "typed residual: not-yet-executed scaffold",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "second_pass_evidence",
+        "notes": "second pass runs in the doit drain, not at bind",
+        "status": "not-applicable"
+      }
+    ],
+    "residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "status": "typed-residual"
+  },
+  "granularity_gate": {
+    "complexity_expansion_complete": true,
+    "dependency_graph_acyclic": true,
+    "missing_surface_ids": "none",
+    "no_umbrella_only_coverage": true,
+    "notes": "mission bridge scaffold for cross-area-integration; 4 task atoms",
+    "one_task_per_affected_skill": true,
+    "single_shared_file_no_fake_parallel": "single-shared-file-no-fake-parallel: serial scaffold",
+    "status": "pass"
+  },
+  "handoff_completeness": {
+    "closeout_bundle": "emitted at archive time by the standard closeout flow",
+    "confidence_lifecycle": "declared-but-unproven until the verifier atom passes",
+    "evidence_claim_map": "opsx-mission-bind.mjs binds feature cross-area-integration to change change11-cross-area-integration.",
+    "must_not_merge_before": [
+      "not-yet-executed: proposals-only scaffold for cross-area-integration; implementation deferred to the doit drain"
+    ],
+    "route_verdict": "native-subagents lane; owner aqvn-opsx-doit",
+    "safe_to_run_in_parallel_with": [
+      "other mission-bridge features with disjoint write_scope"
+    ],
+    "severity_waivers": "none",
+    "task_dag": "C11-001 -> C11-002 -> C11-003 -> C11-004",
+    "workstream_lanes": [
+      "impl/script atoms"
+    ]
+  },
+  "historical_overlap_matrix": [
+    {
+      "check": "historical_overlap",
+      "evidence_refs": [
+        "openspec/changes/change11-cross-area-integration/proposal.md"
+      ],
+      "rationale": "Auto-scaffolded by opsx-mission-bind.mjs for mission feature cross-area-integration.",
+      "verdict": "none"
+    },
+    {
+      "check": "why_not_refresh_old_archive",
+      "evidence_refs": [
+        "openspec/changes/change11-cross-area-integration/proposal.md"
+      ],
+      "rationale": "New bridge scaffold; no archived change is refreshed.",
+      "verdict": "follow-on-not-refresh"
+    },
+    {
+      "check": "why_follow_on_valid",
+      "evidence_refs": [
+        "openspec/changes/change11-cross-area-integration/proposal.md"
+      ],
+      "rationale": "Binds Factory mission feature cross-area-integration to an openspec change.",
+      "verdict": "valid"
+    },
+    {
+      "check": "why_not_delivery_or_local_residual",
+      "evidence_refs": [
+        "openspec/changes/change11-cross-area-integration/proposal.md"
+      ],
+      "rationale": "A bridge scaffold, not a local env or delivery residual.",
+      "verdict": "not-delivery-not-local"
+    }
+  ],
+  "next_task_hint": {
+    "execution_surface_hint": "native-subagents",
+    "reason": "first atom on the critical path",
+    "selected_change": "change11-cross-area-integration",
+    "task_id": "C11-001"
+  },
+  "numbering_policy": {
+    "default_rule": "global-max-plus-one over the archive baseline (highest_existing_ordinal 10); selected ordinal 11",
+    "highest_existing_ordinal": 10,
+    "lineage_authorized": true,
+    "lineage_authorized_by": "opsx-mission-bind.mjs (mission c82a03df-dfc7-438f-b44b-9089dcc40a8f)",
+    "mode": "global-max-plus-one",
+    "selected_change": "change11-cross-area-integration",
+    "selected_ordinal": 11
+  },
+  "open_questions": [],
+  "orchestration_core_refs": {
+    "closeout_bundle_ref": "openspec/changes/change11-cross-area-integration/roadmap-audit.json#terminal_closeout",
+    "confidence_lifecycle_ref": "openspec/changes/change11-cross-area-integration/roadmap-audit.json#second_pass_evidence",
+    "evidence_claim_map_ref": "openspec/changes/change11-cross-area-integration/roadmap-audit.json#surface_to_task_coverage",
+    "migration_note": "mission bridge scaffold for feature cross-area-integration",
+    "packet_ref": "openspec/changes/change11-cross-area-integration/proposal.md",
+    "required_for_handoff": false,
+    "route_verdict_ref": "openspec/changes/change11-cross-area-integration/roadmap-audit.json#handoff_completeness",
+    "severity_waiver_policy_ref": "openspec/changes/change11-cross-area-integration/roadmap-audit.json#residuals",
+    "task_dag_ref": "openspec/changes/change11-cross-area-integration/roadmap-audit.json#dependency_graph",
+    "workstream_lane_refs": [
+      "openspec/changes/change11-cross-area-integration/execution-ledger.json#lanes"
+    ]
+  },
+  "parallelization_hints": {
+    "batchable_lanes": [],
+    "change_name": "change11-cross-area-integration",
+    "critical_path": [
+      "C11-001",
+      "C11-002",
+      "C11-003",
+      "C11-004"
+    ],
+    "no_fake_parallel_note": "Serial scaffold",
+    "sequential_gates": [
+      "C11-001",
+      "C11-002",
+      "C11-003",
+      "C11-004"
+    ]
+  },
+  "repo_mode": "aqvn-native",
+  "residuals": [],
+  "schema_version": "aqvn_opsx_roadmap_audit/v2",
+  "second_pass_evidence": {
+    "blocking_residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "evidence_refs": [],
+    "independence": "verifier runs in a separate lane from the implementing atoms",
+    "reviewer_lane": "independent-subagent (the final verification atom)",
+    "status": "typed-residual"
+  },
+  "semantic_validations": [
+    {
+      "name": "change11-cross-area-integration_valid",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_problem_map_fit",
+      "note": "mission bridge scaffold for cross-area-integration",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_claim_ceiling_check",
+      "note": "proposals-only scaffold; claims stay bounded until the doit drain",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_route_drift_check",
+      "note": "bound 1:1 to the mission feature; no alternate route",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_agent_consistency_check",
+      "note": "single owner_skill aqvn-opsx-doit across all atoms",
+      "status": "planned"
+    }
+  ],
+  "surface_to_task_coverage": [
+    {
+      "coverage_status": "covered",
+      "surface_id": "surf:11-cross-area-integration",
+      "task_ids": [
+        "C11-001",
+        "C11-002",
+        "C11-003",
+        "C11-004"
+      ]
+    }
+  ],
+  "task_inventory": [
+    {
+      "affected_surface_ids": [
+        "surf:11-cross-area-integration"
+      ],
+      "complexity": 1,
+      "dependencies": [],
+      "details": "Journeys A+B pass end-to-end with screenshots/logs",
+      "execution_surface_hint": "native-subagents",
+      "id": "C11-001",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-CROSS-001. Seeded RED: behavior unmet. GREEN: behavior met and VAL-CROSS-001 pass.",
+      "title": "Journeys A+B pass end-to-end with screenshots/logs",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:11-cross-area-integration"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C11-001"
+      ],
+      "details": "Restart → settings + listeners restored from saved config",
+      "execution_surface_hint": "native-subagents",
+      "id": "C11-002",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-CROSS-002. Seeded RED: behavior unmet. GREEN: behavior met and VAL-CROSS-002 pass.",
+      "title": "Restart → settings + listeners restored from saved config",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:11-cross-area-integration"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C11-002"
+      ],
+      "details": "Whitelabel sweep clean on all six named surfaces",
+      "execution_surface_hint": "native-subagents",
+      "id": "C11-003",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-CROSS-003. Seeded RED: behavior unmet. GREEN: behavior met and VAL-CROSS-003 pass.",
+      "title": "Whitelabel sweep clean on all six named surfaces",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:11-cross-area-integration"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C11-003"
+      ],
+      "details": "Toggle OFF closes both control ports, chat unaffected; chat stable under concurrent RFC load",
+      "execution_surface_hint": "native-subagents",
+      "id": "C11-004",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-CROSS-004, VAL-CROSS-005, VAL-CROSS-006. Seeded RED: behavior unmet. GREEN: behavior met and VAL-CROSS-004, VAL-CROSS-005, VAL-CROSS-006 pass.",
+      "title": "Toggle OFF closes both control ports, chat unaffected; chat stable under concurrent RFC load",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    }
+  ],
+  "terminal_closeout": {
+    "evidence_refs": [],
+    "no_active_change_gate": "not-applicable",
+    "reserved_change": false,
+    "status": "not-needed"
+  }
+}

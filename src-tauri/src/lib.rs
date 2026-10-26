@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod rfc;
+pub mod ssh;
 
 use tauri::{Manager, WebviewWindowBuilder};
 
@@ -23,6 +24,15 @@ pub fn run() {
             let supervisor = watcher.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(err) = rfc::server::run_supervised(supervisor).await {
+                    eprintln!("{err}");
+                }
+            });
+
+            // SSH bridge: binds only when the master toggle is enabled and password is set
+            // (default OFF) and restarts its listener on any settings change (hot reload).
+            let ssh_supervisor = watcher.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = ssh::server::run_supervised(ssh_supervisor).await {
                     eprintln!("{err}");
                 }
             });

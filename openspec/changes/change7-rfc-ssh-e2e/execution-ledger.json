@@ -57,15 +57,16 @@
   },
   "posture": "implementation-heavy",
   "provenance": {
+    "action": "no-op",
     "command": [
       "node",
-      "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
-      "--feature-id",
-      "rfc-ssh-e2e"
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change7-rfc-ssh-e2e"
     ],
-    "generated_at": "2026-10-26T12:00:55.596Z",
-    "producer": "opsx-mission-bind.mjs",
-    "source": "mission c82a03df-dfc7-438f-b44b-9089dcc40a8f feature rfc-ssh-e2e"
+    "generated_at": "2026-10-26T20:56:16.926Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change7-rfc-ssh-e2e"
   },
   "schema_version": "aqvn_execution_ledger/v1.1",
   "tasks": [

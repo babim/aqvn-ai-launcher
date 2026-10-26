@@ -24,8 +24,10 @@ use tokio::net::TcpListener;
 const ROUTE_NAME: &str = "rfc";
 /// Accepted request body size (base64 file payloads cross this endpoint).
 const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
-/// The bridge is a loopback service; never expose it on a routable interface.
-const BIND_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+/// Cloud-reachable listener (contract ruling R2): bind the wildcard address so
+/// the remote agent can reach the host. Authentication is the boundary, and an
+/// empty password fails closed before any socket exists.
+const BIND_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
 /// Per-generation server state, cloned per request.
 #[derive(Clone)]
@@ -148,13 +150,21 @@ fn html_error(status: StatusCode, message: impl Into<String>) -> Response {
         .into_response()
 }
 
-/// Binds the listener only when the master toggle is on.
+/// Binds the listener only when the master toggle is on and a password exists.
 ///
 /// `Ok(None)` means the toggle is off: no socket is created, so the port stays
-/// closed (validation assertion VAL-RFC-025).
+/// closed (validation assertion VAL-RFC-025). An enabled server with an empty
+/// password fails closed (`Err`) instead of exposing an unauthenticated
+/// wildcard listener.
 pub async fn bind_if_enabled(config: &AppConfig) -> Result<Option<TcpListener>, String> {
     if !config.rfc_enabled {
         return Ok(None);
+    }
+    let password = config.rfc_password.trim();
+    if password.is_empty() {
+        return Err("RFC server refused to start: no RFC password configured; \
+             refusing to expose an unauthenticated listener"
+            .to_string());
     }
     let address = SocketAddr::new(BIND_ADDRESS, config.rfc_port);
     let listener = TcpListener::bind(address)

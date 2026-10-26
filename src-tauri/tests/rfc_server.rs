@@ -148,6 +148,38 @@ fn auth_rejects_wrong_password_and_malformed_hashes() {
     assert!(!auth::verify(TEST_PASSWORD, WORKED_INPUT, ""));
 }
 
+/// VAL-RFC-002(b) regression guard: the digest comparison must stay constant
+/// time (`hmac::Mac::verify_slice`) and must reject every single-character
+/// mutation. A plain `==` on the digest bytes fails this test at code level.
+#[test]
+fn val_rfc_002_auth_compare_is_constant_time() {
+    const AUTH_SOURCE: &str = include_str!("../src/rfc/auth.rs");
+    assert!(
+        AUTH_SOURCE.contains("verify_slice"),
+        "auth must compare digests with hmac::Mac::verify_slice"
+    );
+    for forbidden in ["expected ==", "== expected", "expected !=", "!= expected"] {
+        assert!(
+            !AUTH_SOURCE.contains(forbidden),
+            "digest comparison must not use `{forbidden}`"
+        );
+    }
+
+    let valid = auth::compute_hash(TEST_PASSWORD, WORKED_INPUT);
+    assert_eq!(valid.len(), 64, "lowercase hex SHA-256 digest");
+    for index in 0..valid.len() {
+        let byte = valid.as_bytes()[index];
+        let replacement = if byte == b'0' { '1' } else { '0' };
+        let mut mutated: Vec<char> = valid.chars().collect();
+        mutated[index] = replacement;
+        let mutated: String = mutated.into_iter().collect();
+        assert!(
+            !auth::verify(TEST_PASSWORD, WORKED_INPUT, &mutated),
+            "mutation at byte {index} was accepted"
+        );
+    }
+}
+
 // ------------------------------------------------------ success path (VAL-RFC-001)
 
 #[tokio::test]
@@ -396,8 +428,10 @@ async fn master_toggle_off_binds_no_socket() {
     );
 }
 
+/// Contract ruling R2: the RFC listener is cloud-reachable, so it must bind the
+/// wildcard address, never loopback only.
 #[tokio::test]
-async fn enabled_server_binds_loopback_ephemeral_port() {
+async fn enabled_server_binds_wildcard_ephemeral_port() {
     let config = config_for(std::env::temp_dir().as_path());
 
     let listener = server::bind_if_enabled(&config)
@@ -406,8 +440,34 @@ async fn enabled_server_binds_loopback_ephemeral_port() {
         .expect("enabled server must bind");
 
     let addr = listener.local_addr().expect("local addr");
-    assert!(addr.ip().is_loopback(), "must bind loopback only: {addr}");
+    assert!(
+        addr.ip().is_unspecified(),
+        "must bind the wildcard address (ruling R2): {addr}"
+    );
     assert_ne!(addr.port(), 0, "ephemeral bind must resolve a real port");
+}
+
+/// Security invariant: an enabled listener with no password must fail closed —
+/// an unauthenticated wildcard listener must never exist.
+#[tokio::test]
+async fn enabled_server_refuses_to_bind_without_password() {
+    let config = AppConfig {
+        rfc_enabled: true,
+        rfc_port: 0,
+        ..Default::default()
+    };
+    assert!(
+        config.rfc_password.is_empty(),
+        "fixture must start without a password"
+    );
+
+    let result = server::bind_if_enabled(&config).await;
+
+    let error = result.expect_err("empty password must fail closed, never bind");
+    assert!(
+        error.to_lowercase().contains("password"),
+        "log must name the reason: {error}"
+    );
 }
 
 #[tokio::test]
@@ -421,16 +481,23 @@ async fn serves_http_over_tcp() {
         .expect("bind")
         .expect("enabled");
     let addr = listener.local_addr().expect("addr");
+    // The listener binds the wildcard address; dial it through loopback.
+    let local = std::net::SocketAddr::new(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        addr.port(),
+    );
     let state = server::build_state(&config);
     let task = tokio::spawn(async move { server::serve(listener, state).await });
 
     let body = json!({ "rfc_input": WORKED_INPUT, "hash": WORKED_HASH }).to_string();
     let request = format!(
-        "POST {RFC_PATH} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {RFC_PATH} HTTP/1.1\r\nHost: {local}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
 
-    let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let mut stream = tokio::net::TcpStream::connect(local)
+        .await
+        .expect("connect");
     stream
         .write_all(request.as_bytes())
         .await

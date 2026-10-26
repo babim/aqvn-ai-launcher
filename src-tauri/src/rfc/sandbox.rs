@@ -7,10 +7,10 @@
 
 use std::path::{Component, Path, PathBuf};
 
-/// Fallback sandbox root when no allowed path is configured.
+/// Default sandbox root used by the shell working directory.
 pub const DEFAULT_SANDBOX: &str = "~/Workspace";
 
-/// Agent-facing prefix that maps onto the sandbox root.
+/// Agent-facing prefix that maps onto the first sandbox root.
 const AGENT_ROOT_PREFIX: &str = "/a0";
 
 #[derive(Debug, thiserror::Error)]
@@ -23,54 +23,78 @@ pub enum SandboxError {
 
 #[derive(Debug, Clone)]
 pub struct Sandbox {
-    root: PathBuf,
+    roots: Vec<PathBuf>,
 }
 
 impl Sandbox {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
-    }
-
-    /// Builds a sandbox from the first configured allowed path.
-    ///
-    /// A missing root is created so the default `~/Workspace` works on a fresh
-    /// install; a failed creation surfaces later as `Unavailable` on use.
-    pub fn from_allowed_paths(allowed: &[String]) -> Self {
-        let raw = allowed
-            .first()
-            .map(String::as_str)
-            .unwrap_or(DEFAULT_SANDBOX);
-        let sandbox = Self::new(expand_tilde(raw));
-        let _ = std::fs::create_dir_all(sandbox.root());
-        sandbox
-    }
-
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    /// Canonical root (symlinks in the configured root resolved).
-    pub fn canonical_root(&self) -> Result<PathBuf, SandboxError> {
-        std::fs::canonicalize(&self.root)
-            .map_err(|err| SandboxError::Unavailable(format!("{}: {err}", self.root.display())))
-    }
-
-    /// Path relative to the sandbox root, when `path` is inside it.
-    pub fn relative(&self, path: &Path) -> Option<PathBuf> {
-        if let Ok(rest) = path.strip_prefix(&self.root) {
-            return Some(rest.to_path_buf());
+        Self {
+            roots: vec![root.into()],
         }
-        let canonical = self.canonical_root().ok()?;
-        path.strip_prefix(&canonical).ok().map(Path::to_path_buf)
+    }
+
+    /// Builds a sandbox from every configured allowed path.
+    ///
+    /// Configured roots are created so the default `~/Workspace` works on a
+    /// fresh install. An empty list denies every path: there is no implicit
+    /// fallback root.
+    pub fn from_allowed_paths(allowed: &[String]) -> Self {
+        let roots: Vec<PathBuf> = allowed
+            .iter()
+            .filter(|raw| !raw.trim().is_empty())
+            .map(|raw| expand_tilde(raw))
+            .collect();
+        for root in &roots {
+            let _ = std::fs::create_dir_all(root);
+        }
+        Self { roots }
+    }
+
+    pub fn roots(&self) -> &[PathBuf] {
+        &self.roots
+    }
+
+    /// Canonical roots (symlinks in each configured root resolved).
+    ///
+    /// Roots that cannot be resolved are skipped; with no resolvable root the
+    /// sandbox denies everything (`Unavailable`).
+    pub fn canonical_roots(&self) -> Result<Vec<PathBuf>, SandboxError> {
+        let roots: Vec<PathBuf> = self
+            .roots
+            .iter()
+            .filter_map(|root| std::fs::canonicalize(root).ok())
+            .collect();
+        if roots.is_empty() {
+            return Err(SandboxError::Unavailable(
+                "no allowed path is configured or resolvable".to_string(),
+            ));
+        }
+        Ok(roots)
+    }
+
+    /// Path relative to any sandbox root, when `path` is inside one.
+    pub fn relative(&self, path: &Path) -> Option<PathBuf> {
+        for root in &self.roots {
+            if let Ok(rest) = path.strip_prefix(root) {
+                return Some(rest.to_path_buf());
+            }
+            if let Ok(canonical) = std::fs::canonicalize(root) {
+                if let Ok(rest) = path.strip_prefix(&canonical) {
+                    return Some(rest.to_path_buf());
+                }
+            }
+        }
+        None
     }
 
     /// Maps an agent-facing path into the sandbox and verifies containment.
     ///
-    /// Existing path components are canonicalized (symlink-safe); components
-    /// that do not exist yet cannot be symlinks, so the check stays sound for
-    /// create/write targets.
+    /// Every root is tried in configured order, so all `allowed_paths` entries
+    /// are honored. Existing path components are canonicalized (symlink-safe);
+    /// components that do not exist yet cannot be symlinks, so the check stays
+    /// sound for create/write targets.
     pub fn jail(&self, requested: &str) -> Result<PathBuf, SandboxError> {
-        let root = self.canonical_root()?;
+        let roots = self.canonical_roots()?;
         let expanded;
         let requested = if requested.starts_with('~') {
             expanded = expand_tilde(requested).to_string_lossy().into_owned();
@@ -78,19 +102,34 @@ impl Sandbox {
         } else {
             requested
         };
-        let relative = relative_to_root(&root, requested)?;
-        let candidate = root.join(relative);
-
-        let existing = deepest_existing(&candidate).ok_or_else(|| {
-            SandboxError::Denied(format!("cannot resolve path inside sandbox: {requested}"))
-        })?;
-        let resolved = std::fs::canonicalize(&existing)
-            .map_err(|err| SandboxError::Denied(format!("cannot resolve {requested}: {err}")))?;
-        if !resolved.starts_with(&root) {
-            return Err(SandboxError::Denied(requested.to_string()));
+        for root in &roots {
+            let Ok(relative) = relative_to_root(root, requested) else {
+                continue;
+            };
+            if let Ok(mapped) = contained_candidate(root, &root.join(relative), requested) {
+                return Ok(mapped);
+            }
         }
-        Ok(candidate)
+        Err(SandboxError::Denied(requested.to_string()))
     }
+}
+
+/// Returns `candidate` when its deepest existing ancestor resolves inside
+/// `root`; any resolution failure is a denial.
+fn contained_candidate(
+    root: &Path,
+    candidate: &Path,
+    requested: &str,
+) -> Result<PathBuf, SandboxError> {
+    let existing = deepest_existing(candidate).ok_or_else(|| {
+        SandboxError::Denied(format!("cannot resolve path inside sandbox: {requested}"))
+    })?;
+    let resolved = std::fs::canonicalize(&existing)
+        .map_err(|err| SandboxError::Denied(format!("cannot resolve {requested}: {err}")))?;
+    if !resolved.starts_with(root) {
+        return Err(SandboxError::Denied(requested.to_string()));
+    }
+    Ok(candidate.to_path_buf())
 }
 
 /// Strips the agent-facing prefix (or an already-rooted sandbox path) and
@@ -175,11 +214,11 @@ mod tests {
 
         assert_eq!(
             sandbox.jail("/a0/file.txt").expect("mapped"),
-            sandbox.canonical_root().expect("root").join("file.txt")
+            sandbox.canonical_roots().expect("root")[0].join("file.txt")
         );
         assert_eq!(
             sandbox.jail("/a0").expect("root maps"),
-            sandbox.canonical_root().expect("root")
+            sandbox.canonical_roots().expect("root")[0]
         );
         // `/a0foo` is not the agent prefix and is not inside the sandbox.
         assert!(sandbox.jail("/a0foo").is_err());
@@ -214,8 +253,50 @@ mod tests {
         let root = temp_root();
         let sandbox = Sandbox::new(root.clone());
         let jailed = sandbox.jail("/a0/new/deep/file.bin").expect("allowed");
-        assert!(jailed.starts_with(sandbox.canonical_root().expect("root")));
+        assert!(jailed.starts_with(&sandbox.canonical_roots().expect("root")[0]));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn denies_everything_when_allowed_paths_is_empty() {
+        let sandbox = Sandbox::from_allowed_paths(&[]);
+        assert!(sandbox.roots().is_empty(), "no implicit fallback root");
+        assert!(sandbox.jail("/a0/anything").is_err());
+        assert!(sandbox.jail("/tmp").is_err());
+        assert!(sandbox.canonical_roots().is_err());
+    }
+
+    #[test]
+    fn honors_every_allowed_path() {
+        let first = temp_root();
+        let second = temp_root();
+        std::fs::write(first.join("one.txt"), b"1").expect("fixture");
+        std::fs::write(second.join("two.txt"), b"2").expect("fixture");
+        let sandbox = Sandbox::from_allowed_paths(&[
+            first.to_string_lossy().into_owned(),
+            second.to_string_lossy().into_owned(),
+        ]);
+
+        let from_first = sandbox
+            .jail(&format!("{}/one.txt", first.display()))
+            .expect("first root honored");
+        assert_eq!(from_first, first.join("one.txt"));
+        let from_second = sandbox
+            .jail(&format!("{}/two.txt", second.display()))
+            .expect("second root honored");
+        assert_eq!(from_second, second.join("two.txt"));
+        assert_eq!(
+            sandbox.relative(&from_second),
+            Some(PathBuf::from("two.txt"))
+        );
+        // `/a0` maps onto the first configured root, not the second.
+        assert_eq!(
+            sandbox.jail("/a0/two.txt").expect("maps to first root"),
+            sandbox.canonical_roots().expect("roots")[0].join("two.txt")
+        );
+
+        let _ = std::fs::remove_dir_all(&first);
+        let _ = std::fs::remove_dir_all(&second);
     }
 
     #[test]
@@ -228,9 +309,9 @@ mod tests {
     }
 
     #[test]
-    fn expands_tilde_for_the_default_root() {
+    fn expands_tilde_for_configured_roots() {
         let home = home_dir();
         let sandbox = Sandbox::from_allowed_paths(&["~/Workspace".to_string()]);
-        assert_eq!(sandbox.root(), home.join("Workspace"));
+        assert_eq!(sandbox.roots(), [home.join("Workspace")]);
     }
 }

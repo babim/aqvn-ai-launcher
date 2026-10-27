@@ -186,12 +186,18 @@ async fn handle_proxy_csrf(State(state): State<ProxyState>, headers: HeaderMap) 
 
 async fn handle_login(
     State(state): State<ProxyState>,
+    method: Method,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
     let origin = request_origin(&headers);
     if let Some(response) = reject_bad_origin(origin.as_deref()) {
         return with_cors(response, origin.as_deref());
+    }
+    // The webview sends JSON, so the browser preflights /login. A 4xx
+    // preflight is a hard CORS failure, so answer it before parsing a body.
+    if method == Method::OPTIONS {
+        return with_cors(StatusCode::NO_CONTENT.into_response(), origin.as_deref());
     }
 
     let login: LoginBody = match serde_json::from_slice(&body) {

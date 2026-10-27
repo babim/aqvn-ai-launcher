@@ -8,122 +8,85 @@
       // Rust mirrors this into the native window title (no JS IPC needed).
       document.title = "AQVN AI Workspace";
     </script>
+    <link rel="stylesheet" href="chat.css" />
+    <script src="vendor/socket.io.min.js"></script>
     <script src="bridge.js"></script>
-    <script>
-      // `window.__AQVN_PROXY__` is injected by Rust before page scripts run.
-      // Its port is chosen at launch; nothing here hardcodes it.
-      window.addEventListener("DOMContentLoaded", function () {
-        if (window.bridge && window.bridge.proxy) {
-          console.info("[AQVN] proxy bridge:", window.bridge.proxy.url);
-        }
-      });
-    </script>
-    <style>
-      :root {
-        color-scheme: dark;
-      }
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-        background: radial-gradient(circle at 30% 20%, #10243a, #070d16 65%);
-        color: #e6edf7;
-      }
-      .nav {
-        position: fixed;
-        top: 16px;
-        left: 16px;
-        padding: 10px 20px;
-        border: 1px solid #22d3ee55;
-        border-radius: 10px;
-        background: #0b1220;
-        color: #22d3ee;
-        font-size: 0.9rem;
-        text-decoration: none;
-      }
-      .nav:hover,
-      .nav:focus-visible {
-        background: #132c46;
-      }
-      main {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        max-width: 760px;
-        width: 100%;
-        margin: 0 auto;
-        padding: 72px 24px 24px;
-      }
-      h1 {
-        margin: 0 0 0.25rem;
-        font-size: 1.4rem;
-        letter-spacing: 0.02em;
-      }
-      .subtitle {
-        margin: 0 0 1.5rem;
-        color: #93a4bd;
-        font-size: 0.9rem;
-      }
-      .chat {
-        flex: 1;
-        min-height: 240px;
-        border: 1px solid #1e2f45;
-        border-radius: 14px;
-        background: #0b1220aa;
-        padding: 16px;
-        display: grid;
-        place-items: center;
-        color: #93a4bd;
-        font-size: 0.9rem;
-      }
-      .composer {
-        margin-top: 12px;
-        display: flex;
-        gap: 8px;
-      }
-      .composer textarea {
-        flex: 1;
-        resize: none;
-        min-height: 48px;
-        padding: 12px;
-        border: 1px solid #1e2f45;
-        border-radius: 10px;
-        background: #0b1220;
-        color: #e6edf7;
-        font: inherit;
-      }
-      .composer button {
-        padding: 0 20px;
-        border: 1px solid #22d3ee55;
-        border-radius: 10px;
-        background: #132c46;
-        color: #22d3ee;
-        font: inherit;
-        cursor: not-allowed;
-      }
-    </style>
+    <script defer src="chat.js"></script>
   </head>
   <body>
-    <a class="nav" id="open-settings" href="settings.html">Settings</a>
+    <header class="topbar">
+      <a class="brand" href="index.html">AQVN Workspace</a>
+      <span id="connection" class="conn" role="status" aria-live="polite">Offline</span>
+      <a class="nav" id="open-settings" href="settings.html">Settings</a>
+    </header>
+
     <main>
-      <h1>AQVN Workspace</h1>
-      <p class="subtitle">Chat shell placeholder</p>
-      <section class="chat" aria-label="Conversation">
-        <p>Chat connects in the OS-integration milestone.</p>
+      <section id="login-view" class="panel" aria-labelledby="login-title">
+        <h1 id="login-title">Sign in</h1>
+        <p class="subtitle">Connect to your workspace server through the local bridge.</p>
+        <p id="session-notice" class="notice" role="status" hidden></p>
+        <form id="login-form" novalidate>
+          <label for="login-username">Username</label>
+          <input
+            id="login-username"
+            name="username"
+            autocomplete="username"
+            spellcheck="false"
+            required
+          />
+          <label for="login-password">Password</label>
+          <input
+            id="login-password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+          />
+          <p id="login-error" class="error" role="alert"></p>
+          <button id="login-submit" type="submit">Sign in</button>
+        </form>
+        <details class="advanced">
+          <summary>Connection</summary>
+          <label for="proxy-url">Bridge proxy URL</label>
+          <input
+            id="proxy-url"
+            name="proxy-url"
+            placeholder="(same origin)"
+            spellcheck="false"
+          />
+          <p class="hint">
+            Filled in by the desktop app at launch. Leave empty when the page and
+            the bridge share an origin.
+          </p>
+        </details>
       </section>
-      <form class="composer" onsubmit="return false">
-        <textarea
-          aria-label="Message"
-          placeholder="Message the assistant&hellip;"
-          disabled
-        ></textarea>
-        <button type="submit" disabled>Send</button>
-      </form>
+
+      <section id="chat-view" class="chat-shell" aria-label="Conversation" hidden>
+        <nav id="contexts" class="contexts" aria-label="Conversations"></nav>
+        <div class="chat-main">
+          <div class="chat-toolbar">
+            <h1>Conversation</h1>
+            <div class="actions">
+              <button id="new-chat-btn" type="button">New chat</button>
+              <button id="stop-btn" type="button" disabled>Stop</button>
+            </div>
+          </div>
+          <div id="messages" class="messages" role="log" aria-live="polite"></div>
+          <p id="status-line" class="status" role="status" hidden></p>
+          <p id="chat-error" class="error" role="alert" hidden></p>
+          <form id="composer" class="composer">
+            <label class="sr-only" for="message-input">Message</label>
+            <textarea
+              id="message-input"
+              name="message"
+              rows="2"
+              placeholder="Message the assistant&hellip;"
+              required
+            ></textarea>
+            <button id="send-btn" type="submit">Send</button>
+          </form>
+        </div>
+      </section>
     </main>
   </body>
 </html>

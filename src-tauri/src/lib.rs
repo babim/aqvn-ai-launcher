@@ -3,18 +3,28 @@
 pub mod app;
 pub mod config;
 pub mod proxy;
+#[cfg(not(target_os = "android"))]
 pub mod rfc;
+#[cfg(not(target_os = "android"))]
 pub mod ssh;
 
 use tauri::{Manager, WebviewWindowBuilder};
 
-/// Runs the desktop application.
+/// Runs the application.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_store::Builder::new().build());
+
+    #[cfg(not(target_os = "android"))]
+    {
+        builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
             let initial_config =
                 config::AppConfig::load_from_store(app.handle()).unwrap_or_default();
@@ -40,23 +50,26 @@ pub fn run() {
                 proxy::server::watch_target(watch_config, watch_state).await;
             });
 
-            // RFC bridge: binds only when the master toggle is enabled (default OFF)
-            // and restarts its listener on any settings change (hot reload).
-            let supervisor = watcher.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(err) = rfc::server::run_supervised(supervisor).await {
-                    eprintln!("{err}");
-                }
-            });
+            #[cfg(not(target_os = "android"))]
+            {
+                // RFC bridge: binds only when the master toggle is enabled (default OFF)
+                // and restarts its listener on any settings change (hot reload).
+                let supervisor = watcher.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(err) = rfc::server::run_supervised(supervisor).await {
+                        eprintln!("{err}");
+                    }
+                });
 
-            // SSH bridge: binds only when the master toggle is enabled and password is set
-            // (default OFF) and restarts its listener on any settings change (hot reload).
-            let ssh_supervisor = watcher.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(err) = ssh::server::run_supervised(ssh_supervisor).await {
-                    eprintln!("{err}");
-                }
-            });
+                // SSH bridge: binds only when the master toggle is enabled and password is set
+                // (default OFF) and restarts its listener on any settings change (hot reload).
+                let ssh_supervisor = watcher.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(err) = ssh::server::run_supervised(ssh_supervisor).await {
+                        eprintln!("{err}");
+                    }
+                });
+            }
 
             // The settings UI writes through the store plugin; poll the settings file so
             // those writes reach the watcher without an app restart.
@@ -97,8 +110,12 @@ pub fn run() {
                 })
                 .build()?;
 
-            app::tray::init(app.handle())?;
-            app::hotkey::register(app.handle());
+            #[cfg(not(target_os = "android"))]
+            {
+                app::tray::init(app.handle())?;
+                app::hotkey::register(app.handle());
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

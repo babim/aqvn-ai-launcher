@@ -1,9 +1,11 @@
-//! Desktop-only OS integration: tray icon, global hotkey, notifications, and
-//! external-link policy. Compiled out of mobile builds.
+//! OS integration: tray icon, global hotkey, notifications, and
+//! external-link policy. Tray and hotkey are compiled out of mobile builds.
 
+#[cfg(not(target_os = "android"))]
 pub mod hotkey;
 pub mod links;
 pub mod notify;
+#[cfg(not(target_os = "android"))]
 pub mod tray;
 
 use tauri::{AppHandle, Manager};
@@ -34,5 +36,13 @@ pub fn toggle_main_window(app: &AppHandle) {
 /// Busy/idle tray icon, driven by chat activity reported from the UI.
 #[tauri::command]
 pub fn set_tray_busy(app: AppHandle, busy: bool) -> Result<(), String> {
-    tray::set_busy(&app, busy).map_err(|err| err.to_string())
+    #[cfg(not(target_os = "android"))]
+    {
+        tray::set_busy(&app, busy).map_err(|err| err.to_string())
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = (&app, busy);
+        Ok(())
+    }
 }

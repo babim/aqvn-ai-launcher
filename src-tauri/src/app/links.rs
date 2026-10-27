@@ -1,0 +1,53 @@
+//! External-link policy.
+//!
+//! App pages (the embedded `ui/` bundle) load in the webview. Any other
+//! `http(s)` navigation is cancelled and handed to the system browser through
+//! `tauri-plugin-shell`, so the chat surface never leaves the app origin.
+
+use tauri::AppHandle;
+use tauri_plugin_shell::ShellExt;
+use url::Url;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nav {
+    /// Embedded app page: keep it in the webview.
+    App,
+    /// Non-app page: open in the system browser.
+    External,
+    /// Unsupported scheme: refuse and stay put.
+    Blocked,
+}
+
+/// Classifies a navigation target without side effects.
+pub fn classify(url: &Url) -> Nav {
+    let app_host = url.host_str() == Some("tauri.localhost");
+    if app_host || matches!(url.scheme(), "tauri" | "about" | "data" | "blob") {
+        Nav::App
+    } else if matches!(url.scheme(), "http" | "https") {
+        Nav::External
+    } else {
+        Nav::Blocked
+    }
+}
+
+/// Navigation handler for the main webview: returns whether to allow navigation.
+///
+/// `Shell::open` is the plugin API mandated by the architecture; it is marked
+/// deprecated upstream in favour of a newer plugin but remains functional here.
+#[allow(deprecated)]
+pub fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
+    match classify(url) {
+        Nav::App => true,
+        Nav::External => {
+            match app.shell().open(url.as_str(), None) {
+                Ok(()) => eprintln!("aqvn: external link opened in system browser: {url}"),
+                Err(err) => eprintln!("aqvn: external link open failed ({url}): {err}"),
+            }
+            false
+        }
+        Nav::Blocked => {
+            eprintln!("aqvn: blocked navigation to unsupported scheme: {url}");
+            false
+        }
+    }
+}

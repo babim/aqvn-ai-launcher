@@ -78,6 +78,46 @@
     }
   }
 
+  /* Desktop IPC with a browser-mode no-op so static UI tests keep working. */
+  function invokeIpc(command, args) {
+    try {
+      if (
+        window.__TAURI_INTERNALS__ &&
+        typeof window.__TAURI_INTERNALS__.invoke === 'function'
+      ) {
+        return window.__TAURI_INTERNALS__.invoke(command, args || {}).catch(
+          function () {}
+        );
+      }
+    } catch (err) {
+      /* browser mode: no desktop APIs */
+    }
+    return Promise.resolve();
+  }
+
+  /* Message text with real http(s) links. Rust cancels external navigation
+   * and hands the URL to the system browser, so the app page never leaves. */
+  function renderContent(node, text) {
+    node.textContent = '';
+    var pattern = /https?:\/\/[^\s<>"']+/gi;
+    var last = 0;
+    var match;
+    while ((match = pattern.exec(text)) !== null) {
+      if (match.index > last) {
+        node.appendChild(document.createTextNode(text.slice(last, match.index)));
+      }
+      var link = document.createElement('a');
+      link.href = match[0];
+      link.textContent = match[0];
+      link.rel = 'noopener noreferrer';
+      node.appendChild(link);
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) {
+      node.appendChild(document.createTextNode(text.slice(last)));
+    }
+  }
+
   function trimBase(value) {
     var raw = String(value == null ? '' : value).trim();
     if (!raw) {
@@ -223,7 +263,7 @@
     var type = record.type || 'info';
     row.className = 'msg msg-' + type;
     setText(row.firstChild, TYPE_LABELS[type] || type);
-    setText(row.lastChild, record.content || '');
+    renderContent(row.lastChild, record.content || '');
   }
 
   function placeRow(id) {
@@ -290,6 +330,7 @@
   }
 
   function applyProgress(active, text) {
+    var wasActive = state.active === true;
     state.active = active === true;
     state.progress = typeof text === 'string' ? text : '';
     if (state.active && state.progress) {
@@ -301,6 +342,27 @@
     }
     dom.stop.disabled = !state.active;
     document.body.classList.toggle('busy', state.active);
+
+    if (state.active !== wasActive) {
+      invokeIpc('set_tray_busy', { busy: state.active });
+      if (wasActive && !state.active) {
+        notifyComplete();
+      }
+    }
+  }
+
+  /* Native notification for the true -> false progress transition. */
+  function notifyComplete() {
+    var body = state.progress || '';
+    if (!body && state.order.length) {
+      var last = state.logs.get(state.order[state.order.length - 1]);
+      body = (last && last.content) || '';
+    }
+    body = body.replace(/\s+/g, ' ').trim().slice(0, 140);
+    if (!body) {
+      body = 'The assistant finished responding.';
+    }
+    invokeIpc('notify_task_complete', { title: 'Task complete', body: body });
   }
 
   function renderContexts() {

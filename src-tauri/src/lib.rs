@@ -1,5 +1,6 @@
 //! AQVN Workspace core library.
 
+pub mod app;
 pub mod config;
 pub mod proxy;
 pub mod rfc;
@@ -86,15 +87,24 @@ pub fn run() {
                 .find(|w| w.label == "main")
                 .expect("main window config not found in tauri.conf.json");
 
+            let nav_handle = app.handle().clone();
             WebviewWindowBuilder::from_config(app.handle(), window_config)?
                 .initialization_script(proxy::server::init_script(proxy_info.port))
+                .on_navigation(move |url| app::links::handle_navigation(&nav_handle, url))
                 .on_document_title_changed(|window, title| {
                     // Rust-side sync needs no `core:window:allow-set-title`.
                     let _ = window.set_title(&title);
                 })
                 .build()?;
+
+            app::tray::init(app.handle())?;
+            app::hotkey::register(app.handle());
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            app::set_tray_busy,
+            app::notify::notify_task_complete
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run AQVN Workspace");
 }

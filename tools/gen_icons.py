@@ -47,8 +47,36 @@ def draw_mark(size: int) -> Image.Image:
     return img.resize((size, size), Image.LANCZOS)
 
 
+def draw_tray(size: int, busy: bool) -> Image.Image:
+    """Tray glyph: idle = teal ring, busy = amber filled disc with a notch."""
+    scale = 4
+    s = size * scale
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    pad = int(s * 0.10)
+    if busy:
+        draw.ellipse((pad, pad, s - pad, s - pad), fill=(245, 158, 11, 255))
+        draw.ellipse(
+            (int(s * 0.34), int(s * 0.34), int(s * 0.66), int(s * 0.66)),
+            fill=(11, 18, 32, 255),
+        )
+    else:
+        stroke = max(1, int(s * 0.16))
+        draw.ellipse((pad, pad, s - pad, s - pad), outline=TEAL, width=stroke)
+        draw.ellipse(
+            (int(s * 0.42), int(s * 0.42), int(s * 0.58), int(s * 0.58)),
+            fill=WHITE,
+        )
+    return img.resize((size, size), Image.LANCZOS)
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
+    draw_tray(32, False).save(OUT / "tray-idle.png")
+    draw_tray(32, True).save(OUT / "tray-busy.png")
+    # Raw RGBA (32x32) embedded in the binary; avoids pulling the PNG decoder.
+    (OUT / "tray-idle.rgba").write_bytes(draw_tray(32, False).tobytes())
+    (OUT / "tray-busy.rgba").write_bytes(draw_tray(32, True).tobytes())
     for name, size in {
         "icon.png": 512,
         "32x32.png": 32,

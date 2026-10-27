@@ -1,0 +1,52 @@
+version: '3'
+
+vars:
+  ANDROID_SDK: '{{.HOME}}/Android/Sdk'
+  ANDROID_NDK: '{{.HOME}}/Android/Sdk/ndk/27.3.13750724'
+  JAVA_HOME_PATH: '/usr/lib64/jvm/java-17-openjdk'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  build:linux:
+    desc: Build Linux release binary and deb/rpm bundles
+    dir: src-tauri
+    cmds:
+      - cargo tauri build --bundles deb,rpm
+
+  build:windows:
+    desc: Build Windows installers (documented CI-only via GitHub Actions release workflow)
+    cmds:
+      - echo "build:windows is CI-only. Built via GitHub Actions on windows-latest in .github/workflows/release.yml"
+
+  build:android:
+    desc: Build Android APK (unsigned debug)
+    dir: src-tauri
+    env:
+      ANDROID_HOME: '{{.ANDROID_SDK}}'
+      NDK_HOME: '{{.ANDROID_NDK}}'
+      JAVA_HOME: '{{.JAVA_HOME_PATH}}'
+      PATH: '{{.PATH}}:{{.ANDROID_SDK}}/platform-tools:{{.ANDROID_SDK}}/cmdline-tools/latest/bin:{{.JAVA_HOME_PATH}}/bin'
+    cmds:
+      - cargo tauri android build --apk
+
+  test:
+    desc: Run Rust unit and integration tests
+    dir: src-tauri
+    cmds:
+      - cargo test
+
+  lint:
+    desc: Run clippy and format check
+    dir: src-tauri
+    cmds:
+      - cargo clippy --all-targets -- -D warnings
+      - cargo fmt --check
+
+  bench:
+    desc: Run benchmark suite (release binary size, RSS, FCP, cold start)
+    cmds:
+      - bash tools/benchmark.sh

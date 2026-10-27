@@ -65,6 +65,14 @@ def check(name: str, condition: bool, detail: str) -> None:
     print(f"PASS {name}: {detail}", flush=True)
 
 
+def has_assistant_record(logs: list[dict]) -> bool:
+    return any(
+        rec.get("type") in {"agent", "response"}
+        and bool(str(rec.get("content") or "").strip())
+        for rec in logs
+    )
+
+
 def http_json(method: str, url: str, *, payload=None, data=None, headers=None, session=None):
     agent = session or requests
     timeout = float(os.environ.get("CHAT_E2E_HTTP_TIMEOUT", "120"))
@@ -98,12 +106,20 @@ async def wait_for_records(pushes: list[dict], message_id: str, timeout: float):
                 rec.get("id") == message_id and rec.get("type") == "user"
                 for rec in logs
             )
-            answered = any(
-                rec.get("type") in {"agent", "response"} for rec in logs
-            )
+            answered = has_assistant_record(logs)
             if user and answered:
                 return saw_progress
         await asyncio.sleep(0.1)
+    if pushes:
+        snapshot = (pushes[-1].get("data") or {}).get("snapshot") or {}
+        logs = snapshot.get("logs") or []
+        print(
+            "INFO last snapshot records: "
+            + str([(rec.get("type"), str(rec.get("id"))[:8]) for rec in logs[:8]]),
+            flush=True,
+        )
+    else:
+        print("INFO no state_push received", flush=True)
     return None
 
 
@@ -147,7 +163,7 @@ async def poll_for_records(
                 rec.get("id") == message_id and rec.get("type") == "user"
                 for rec in logs
             )
-            answered = any(rec.get("type") in {"agent", "response"} for rec in logs)
+            answered = has_assistant_record(logs)
             if user and answered:
                 return saw_progress
         await asyncio.sleep(0.6)
@@ -182,6 +198,16 @@ async def run_socket(
     @sio.on("state_push", namespace=NAMESPACE)
     async def on_push(data):
         pushes.append(data if isinstance(data, dict) else {"data": {}})
+        if os.environ.get("CHAT_E2E_DEBUG_PUSH") == "1":
+            snapshot = (pushes[-1].get("data") or {}).get("snapshot") or {}
+            logs = snapshot.get("logs") or []
+            summary = [(rec.get("type"), str(rec.get("id"))[:8]) for rec in logs[:8]]
+            print(
+                f"DEBUG state_push logs={len(logs)} records={summary} "
+                f"context={str(snapshot.get('context'))[:8]} "
+                f"progress={snapshot.get('log_progress_active')}",
+                flush=True,
+            )
 
     try:
         await sio.connect(
@@ -256,6 +282,15 @@ async def run_socket(
 
     timeout = float(os.environ.get("CHAT_E2E_TIMEOUT", "180"))
     if ws_ok:
+        # The snapshot only carries logs for a selected context; the UI selects
+        # the context returned by message_async before waiting for state_push.
+        selected = {
+            **state_payload,
+            "context": context_id,
+            "log_from": 0,
+            "correlationId": "chat-e2e-" + uuid.uuid4().hex[:8],
+        }
+        await sio.call("state_request", selected, namespace=NAMESPACE, timeout=30)
         saw_progress = await wait_for_records(pushes, message_id, timeout)
         record_label = "state_push records"
     else:

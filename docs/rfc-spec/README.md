@@ -9,6 +9,14 @@ The repo-wide whitelabel gate (`rg -i "agentzero|agent0|agent zero"`) excludes
 `docs/rfc-spec/**`. Naming the upstream project is allowed **only here**. Code,
 UI strings, bundle metadata, comments, and commit content stay AQVN-branded.
 
+## Wire notes (landed findings)
+
+- `apply_context_patch_file` requires the upstream patch wrapper format:
+  `*** Begin Patch` … `*** Update File: <path>` … `*** End Patch`.
+  Bare hunks without the wrapper are rejected by the upstream parser we mirror.
+- `_provide_root_password` responds `200 application/json` with a JSON-encoded
+  quoted lowercase-hex string (json.loads before hex-decoding), not raw bytes.
+
 ## Planned notes
 
 - `security-notes.md` — exposure model, real security boundary, SSH denylist

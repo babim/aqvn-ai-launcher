@@ -1,0 +1,420 @@
+{
+  "affected_surfaces": [
+    {
+      "coverage_status": "covered",
+      "owner_skill": "aqvn-opsx-doit",
+      "path": "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "reason": "Bridge surface for feature rfc-server-core-fix-1.",
+      "required_task_ids": [
+        "C15-001",
+        "C15-002",
+        "C15-003",
+        "C15-004"
+      ],
+      "surface_id": "surf:15-rfc-server-core-fix-1",
+      "type": "script"
+    }
+  ],
+  "bounded_assumptions": [],
+  "confidence": "high",
+  "config_source": "mission-bind",
+  "conflict_policy": {
+    "config_vs_evidence": "mission-bind scaffold; feature rfc-server-core-fix-1"
+  },
+  "coverage_map": [
+    {
+      "change_name": "change15-rfc-server-core-fix-1",
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_class": "declared-but-unproven",
+      "sync_class": "in-sync",
+      "trust_class": "low"
+    }
+  ],
+  "decision": {
+    "blocked": false,
+    "result_posture": "append-required",
+    "roadmap_mode": "append-roadmap"
+  },
+  "decision_table": [
+    {
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_score": 1,
+      "note": "mission bridge scaffold for rfc-server-core-fix-1",
+      "sync_score": 1,
+      "trust_score": 1
+    }
+  ],
+  "dependency_graph": {
+    "acyclic": true,
+    "critical_path": [
+      "C15-001",
+      "C15-002",
+      "C15-003",
+      "C15-004"
+    ],
+    "edges": [
+      {
+        "from": "C15-001",
+        "reason": "sequential scaffold",
+        "to": "C15-002"
+      },
+      {
+        "from": "C15-002",
+        "reason": "sequential scaffold",
+        "to": "C15-003"
+      },
+      {
+        "from": "C15-003",
+        "reason": "sequential scaffold",
+        "to": "C15-004"
+      }
+    ]
+  },
+  "execution_posture_hints": [
+    {
+      "change_name": "change15-rfc-server-core-fix-1",
+      "confidence": "high",
+      "implementation_lane_shape": "bounded-single-lane",
+      "posture": "implementation-heavy",
+      "reason": "bridge script with self-test"
+    }
+  ],
+  "execution_surface_hints": [
+    {
+      "change_name": "change15-rfc-server-core-fix-1",
+      "confidence": "high",
+      "reason": "bridge script fits native-subagents surface",
+      "surface": "native-subagents"
+    }
+  ],
+  "final_preflight": {
+    "checks": [
+      {
+        "evidence_refs": [
+          "openspec/changes/change15-rfc-server-core-fix-1/tasks.md"
+        ],
+        "name": "active_changes",
+        "notes": "scaffold-bound change not yet implemented",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change15-rfc-server-core-fix-1/specs/"
+        ],
+        "name": "specs",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change15-rfc-server-core-fix-1/tasks.md"
+        ],
+        "name": "semantic_gate",
+        "notes": "scaffold sections emitted; atoms unexecuted",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change15-rfc-server-core-fix-1/roadmap-audit.json"
+        ],
+        "name": "schema_gate",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "handoff_packet",
+        "notes": "handoff completeness declared, not yet exercised",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "terminal_closeout",
+        "notes": "closeout happens at archive time",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change15-rfc-server-core-fix-1/execution-ledger.json"
+        ],
+        "name": "audit_sync",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change15-rfc-server-core-fix-1/roadmap-audit.json#numbering_policy"
+        ],
+        "name": "numbering_justification",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "overlap_matrix",
+        "notes": "new bridge scaffold; no archived change refreshed",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [],
+        "name": "residual_taxonomy",
+        "notes": "typed residual: not-yet-executed scaffold",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "second_pass_evidence",
+        "notes": "second pass runs in the doit drain, not at bind",
+        "status": "not-applicable"
+      }
+    ],
+    "residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "status": "typed-residual"
+  },
+  "granularity_gate": {
+    "complexity_expansion_complete": true,
+    "dependency_graph_acyclic": true,
+    "missing_surface_ids": "none",
+    "no_umbrella_only_coverage": true,
+    "notes": "mission bridge scaffold for rfc-server-core-fix-1; 4 task atoms",
+    "one_task_per_affected_skill": true,
+    "single_shared_file_no_fake_parallel": "single-shared-file-no-fake-parallel: serial scaffold",
+    "status": "pass"
+  },
+  "handoff_completeness": {
+    "closeout_bundle": "emitted at archive time by the standard closeout flow",
+    "confidence_lifecycle": "declared-but-unproven until the verifier atom passes",
+    "evidence_claim_map": "opsx-mission-bind.mjs binds feature rfc-server-core-fix-1 to change change15-rfc-server-core-fix-1.",
+    "must_not_merge_before": [
+      "not-yet-executed: proposals-only scaffold for rfc-server-core-fix-1; implementation deferred to the doit drain"
+    ],
+    "route_verdict": "native-subagents lane; owner aqvn-opsx-doit",
+    "safe_to_run_in_parallel_with": [
+      "other mission-bridge features with disjoint write_scope"
+    ],
+    "severity_waivers": "none",
+    "task_dag": "C15-001 -> C15-002 -> C15-003 -> C15-004",
+    "workstream_lanes": [
+      "impl/script atoms"
+    ]
+  },
+  "historical_overlap_matrix": [
+    {
+      "check": "historical_overlap",
+      "evidence_refs": [
+        "openspec/changes/change15-rfc-server-core-fix-1/proposal.md"
+      ],
+      "rationale": "Auto-scaffolded by opsx-mission-bind.mjs for mission feature rfc-server-core-fix-1.",
+      "verdict": "none"
+    },
+    {
+      "check": "why_not_refresh_old_archive",
+      "evidence_refs": [
+        "openspec/changes/change15-rfc-server-core-fix-1/proposal.md"
+      ],
+      "rationale": "New bridge scaffold; no archived change is refreshed.",
+      "verdict": "follow-on-not-refresh"
+    },
+    {
+      "check": "why_follow_on_valid",
+      "evidence_refs": [
+        "openspec/changes/change15-rfc-server-core-fix-1/proposal.md"
+      ],
+      "rationale": "Binds Factory mission feature rfc-server-core-fix-1 to an openspec change.",
+      "verdict": "valid"
+    },
+    {
+      "check": "why_not_delivery_or_local_residual",
+      "evidence_refs": [
+        "openspec/changes/change15-rfc-server-core-fix-1/proposal.md"
+      ],
+      "rationale": "A bridge scaffold, not a local env or delivery residual.",
+      "verdict": "not-delivery-not-local"
+    }
+  ],
+  "next_task_hint": {
+    "execution_surface_hint": "native-subagents",
+    "reason": "first atom on the critical path",
+    "selected_change": "change15-rfc-server-core-fix-1",
+    "task_id": "C15-001"
+  },
+  "numbering_policy": {
+    "default_rule": "global-max-plus-one over the archive baseline (highest_existing_ordinal 14); selected ordinal 15",
+    "highest_existing_ordinal": 14,
+    "lineage_authorized": true,
+    "lineage_authorized_by": "opsx-mission-bind.mjs (mission c82a03df-dfc7-438f-b44b-9089dcc40a8f)",
+    "mode": "global-max-plus-one",
+    "selected_change": "change15-rfc-server-core-fix-1",
+    "selected_ordinal": 15
+  },
+  "open_questions": [],
+  "orchestration_core_refs": {
+    "closeout_bundle_ref": "openspec/changes/change15-rfc-server-core-fix-1/roadmap-audit.json#terminal_closeout",
+    "confidence_lifecycle_ref": "openspec/changes/change15-rfc-server-core-fix-1/roadmap-audit.json#second_pass_evidence",
+    "evidence_claim_map_ref": "openspec/changes/change15-rfc-server-core-fix-1/roadmap-audit.json#surface_to_task_coverage",
+    "migration_note": "mission bridge scaffold for feature rfc-server-core-fix-1",
+    "packet_ref": "openspec/changes/change15-rfc-server-core-fix-1/proposal.md",
+    "required_for_handoff": false,
+    "route_verdict_ref": "openspec/changes/change15-rfc-server-core-fix-1/roadmap-audit.json#handoff_completeness",
+    "severity_waiver_policy_ref": "openspec/changes/change15-rfc-server-core-fix-1/roadmap-audit.json#residuals",
+    "task_dag_ref": "openspec/changes/change15-rfc-server-core-fix-1/roadmap-audit.json#dependency_graph",
+    "workstream_lane_refs": [
+      "openspec/changes/change15-rfc-server-core-fix-1/execution-ledger.json#lanes"
+    ]
+  },
+  "parallelization_hints": {
+    "batchable_lanes": [],
+    "change_name": "change15-rfc-server-core-fix-1",
+    "critical_path": [
+      "C15-001",
+      "C15-002",
+      "C15-003",
+      "C15-004"
+    ],
+    "no_fake_parallel_note": "Serial scaffold",
+    "sequential_gates": [
+      "C15-001",
+      "C15-002",
+      "C15-003",
+      "C15-004"
+    ]
+  },
+  "repo_mode": "aqvn-native",
+  "residuals": [],
+  "schema_version": "aqvn_opsx_roadmap_audit/v2",
+  "second_pass_evidence": {
+    "blocking_residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "evidence_refs": [],
+    "independence": "verifier runs in a separate lane from the implementing atoms",
+    "reviewer_lane": "independent-subagent (the final verification atom)",
+    "status": "typed-residual"
+  },
+  "semantic_validations": [
+    {
+      "name": "change15-rfc-server-core-fix-1_valid",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_problem_map_fit",
+      "note": "mission bridge scaffold for rfc-server-core-fix-1",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_claim_ceiling_check",
+      "note": "proposals-only scaffold; claims stay bounded until the doit drain",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_route_drift_check",
+      "note": "bound 1:1 to the mission feature; no alternate route",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_agent_consistency_check",
+      "note": "single owner_skill aqvn-opsx-doit across all atoms",
+      "status": "planned"
+    }
+  ],
+  "surface_to_task_coverage": [
+    {
+      "coverage_status": "covered",
+      "surface_id": "surf:15-rfc-server-core-fix-1",
+      "task_ids": [
+        "C15-001",
+        "C15-002",
+        "C15-003",
+        "C15-004"
+      ]
+    }
+  ],
+  "task_inventory": [
+    {
+      "affected_surface_ids": [
+        "surf:15-rfc-server-core-fix-1"
+      ],
+      "complexity": 1,
+      "dependencies": [],
+      "details": "RFC binds 0.0.0.0:55080 when enabled AND rfc_password non-empty",
+      "execution_surface_hint": "native-subagents",
+      "id": "C15-001",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "No VAL-* mapped (fulfills[] empty). Behavior: \"RFC binds 0.0.0.0:55080 when enabled AND rfc_password non-empty\". Seeded RED: behavior unmet. GREEN: behavior met.",
+      "title": "M15-T1: RFC binds 0.0.0.0:55080 when enabled AND rfc_password non-empty",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:15-rfc-server-core-fix-1"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C15-001"
+      ],
+      "details": "Empty rfc_password → no bind, fail-closed with log",
+      "execution_surface_hint": "native-subagents",
+      "id": "C15-002",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "No VAL-* mapped (fulfills[] empty). Behavior: \"Empty rfc_password → no bind, fail-closed with log\". Seeded RED: behavior unmet. GREEN: behavior met.",
+      "title": "M15-T2: Empty rfc_password → no bind, fail-closed with log",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:15-rfc-server-core-fix-1"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C15-002"
+      ],
+      "details": "Empty allowed_paths → sandbox deny-all; multi-entry allowed_paths all honored",
+      "execution_surface_hint": "native-subagents",
+      "id": "C15-003",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "No VAL-* mapped (fulfills[] empty). Behavior: \"Empty allowed_paths → sandbox deny-all; multi-entry allowed_paths all honored\". Seeded RED: behavior unmet. GREEN: behavior met.",
+      "title": "M15-T3: Empty allowed_paths → sandbox deny-all; multi-entry allowed_paths all honored",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:15-rfc-server-core-fix-1"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C15-003"
+      ],
+      "details": "Full cargo test + clippy + fmt green; whitelabel gate clean",
+      "execution_surface_hint": "native-subagents",
+      "id": "C15-004",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "No VAL-* mapped (fulfills[] empty). Behavior: \"Full cargo test + clippy + fmt green; whitelabel gate clean\". Seeded RED: behavior unmet. GREEN: behavior met.",
+      "title": "M15-T4: Full cargo test + clippy + fmt green; whitelabel gate clean",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    }
+  ],
+  "terminal_closeout": {
+    "evidence_refs": [],
+    "no_active_change_gate": "not-applicable",
+    "reserved_change": false,
+    "status": "not-needed"
+  }
+}

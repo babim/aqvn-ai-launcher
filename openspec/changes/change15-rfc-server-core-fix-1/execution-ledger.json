@@ -1,0 +1,166 @@
+{
+  "change_name": "change15-rfc-server-core-fix-1",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change15-rfc-server-core-fix-1/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "cache_read_tokens": 132936759,
+      "change_ref": "change15-rfc-server-core-fix-1",
+      "input_tokens": 8797219,
+      "lane": "executor",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 511877,
+      "recorded_epoch": "2026-10-26T21:18:11.161Z",
+      "sessions_attributed": 8,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 142245855
+    },
+    {
+      "cache_read_tokens": 33940141,
+      "change_ref": "change15-rfc-server-core-fix-1",
+      "input_tokens": 3582719,
+      "lane": "verifier",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 367714,
+      "recorded_epoch": "2026-10-26T21:18:11.161Z",
+      "sessions_attributed": 6,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 37890574
+    },
+    {
+      "cache_read_tokens": 0,
+      "change_ref": "change15-rfc-server-core-fix-1",
+      "input_tokens": 0,
+      "lane": "scout",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 0,
+      "recorded_epoch": "2026-10-26T21:18:11.161Z",
+      "sessions_attributed": 0,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=rfc-server-core-fix-1; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "action": "no-op",
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change15-rfc-server-core-fix-1"
+    ],
+    "generated_at": "2026-10-26T21:31:03.808Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change15-rfc-server-core-fix-1"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "M15-T1: RFC binds 0.0.0.0:55080 when enabled AND rfc_password non-empty",
+      "mission_lineage": {
+        "feature_id": "rfc-server-core-fix-1",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C15-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "M15-T2: Empty rfc_password → no bind, fail-closed with log",
+      "mission_lineage": {
+        "feature_id": "rfc-server-core-fix-1",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C15-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "M15-T3: Empty allowed_paths → sandbox deny-all; multi-entry allowed_paths all honored",
+      "mission_lineage": {
+        "feature_id": "rfc-server-core-fix-1",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C15-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "M15-T4: Full cargo test + clippy + fmt green; whitelabel gate clean",
+      "mission_lineage": {
+        "feature_id": "rfc-server-core-fix-1",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C15-004",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-26T21:18:11.161Z"
+}

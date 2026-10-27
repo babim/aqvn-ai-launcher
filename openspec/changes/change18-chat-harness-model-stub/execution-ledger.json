@@ -1,0 +1,166 @@
+{
+  "change_name": "change18-chat-harness-model-stub",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change18-chat-harness-model-stub/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "cache_read_tokens": 219070519,
+      "change_ref": "change18-chat-harness-model-stub",
+      "input_tokens": 10561175,
+      "lane": "executor",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 855209,
+      "recorded_epoch": "2026-10-27T00:54:22.987Z",
+      "sessions_attributed": 13,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 230486903
+    },
+    {
+      "cache_read_tokens": 56484013,
+      "change_ref": "change18-chat-harness-model-stub",
+      "input_tokens": 5059123,
+      "lane": "verifier",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 639431,
+      "recorded_epoch": "2026-10-27T00:54:22.987Z",
+      "sessions_attributed": 8,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 62182567
+    },
+    {
+      "cache_read_tokens": 0,
+      "change_ref": "change18-chat-harness-model-stub",
+      "input_tokens": 0,
+      "lane": "scout",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 0,
+      "recorded_epoch": "2026-10-27T00:54:22.987Z",
+      "sessions_attributed": 0,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=chat-harness-model-stub; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "action": "no-op",
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change18-chat-harness-model-stub"
+    ],
+    "generated_at": "2026-10-27T01:38:49.119Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change18-chat-harness-model-stub"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "M18-T1: tools/model_stub_server.py serves OpenAI-compatible completions on loopback",
+      "mission_lineage": {
+        "feature_id": "chat-harness-model-stub",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C18-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "M18-T2: Harness config points chat_model at stub (config files only, no source edits)",
+      "mission_lineage": {
+        "feature_id": "chat-harness-model-stub",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C18-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "M18-T3: chat_e2e.sh flow yields an assistant record with non-empty content (exit 0)",
+      "mission_lineage": {
+        "feature_id": "chat-harness-model-stub",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C18-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "M18-T4: Clean shutdown: stub + harness + app stopped, ports free, no orphans",
+      "mission_lineage": {
+        "feature_id": "chat-harness-model-stub",
+        "mission_id": "c82a03df-dfc7-438f-b44b-9089dcc40a8f",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C18-004",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-27T00:54:22.987Z"
+}

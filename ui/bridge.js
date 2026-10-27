@@ -39,14 +39,43 @@
     }
 
     async get(key) {
-      return Object.prototype.hasOwnProperty.call(this._data, key)
-        ? this._data[key]
-        : undefined;
+      if (Object.prototype.hasOwnProperty.call(this._data, key)) {
+        return this._data[key];
+      }
+      if (this.path === 'settings.json') {
+        if (key === 'server_url') {
+          try {
+            const rawUrl = localStorage.getItem('aqvn_server_url');
+            if (rawUrl) return rawUrl;
+          } catch (e) {}
+          return 'https://a0.matmagoc.com';
+        }
+        if (key === 'server_profiles') {
+          try {
+            const raw = localStorage.getItem('aqvn_server_profiles');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            }
+          } catch (e) {}
+          return ['https://a0.matmagoc.com'];
+        }
+      }
+      return undefined;
     }
 
     async set(key, value) {
       this._data[key] = value;
       this._commitToStorage();
+      if (this.path === 'settings.json') {
+        try {
+          if (key === 'server_url') {
+            localStorage.setItem('aqvn_server_url', String(value));
+          } else if (key === 'server_profiles' && Array.isArray(value)) {
+            localStorage.setItem('aqvn_server_profiles', JSON.stringify(value));
+          }
+        } catch (e) {}
+      }
     }
 
     async has(key) {
@@ -239,10 +268,82 @@
     return { url: String(injected.url), port: injected.port };
   }
 
+  async function getServerProfiles() {
+    try {
+      const store = await getStore('settings.json');
+      const profiles = await store.get('server_profiles');
+      if (Array.isArray(profiles) && profiles.length > 0) {
+        return profiles;
+      }
+    } catch (e) {}
+    try {
+      const raw = localStorage.getItem('aqvn_server_profiles');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return ['https://a0.matmagoc.com'];
+  }
+
+  async function saveServerProfiles(profiles) {
+    if (!Array.isArray(profiles)) return;
+    try {
+      const store = await getStore('settings.json');
+      await store.set('server_profiles', profiles);
+      await store.save();
+    } catch (e) {}
+    try {
+      localStorage.setItem('aqvn_server_profiles', JSON.stringify(profiles));
+    } catch (e) {}
+  }
+
+  async function getServerUrl() {
+    try {
+      const store = await getStore('settings.json');
+      const url = await store.get('server_url');
+      if (url && typeof url === 'string') return url;
+    } catch (e) {}
+    try {
+      const saved = localStorage.getItem('aqvn_server_url');
+      if (saved) return saved;
+    } catch (e) {}
+    return 'https://a0.matmagoc.com';
+  }
+
+  async function saveServerUrl(url) {
+    if (!url || typeof url !== 'string') return;
+    try {
+      const store = await getStore('settings.json');
+      await store.set('server_url', url);
+      let profiles = await store.get('server_profiles');
+      if (!Array.isArray(profiles) || profiles.length === 0) {
+        profiles = await getServerProfiles();
+      }
+      if (!profiles.includes(url)) {
+        profiles.push(url);
+      }
+      await store.set('server_profiles', profiles);
+      await store.save();
+    } catch (e) {}
+    try {
+      localStorage.setItem('aqvn_server_url', url);
+      const profiles = await getServerProfiles();
+      if (!profiles.includes(url)) {
+        profiles.push(url);
+        localStorage.setItem('aqvn_server_profiles', JSON.stringify(profiles));
+      }
+    } catch (e) {}
+  }
+
   window.bridge = {
     isTauri: checkIsTauri(),
     getStore,
     backendDescription,
-    proxy: proxyInfo()
+    proxy: proxyInfo(),
+    getServerProfiles,
+    saveServerProfiles,
+    getServerUrl,
+    saveServerUrl
   };
 })();

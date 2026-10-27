@@ -10,6 +10,7 @@ use tauri::Manager;
 fn default_config_matches_contract_requirements() {
     let conf = AppConfig::default();
     assert_eq!(conf.server_url, "https://a0.matmagoc.com");
+    assert_eq!(conf.server_profiles, vec!["https://a0.matmagoc.com"]);
     assert!(!conf.rfc_enabled);
     assert_eq!(conf.rfc_port, 55080);
     assert_eq!(conf.ssh_port, 55022);
@@ -49,6 +50,7 @@ fn config_watcher_broadcasts_updates() {
 fn config_json_serde_roundtrip() {
     let conf = AppConfig {
         server_url: "https://persist-check.example".to_string(),
+        server_profiles: vec!["https://persist-check.example".to_string()],
         rfc_enabled: true,
         rfc_password: "secret-pass".to_string(),
         ssh_password: "ssh-pass".to_string(),
@@ -87,6 +89,7 @@ fn test_store_persistence_roundtrip() {
 
     let new_config = AppConfig {
         server_url: "https://persist-check.example".to_string(),
+        server_profiles: vec!["https://persist-check.example".to_string()],
         rfc_enabled: true,
         rfc_password: "secret-pass".to_string(),
         allowed_paths: vec!["/tmp/test-path".to_string()],
@@ -110,6 +113,10 @@ fn test_store_persistence_roundtrip() {
     // Load from store
     let loaded = AppConfig::load_from_store(app.handle()).expect("load from store");
     assert_eq!(loaded.server_url, "https://persist-check.example");
+    assert_eq!(
+        loaded.server_profiles,
+        vec!["https://persist-check.example".to_string()]
+    );
     assert!(loaded.rfc_enabled);
     assert_eq!(loaded.rfc_password, "secret-pass");
     assert_eq!(loaded.allowed_paths, vec!["/tmp/test-path".to_string()]);

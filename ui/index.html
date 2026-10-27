@@ -84,6 +84,7 @@
   <body>
     <header class="topbar">
       <a class="brand" href="index.html">AQVN Workspace</a>
+      <span id="active-server-url" class="server-badge" title="Active Server URL">https://a0.matmagoc.com</span>
       <span id="connection" class="conn" role="status" aria-live="polite">Offline</span>
       <a class="nav" id="open-settings" href="settings.html">Settings</a>
     </header>
@@ -94,6 +95,24 @@
         <p class="subtitle">Connect to your workspace server through the local bridge.</p>
         <p id="session-notice" class="notice" role="status" hidden></p>
         <form id="login-form" novalidate>
+          <label for="login-server-url">Server URL</label>
+          <div class="server-url-field">
+            <input
+              id="login-server-url"
+              name="server_url"
+              type="url"
+              list="server-profiles-list"
+              autocomplete="url"
+              spellcheck="false"
+              placeholder="https://a0.matmagoc.com"
+              required
+            />
+            <select id="server-profile-select" aria-label="Saved server profiles">
+              <option value="">Profiles&hellip;</option>
+            </select>
+          </div>
+          <datalist id="server-profiles-list"></datalist>
+
           <label for="login-username">Username</label>
           <input
             id="login-username"
@@ -133,7 +152,10 @@
         <nav id="contexts" class="contexts" aria-label="Conversations"></nav>
         <div class="chat-main">
           <div class="chat-toolbar">
-            <h1>Conversation</h1>
+            <div class="chat-title-group">
+              <h1>Conversation</h1>
+              <span id="chat-server-url" class="chat-server-badge">https://a0.matmagoc.com</span>
+            </div>
             <div class="actions">
               <button id="new-chat-btn" type="button">New chat</button>
               <button id="stop-btn" type="button" disabled>Stop</button>

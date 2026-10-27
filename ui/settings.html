@@ -197,6 +197,28 @@
       .path-item .remove-path-btn:hover {
         background: #ef444422;
       }
+      .path-item .select-profile-btn {
+        background: transparent;
+        border: 1px solid #22d3ee55;
+        color: #22d3ee;
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 0.75rem;
+      }
+      .path-item .select-profile-btn:hover {
+        background: #22d3ee22;
+      }
+      .path-item .active-badge {
+        background: #0284c733;
+        border: 1px solid #0284c7;
+        color: #38bdf8;
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
       .path-input-row {
         display: flex;
         gap: 8px;
@@ -292,6 +314,23 @@
               required
             />
             <div class="help-text">Upstream workspace server endpoint.</div>
+          </div>
+
+          <div class="form-group">
+            <label>Saved Server Profiles</label>
+            <div class="help-text" style="margin-bottom: 8px;">
+              Saved workspace instance endpoints. Click "Select" to make a profile active.
+            </div>
+            <ul class="path-list" id="server-profiles-list" aria-label="Saved Server Profiles"></ul>
+            <div class="path-input-row">
+              <input
+                type="url"
+                id="new-profile-input"
+                name="new_profile_input"
+                placeholder="e.g. https://custom-instance.example.com"
+              />
+              <button type="button" id="add-profile-btn">Add Profile</button>
+            </div>
           </div>
         </section>
 

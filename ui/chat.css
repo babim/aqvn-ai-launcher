@@ -372,3 +372,63 @@ button:disabled {
     animation: none;
   }
 }
+
+.server-badge {
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  border-radius: 6px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-url-field {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.server-url-field input {
+  flex: 1;
+}
+
+.server-url-field select {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  max-width: 150px;
+  cursor: pointer;
+}
+
+.server-url-field select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.chat-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-server-badge {
+  font-size: 0.75rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid #22d3ee44;
+  padding: 2px 8px;
+  border-radius: 6px;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

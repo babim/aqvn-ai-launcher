@@ -14,6 +14,7 @@ use tauri_plugin_store::StoreExt;
 use tokio::sync::watch;
 
 pub const DEFAULT_SERVER_URL: &str = "https://a0.matmagoc.com";
+pub const DEFAULT_SERVER_PROFILES: &[&str] = &[DEFAULT_SERVER_URL];
 pub const DEFAULT_RFC_ENABLED: bool = false;
 pub const DEFAULT_RFC_PORT: u16 = 55080;
 pub const DEFAULT_SSH_PORT: u16 = 55022;
@@ -24,6 +25,7 @@ pub const STORE_FILENAME: &str = "settings.json";
 #[serde(default)]
 pub struct AppConfig {
     pub server_url: String,
+    pub server_profiles: Vec<String>,
     pub rfc_enabled: bool,
     pub rfc_password: String,
     pub ssh_password: String,
@@ -36,6 +38,10 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             server_url: DEFAULT_SERVER_URL.to_string(),
+            server_profiles: DEFAULT_SERVER_PROFILES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             rfc_enabled: DEFAULT_RFC_ENABLED,
             rfc_password: String::new(),
             ssh_password: String::new(),
@@ -63,6 +69,17 @@ impl AppConfig {
             if let Some(s) = val.as_str() {
                 config.server_url = s.to_string();
             }
+        }
+        if let Some(val) = store.get("server_profiles") {
+            if let Some(arr) = val.as_array() {
+                config.server_profiles = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+            }
+        }
+        if config.server_profiles.is_empty() {
+            config.server_profiles = vec![config.server_url.clone()];
         }
         if let Some(val) = store.get("rfc_enabled") {
             if let Some(b) = val.as_bool() {
@@ -108,6 +125,7 @@ impl AppConfig {
             .map_err(|e| format!("Failed to open store {STORE_FILENAME}: {e}"))?;
 
         store.set("server_url", serde_json::json!(self.server_url));
+        store.set("server_profiles", serde_json::json!(self.server_profiles));
         store.set("rfc_enabled", serde_json::json!(self.rfc_enabled));
         store.set("rfc_password", serde_json::json!(self.rfc_password));
         store.set("ssh_password", serde_json::json!(self.ssh_password));

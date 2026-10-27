@@ -42,6 +42,8 @@
   var state = {
     base: '',
     csrf: '',
+    serverUrl: 'https://a0.matmagoc.com',
+    serverProfiles: ['https://a0.matmagoc.com'],
     socket: null,
     context: null,
     contexts: [],
@@ -736,10 +738,73 @@
     return true;
   }
 
+  function renderServerProfiles() {
+    if (dom.activeServerUrl) {
+      setText(dom.activeServerUrl, state.serverUrl);
+      dom.activeServerUrl.title = 'Active Server: ' + state.serverUrl;
+    }
+    if (dom.chatServerUrl) {
+      setText(dom.chatServerUrl, state.serverUrl);
+      dom.chatServerUrl.title = 'Active Server: ' + state.serverUrl;
+    }
+    if (dom.serverProfilesList) {
+      dom.serverProfilesList.innerHTML = '';
+      state.serverProfiles.forEach(function (url) {
+        var opt = document.createElement('option');
+        opt.value = url;
+        dom.serverProfilesList.appendChild(opt);
+      });
+    }
+    if (dom.serverProfileSelect) {
+      dom.serverProfileSelect.innerHTML = '<option value="">Profiles&hellip;</option>';
+      state.serverProfiles.forEach(function (url) {
+        var opt = document.createElement('option');
+        opt.value = url;
+        opt.textContent = url.replace(/^https?:\/\//, '');
+        if (url === state.serverUrl) {
+          opt.selected = true;
+        }
+        dom.serverProfileSelect.appendChild(opt);
+      });
+    }
+  }
+
+  async function setActiveServer(url) {
+    if (!url || !/^https?:\/\//i.test(url)) return;
+    state.serverUrl = url;
+    if (state.serverProfiles.indexOf(url) === -1) {
+      state.serverProfiles.push(url);
+    }
+    try {
+      if (window.bridge && typeof window.bridge.saveServerUrl === 'function') {
+        await window.bridge.saveServerUrl(url);
+      } else if (window.bridge && typeof window.bridge.getStore === 'function') {
+        var store = await window.bridge.getStore('settings.json');
+        await store.set('server_url', url);
+        await store.set('server_profiles', state.serverProfiles);
+        await store.save();
+      }
+    } catch (err) {}
+    try {
+      window.localStorage.setItem('aqvn_server_url', url);
+      window.localStorage.setItem('aqvn_server_profiles', JSON.stringify(state.serverProfiles));
+    } catch (err) {}
+    renderServerProfiles();
+  }
+
   async function onLogin(event) {
     event.preventDefault();
     setText(dom.loginError, '');
     dom.sessionNotice.hidden = true;
+
+    var serverUrl = dom.serverUrl ? dom.serverUrl.value.trim() : '';
+    if (serverUrl) {
+      if (!/^https?:\/\//i.test(serverUrl)) {
+        setText(dom.loginError, 'Server URL must start with http:// or https://');
+        return;
+      }
+      await setActiveServer(serverUrl);
+    }
 
     var username = dom.username.value.trim();
     var password = dom.password.value;
@@ -810,6 +875,11 @@
     dom.loginView = byId('login-view');
     dom.chatView = byId('chat-view');
     dom.loginForm = byId('login-form');
+    dom.serverUrl = byId('login-server-url');
+    dom.serverProfileSelect = byId('server-profile-select');
+    dom.serverProfilesList = byId('server-profiles-list');
+    dom.activeServerUrl = byId('active-server-url');
+    dom.chatServerUrl = byId('chat-server-url');
     dom.username = byId('login-username');
     dom.password = byId('login-password');
     dom.loginSubmit = byId('login-submit');
@@ -834,6 +904,38 @@
     } catch (err) {
       dom.username.value = '';
     }
+
+    if (dom.serverUrl) {
+      dom.serverUrl.addEventListener('change', function () {
+        setActiveServer(dom.serverUrl.value.trim());
+      });
+    }
+    if (dom.serverProfileSelect) {
+      dom.serverProfileSelect.addEventListener('change', function () {
+        if (this.value) {
+          if (dom.serverUrl) dom.serverUrl.value = this.value;
+          setActiveServer(this.value);
+        }
+      });
+    }
+
+    async function loadServerConfig() {
+      try {
+        if (window.bridge && typeof window.bridge.getServerProfiles === 'function') {
+          state.serverProfiles = await window.bridge.getServerProfiles();
+          state.serverUrl = await window.bridge.getServerUrl();
+        } else if (window.bridge && typeof window.bridge.getStore === 'function') {
+          var store = await window.bridge.getStore('settings.json');
+          var u = await store.get('server_url');
+          if (u) state.serverUrl = u;
+          var p = await store.get('server_profiles');
+          if (Array.isArray(p) && p.length > 0) state.serverProfiles = p;
+        }
+      } catch (err) {}
+      if (dom.serverUrl) dom.serverUrl.value = state.serverUrl;
+      renderServerProfiles();
+    }
+    loadServerConfig();
 
     dom.loginForm.addEventListener('submit', onLogin);
     dom.composer.addEventListener('submit', sendMessage);

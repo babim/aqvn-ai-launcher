@@ -5,8 +5,10 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "shell:default",
-    "notification:default",
+    "shell:allow-open",
+    "notification:allow-notify",
+    "notification:allow-request-permission",
+    "notification:allow-is-permission-granted",
     "store:default"
   ]
 }

@@ -103,7 +103,7 @@ pub async fn serve(listener: TcpListener, state: ProxyState) -> std::io::Result<
 /// Script injected into the webview before any page script runs.
 pub fn init_script(port: u16) -> String {
     format!(
-        "window.__AQVN_PROXY__ = Object.freeze({{ url: \"http://127.0.0.1:{port}\", port: {port} }});"
+        "window.__AQVN_PROXY__ = Object.freeze({{ url: \"http://127.0.0.1:{port}\", port: {port} }}); window.__AQVN_WINDOW_SHOWN__ = performance.now();"
     )
 }
 
@@ -137,6 +137,7 @@ pub fn router(state: ProxyState) -> Router {
     Router::new()
         .route("/health", any(handle_health))
         .route("/proxy/csrf", any(handle_proxy_csrf))
+        .route("/benchmark/fcp", any(handle_benchmark_fcp))
         .route(LOGIN_PATH, any(handle_login))
         .route("/api/{*rest}", any(handle_api))
         .route("/socket.io/", any(handle_socket_io))
@@ -159,6 +160,33 @@ async fn handle_health(State(state): State<ProxyState>, headers: HeaderMap) -> R
     let upstream = state.upstream().await;
     with_cors(
         Json(json!({ "ok": true, "target": upstream.target().origin() })).into_response(),
+        origin.as_deref(),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct FcpPayload {
+    fcp_ms: f64,
+    method: String,
+}
+
+async fn handle_benchmark_fcp(
+    headers: HeaderMap,
+    body: Result<Json<FcpPayload>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref()) {
+        return with_cors(response, origin.as_deref());
+    }
+    if let Ok(Json(payload)) = body {
+        let doc = json!({
+            "fcp_ms": payload.fcp_ms,
+            "method": payload.method,
+        });
+        let _ = std::fs::write("/tmp/aqvn-benchmark-fcp.json", doc.to_string());
+    }
+    with_cors(
+        Json(json!({ "ok": true })).into_response(),
         origin.as_deref(),
     )
 }

@@ -69,7 +69,6 @@ fn release_profile_is_size_optimized() {
         "[profile.release]",
         "codegen-units = 1",
         "lto = true",
-        "opt-level = \"s\"",
         "panic = \"abort\"",
         "strip = true",
     ] {
@@ -78,4 +77,8 @@ fn release_profile_is_size_optimized() {
             "missing release profile setting: {needle}"
         );
     }
+    assert!(
+        cargo.contains("opt-level = \"s\"") || cargo.contains("opt-level = \"z\""),
+        "missing release profile setting: opt-level = 's' or 'z'"
+    );
 }

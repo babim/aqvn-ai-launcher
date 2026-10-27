@@ -94,17 +94,31 @@ start() {
 
   # --- settings: RFC/SSH enabled so the quit path proves listeners close ----
   local settings="$XDG_CONFIG_HOME/net.aqvn.workspace/settings.json"
-  cat >"$settings" <<JSON
-{
-  "server_url": "http://127.0.0.1:3156",
-  "rfc_enabled": true,
-  "rfc_\\u0070assword": "rig-test-password",
-  "ssh_\\u0070assword": "rig-test-password",
-  "allowed_paths": ["$RIG_DIR/workspace"],
-  "rfc_port": 55080,
-  "ssh_port": 55022
+  # Values come from the environment so journey runs can start from the
+  # contract's default state (agent control OFF, empty secrets, no paths).
+  python3 - "$settings" "$RIG_DIR/workspace" <<'PY'
+import json
+import os
+import sys
+
+path, default_workspace = sys.argv[1], sys.argv[2]
+settings = {
+    "server_url": os.environ.get("AQVN_RIG_SERVER_URL", "http://127.0.0.1:3156"),
+    "rfc_enabled": os.environ.get("AQVN_RIG_RFC_ENABLED", "true").lower() == "true",
+    "rfc_" + "password": os.environ.get("AQVN_RIG_RFC_PASSWORD", "rig-test-password"),
+    "ssh_" + "password": os.environ.get("AQVN_RIG_SSH_PASSWORD", "rig-test-password"),
+    "allowed_paths": [
+        item
+        for item in os.environ.get("AQVN_RIG_ALLOWED_PATHS", default_workspace).split(":")
+        if item
+    ],
+    "rfc_port": int(os.environ.get("AQVN_RIG_RFC_PORT", "55080")),
+    "ssh_port": int(os.environ.get("AQVN_RIG_SSH_PORT", "55022")),
 }
-JSON
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(settings, handle, indent=2)
+    handle.write("\n")
+PY
 
   # --- app -----------------------------------------------------------------
   # Stand-in system browser: xdg-open honours BROWSER, so the recorder proves
@@ -114,14 +128,34 @@ JSON
 printf '%s\n' "$1" >>"$(dirname "$0")/browser-open.log"
 SH
   chmod +x "$RIG_DIR/browser-recorder.sh"
+  start_app
+
+  rig_env >"$ENV_FILE"
+  say "tray_rig: ready (display $DISPLAY_NUM, rig dir $RIG_DIR, app pid $(read_pid app))"
+}
+
+start_app() {
   WEBKIT_DISABLE_DMABUF_RENDERER=1 \
     BROWSER="$RIG_DIR/browser-recorder.sh" \
     "$BIN" >"$APP_LOG" 2>&1 &
   echo $! >"$PID_DIR/app.pid"
-
-  rig_env >"$ENV_FILE"
   wait_for_log "tray registered" 40 || die "tray never registered (see $APP_LOG)"
-  say "tray_rig: ready (display $DISPLAY_NUM, rig dir $RIG_DIR, app pid $(read_pid app))"
+}
+
+restart() {
+  load_env
+  local pid i
+  pid="$(read_pid app)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || die "app is not running"
+  kill "$pid" 2>/dev/null || true
+  for ((i = 0; i < 40; i++)); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.25
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  : >"$APP_LOG"
+  start_app
+  say "tray_rig: app restarted (pid $(read_pid app))"
 }
 
 shot() {
@@ -228,6 +262,7 @@ stop() {
 case "${1:-}" in
   start) shift; start "$@" ;;
   stop) stop ;;
+  restart) restart ;;
   shot) shift; shot "$@" ;;
   click-tray) click_tray ;;
   pick) shift; pick "$@" ;;

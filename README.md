@@ -13,6 +13,15 @@ AQVN Workspace combines two unified components into a single native binary:
 
 ---
 
+## Multi-Server Support
+
+- **Login screen**: the Server URL field is editable — prefilled from saved settings, accepts any workspace server URL.
+- **Saved profiles**: add, remove, and select server profiles in Settings; selections sync with the login screen, and the active server is shown as a badge in the topbar.
+- **Live retarget**: changing `server_url` retargets the loopback bridge proxy within ~500 ms (session cookie jar reset), with no app restart required.
+- **Deployment**: a single client install serves many users — each enters their own server link.
+
+---
+
 ## Architecture & Security Model
 
 The system is designed with defense-in-depth principles:

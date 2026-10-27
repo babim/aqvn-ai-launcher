@@ -2,11 +2,11 @@
 # tools/benchmark.sh
 #
 # Measures all five performance gates on the Linux release binary under Xvfb:
-#   (1) Binary size:       < 8,388,608 bytes (8 MB)
-#   (2) Main process RSS:  < 35,840 KB (35 MB), excluding WebKit child processes
-#   (3) Total family RSS:  < 256,000 KB (250 MB), sum of app + WebKit child processes
-#   (4) FCP:               < 100 ms after window shown (JS Performance API / first layout fallback)
-#   (5) Cold start:        < 1.50 s from binary launch to window mapped under Xvfb
+#   (1) Binary size:              < 8,388,608 bytes (8 MB)
+#   (2) Main process PrivDirty:   < 40,960 KB (40 MB), Private_Dirty from smaps_rollup (ruling R14)
+#   (3) Total family PrivDirty:   < 204,800 KB (200 MB), sum of app + WebKit child processes (ruling R14)
+#   (4) FCP:                      < 100 ms after window shown (JS Performance API / first layout fallback)
+#   (5) Cold start:               < 1.50 s from binary launch to window mapped under Xvfb
 #
 # Prints PASS/FAIL table, exits non-zero on any gate failure, and kills all spawned PIDs.
 
@@ -18,10 +18,29 @@ FCP_LOG="/tmp/aqvn-benchmark-fcp.json"
 
 # Gate thresholds
 MAX_BINARY_BYTES=8388608
-MAX_MAIN_RSS_KB=35840
-MAX_TOTAL_RSS_KB=256000
+MAX_MAIN_DIRTY_KB=40960
+MAX_TOTAL_DIRTY_KB=204800
 MAX_FCP_MS=100.0
 MAX_COLD_START_SEC=1.50
+
+# Memory measurement helpers (ruling R14: Private_Dirty from smaps_rollup)
+get_private_dirty_kb() {
+  local pid="$1"
+  local dirty=0
+  if [ -r "/proc/$pid/smaps_rollup" ]; then
+    dirty=$(awk '/^Private_Dirty:/ {print $2}' "/proc/$pid/smaps_rollup" 2>/dev/null || echo 0)
+  elif [ -r "/proc/$pid/smaps" ]; then
+    dirty=$(awk '/^Private_Dirty:/ {sum += $2} END {print sum}' "/proc/$pid/smaps" 2>/dev/null || echo 0)
+  fi
+  echo "${dirty:-0}"
+}
+
+get_rss_kb() {
+  local pid="$1"
+  local rss
+  rss=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ' || echo 0)
+  echo "${rss:-0}"
+}
 
 # Tracking spawned PIDs for guaranteed cleanup
 SPAWNED_PIDS=()
@@ -180,22 +199,29 @@ FCP_PASS=$(python3 -c "print('PASS' if float('$FCP_MS') < $MAX_FCP_MS else 'FAIL
 GATE4_STATUS="$FCP_PASS"
 
 # -------------------------------------------------------------------
-# Gate 2: Main Process RSS (Exclude WebKit processes)
+# Gate 2: Main Process Private_Dirty (Exclude WebKit processes)
 # -------------------------------------------------------------------
-MAIN_RSS_KB=$(ps -o rss= -p "$APP_PID" 2>/dev/null | tr -d ' ' || echo "0")
+MAIN_COMM=$(cat "/proc/$APP_PID/comm" 2>/dev/null || echo "aqvn-workspace")
+MAIN_DIRTY_KB=$(get_private_dirty_kb "$APP_PID")
+if [ -z "$MAIN_DIRTY_KB" ] || [ "$MAIN_DIRTY_KB" -eq 0 ]; then
+  MAIN_DIRTY_KB=0
+fi
+MAIN_DIRTY_MB=$(python3 -c "print(f'{int($MAIN_DIRTY_KB) / 1024:.2f}')")
+
+MAIN_RSS_KB=$(get_rss_kb "$APP_PID")
 if [ -z "$MAIN_RSS_KB" ] || [ "$MAIN_RSS_KB" -eq 0 ]; then
   MAIN_RSS_KB=0
 fi
 MAIN_RSS_MB=$(python3 -c "print(f'{int($MAIN_RSS_KB) / 1024:.2f}')")
 
-if [ "$MAIN_RSS_KB" -lt "$MAX_MAIN_RSS_KB" ] && [ "$MAIN_RSS_KB" -gt 0 ]; then
+if [ "$MAIN_DIRTY_KB" -lt "$MAX_MAIN_DIRTY_KB" ] && [ "$MAIN_DIRTY_KB" -gt 0 ]; then
   GATE2_STATUS="PASS"
 else
   GATE2_STATUS="FAIL"
 fi
 
 # -------------------------------------------------------------------
-# Gate 3: Total Family RSS (Main + WebKitWebProcess + WebKitNetworkProcess)
+# Gate 3: Total Family Private_Dirty (Main + WebKitWebProcess + WebKitNetworkProcess)
 # -------------------------------------------------------------------
 # Gather all descendant PIDs
 ALL_FAMILY_PIDS=("$APP_PID")
@@ -208,16 +234,22 @@ for c in $CHILDREN; do
   done
 done
 
+TOTAL_DIRTY_KB=0
 TOTAL_RSS_KB=0
 for p in "${ALL_FAMILY_PIDS[@]}"; do
-  R=$(ps -o rss= -p "$p" 2>/dev/null | tr -d ' ' || true)
-  if [ -n "$R" ] && [ "$R" -gt 0 ]; then
-    TOTAL_RSS_KB=$((TOTAL_RSS_KB + R))
+  d=$(get_private_dirty_kb "$p")
+  r=$(get_rss_kb "$p")
+  if [ -n "$d" ] && [ "$d" -gt 0 ]; then
+    TOTAL_DIRTY_KB=$((TOTAL_DIRTY_KB + d))
+  fi
+  if [ -n "$r" ] && [ "$r" -gt 0 ]; then
+    TOTAL_RSS_KB=$((TOTAL_RSS_KB + r))
   fi
 done
+TOTAL_DIRTY_MB=$(python3 -c "print(f'{$TOTAL_DIRTY_KB / 1024:.2f}')")
 TOTAL_RSS_MB=$(python3 -c "print(f'{$TOTAL_RSS_KB / 1024:.2f}')")
 
-if [ "$TOTAL_RSS_KB" -lt "$MAX_TOTAL_RSS_KB" ] && [ "$TOTAL_RSS_KB" -gt 0 ]; then
+if [ "$TOTAL_DIRTY_KB" -lt "$MAX_TOTAL_DIRTY_KB" ] && [ "$TOTAL_DIRTY_KB" -gt 0 ]; then
   GATE3_STATUS="PASS"
 else
   GATE3_STATUS="FAIL"
@@ -226,20 +258,27 @@ fi
 # -------------------------------------------------------------------
 # Summary Table
 # -------------------------------------------------------------------
-echo "-----------------------------------------------------------------"
-printf "%-24s | %-16s | %-14s | %s\n" "Gate" "Measured" "Threshold" "Result"
-echo "-----------------------------------------------------------------"
-printf "%-24s | %-16s | %-14s | %s\n" "1. Binary Size" "$BINARY_BYTES B ($BINARY_MB MB)" "< 8,388,608 B" "[$GATE1_STATUS]"
-printf "%-24s | %-16s | %-14s | %s\n" "2. Main Process RSS" "$MAIN_RSS_KB KB ($MAIN_RSS_MB MB)" "< 35,840 KB" "[$GATE2_STATUS]"
-printf "%-24s | %-16s | %-14s | %s\n" "3. Total Family RSS" "$TOTAL_RSS_KB KB ($TOTAL_RSS_MB MB)" "< 256,000 KB" "[$GATE3_STATUS]"
-printf "%-24s | %-16s | %-14s | %s\n" "4. FCP (${FCP_METHOD})" "${FCP_MS} ms" "< 100.0 ms" "[$GATE4_STATUS]"
-printf "%-24s | %-16s | %-14s | %s\n" "5. Cold Start" "${COLD_START_SEC} s" "< 1.50 s" "[$GATE5_STATUS]"
-echo "-----------------------------------------------------------------"
+echo "---------------------------------------------------------------------------------"
+printf "%-26s | %-24s | %-14s | %s\n" "Gate" "Measured" "Threshold" "Result"
+echo "---------------------------------------------------------------------------------"
+printf "%-26s | %-24s | %-14s | %s\n" "1. Binary Size" "$BINARY_BYTES B ($BINARY_MB MB)" "< 8,388,608 B" "[$GATE1_STATUS]"
+printf "%-26s | %-24s | %-14s | %s\n" "2. Main Private_Dirty" "$MAIN_DIRTY_KB KB ($MAIN_DIRTY_MB MB)" "< 40,960 KB" "[$GATE2_STATUS]"
+printf "%-26s | %-24s | %-14s | %s\n" "3. Total Family PrivDirty" "$TOTAL_DIRTY_KB KB ($TOTAL_DIRTY_MB MB)" "< 204,800 KB" "[$GATE3_STATUS]"
+printf "%-26s | %-24s | %-14s | %s\n" "4. FCP (${FCP_METHOD})" "${FCP_MS} ms" "< 100.0 ms" "[$GATE4_STATUS]"
+printf "%-26s | %-24s | %-14s | %s\n" "5. Cold Start" "${COLD_START_SEC} s" "< 1.50 s" "[$GATE5_STATUS]"
+echo "---------------------------------------------------------------------------------"
 echo "Measurement notes:"
 echo "  - Cold start: $COLD_START_SEC s (loadavg: $HOST_LOAD, window: $WINDOW_ID)"
 echo "  - FCP measurement method: $FCP_METHOD"
-echo "  - Main PID $APP_PID RSS: $MAIN_RSS_KB KB"
+echo "  - Main PID $APP_PID ($MAIN_COMM): Private_Dirty: $MAIN_DIRTY_KB KB ($MAIN_DIRTY_MB MB), RSS: $MAIN_RSS_KB KB ($MAIN_RSS_MB MB)"
+echo "  - Total Family: Private_Dirty: $TOTAL_DIRTY_KB KB ($TOTAL_DIRTY_MB MB), RSS: $TOTAL_RSS_KB KB ($TOTAL_RSS_MB MB)"
 echo "  - Family PIDs: ${ALL_FAMILY_PIDS[*]}"
+for p in "${ALL_FAMILY_PIDS[@]}"; do
+  pcomm=$(cat "/proc/$p/comm" 2>/dev/null || echo "unknown")
+  p_dirty=$(get_private_dirty_kb "$p")
+  p_rss=$(get_rss_kb "$p")
+  echo "    PID $p ($pcomm): Private_Dirty=${p_dirty} KB, RSS=${p_rss} KB"
+done
 echo ""
 
 OVERALL_PASS=true

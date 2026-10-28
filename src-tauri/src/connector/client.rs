@@ -351,7 +351,9 @@ impl GatewayClient {
                                 }
                                 Message::Pong(_) => {}
                                 Message::Text(text) => {
-                                    if let Some(reply) = handlers::dispatch_message(&text).await {
+                                    if let Some(reply) =
+                                        handlers::dispatch_message_streaming(&text, Some(&tx_out)).await
+                                    {
                                         let _ = tx_out.send(Message::Text(reply.into())).await;
                                     }
                                 }

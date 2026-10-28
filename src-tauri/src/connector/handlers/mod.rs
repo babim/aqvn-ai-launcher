@@ -3,14 +3,18 @@
 //! Subordinate modules implement `connector_file_op`, `connector_exec_op`,
 //! `connector_browser_op`, and `connector_computer_use_op`.
 
+pub mod exec;
 pub mod files;
 
-use crate::connector::protocol::MSG_TYPE_FILE_OP;
+use crate::connector::protocol::{MSG_TYPE_EXEC_OP, MSG_TYPE_FILE_OP};
 use serde_json::Value;
 
-/// Dispatches an incoming JSON message to the appropriate handler.
-/// Returns an optional reply JSON string to send back upstream.
-pub async fn dispatch_message(text: &str) -> Option<String> {
+/// Dispatches an incoming JSON message with an optional streaming sender.
+/// Returns an optional final reply JSON string to send back upstream.
+pub async fn dispatch_message_streaming(
+    text: &str,
+    sender: Option<&tokio::sync::mpsc::Sender<tokio_tungstenite::tungstenite::Message>>,
+) -> Option<String> {
     let Ok(envelope) = serde_json::from_str::<Value>(text) else {
         return None;
     };
@@ -34,6 +38,15 @@ pub async fn dispatch_message(text: &str) -> Option<String> {
             .to_string(),
         ),
         MSG_TYPE_FILE_OP | "file_op" => Some(files::handle_file_op(&envelope).await),
+        MSG_TYPE_EXEC_OP | "exec_op" => {
+            Some(exec::handle_exec_op_with_sender(&envelope, sender).await)
+        }
         _ => None,
     }
+}
+
+/// Dispatches an incoming JSON message to the appropriate handler.
+/// Returns an optional reply JSON string to send back upstream.
+pub async fn dispatch_message(text: &str) -> Option<String> {
+    dispatch_message_streaming(text, None).await
 }

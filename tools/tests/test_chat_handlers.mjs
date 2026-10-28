@@ -36,6 +36,15 @@ function createElementMock(id) {
     children: [],
     options: [],
     childElementCount: 0,
+    get firstChild() {
+      return element.children[0] || null;
+    },
+    get lastChild() {
+      return element.children[element.children.length - 1] || null;
+    },
+    append: (...nodes) => {
+      nodes.forEach((node) => element.appendChild(node));
+    },
     focus: () => {},
     appendChild: (child) => {
       element.children.push(child);
@@ -93,7 +102,9 @@ __harness__.exports = (function () {
     'sessionExpired', 'state', 'dom', 'showChatError', 'init', 'initLayout',
     'toggleSidebar', 'toggleCanvas', 'handleShortcut', 'applySidebarWidth',
     'applyCanvasWidth', 'setSidebarCollapsed', 'setCanvasCollapsed',
-    'renderContent', 'copyCode'
+    'renderContent', 'copyCode', 'applyProgress', 'notifyComplete',
+    'setConnection', 'sendMessage', 'queueOutbox', 'readOutbox',
+    'flushOutbox'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -889,5 +900,154 @@ describe('ui/chat.js Focus Mode and hotkeys', () => {
       /\.focus-mode\s+#chat-pane[^{]*\{[^}]*max-width:\s*840px/i,
       '.focus-mode must center #chat-pane with max-width: 840px'
     );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-CONN-001..003: notification, LED states, offline outbox        */
+/* ------------------------------------------------------------------ */
+
+function tauriRecorder(harness) {
+  const calls = [];
+  harness.context.window.__TAURI_INTERNALS__ = {
+    invoke: (command, args) => {
+      calls.push({ command, args });
+      return Promise.resolve();
+    }
+  };
+  return calls;
+}
+
+function flushPromises() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+describe('ui/chat.js notifications, connection LED and offline outbox', () => {
+  test('VAL-CONN-001: notify_task_complete fires only when the task ends while hidden', () => {
+    const harness = createHarness();
+    const calls = tauriRecorder(harness);
+    const { applyProgress } = harness.exports;
+    const notes = () => calls.filter((c) => c.command === 'notify_task_complete');
+
+    harness.document.hidden = false;
+    applyProgress(true, 'working');
+    applyProgress(false, 'done');
+    assert.equal(notes().length, 0, 'visible window must not raise a notification');
+
+    harness.document.hidden = true;
+    applyProgress(true, 'working again');
+    applyProgress(false, 'all done');
+    assert.equal(notes().length, 1, 'hidden window must raise exactly one notification');
+    assert.equal(notes()[0].args.title, 'Task complete');
+    assert.match(notes()[0].args.body, /all done/);
+  });
+
+  test('VAL-CONN-002: #connection-pill renders 🟢 Online, 🟡 Polling and 🔴 Offline', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { setConnection } = harness.exports;
+    const pill = harness.getEl('connection-pill');
+
+    setConnection('online');
+    assert.equal(pill.textContent, '🟢 Online');
+    assert.equal(pill.dataset.state, 'online');
+
+    setConnection('polling');
+    assert.equal(pill.textContent, '🟡 Polling');
+    assert.equal(pill.dataset.state, 'polling');
+
+    setConnection('offline');
+    assert.equal(pill.textContent, '🔴 Offline');
+    assert.equal(pill.dataset.state, 'offline');
+  });
+
+  test('VAL-CONN-002: socket connect and polling fallback drive the LED states', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { connectSocket, startPolling, stopPolling } = harness.exports;
+    const pill = harness.getEl('connection-pill');
+
+    connectSocket();
+    harness.listeners.connect();
+    assert.equal(pill.dataset.state, 'online', 'socket connect must show online');
+    assert.equal(pill.textContent, '🟢 Online');
+
+    stopPolling();
+    startPolling();
+    assert.equal(pill.dataset.state, 'polling', 'poll fallback must show polling');
+    assert.equal(pill.textContent, '🟡 Polling');
+    stopPolling();
+  });
+
+  test('VAL-CONN-002: index.html exposes #connection-pill and CSS styles all three states', () => {
+    const html = readIndexHtml();
+    assert.match(html, /id="connection-pill"/, 'index.html must expose #connection-pill');
+
+    const css = readChatCss();
+    assert.match(css, /\.conn\[data-state="online"\]/, 'CSS must style the online state');
+    assert.match(css, /\.conn\[data-state="polling"\]/, 'CSS must style the polling state');
+    assert.match(css, /\.conn\[data-state="offline"\]/, 'CSS must style the offline state');
+  });
+
+  test('VAL-CONN-003: sending while offline queues into localStorage aqvn_outbox', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { state, sendMessage, dom } = harness.exports;
+    state.online = false;
+    state.polling = false;
+
+    dom.input.value = 'queued hello';
+    await sendMessage({ preventDefault: () => {} });
+
+    const raw = harness.store['aqvn_outbox'];
+    assert.ok(raw, 'offline message must be persisted in aqvn_outbox');
+    const queued = JSON.parse(raw);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].text, 'queued hello');
+
+    const id = queued[0].message_id;
+    assert.ok(id, 'queued message must keep its message_id');
+    const record = state.logs.get(id);
+    assert.ok(record, 'queued message must render optimistically');
+    assert.equal(record.queued, true);
+
+    const row = state.rows.get(id);
+    assert.match(row.className, /msg-queued/, 'row must carry the offline indicator class');
+    assert.match(row.firstChild.textContent, /queued/i, 'header must label the offline queue');
+  });
+
+  test('VAL-CONN-003: socket connect flushes the outbox and clears storage', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { connectSocket } = harness.exports;
+    harness.store['aqvn_outbox'] = JSON.stringify([
+      { text: 'later', context: 'ctx-1', message_id: 'm-1', queued_at: 1 }
+    ]);
+
+    const sent = [];
+    harness.context.fetch = async (url, options) => {
+      if (String(url).includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ token: 't' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      sent.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    connectSocket();
+    harness.listeners.connect();
+    await flushPromises();
+    await flushPromises();
+
+    assert.equal(sent.length, 1, 'queued message must be sent on connect');
+    assert.equal(sent[0].text, 'later');
+    assert.equal(sent[0].context, 'ctx-1');
+    assert.equal(sent[0].message_id, 'm-1');
+    assert.equal(harness.store['aqvn_outbox'], undefined, 'outbox must clear after flush');
   });
 });

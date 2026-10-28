@@ -80,8 +80,17 @@ body {
   color: var(--ok);
 }
 
+.conn[data-state="polling"] {
+  color: #fbbf24;
+}
+
 .conn[data-state="offline"] {
   color: var(--muted);
+}
+
+.msg-queued {
+  opacity: 0.75;
+  border-left: 2px dashed #fbbf24;
 }
 
 .nav {

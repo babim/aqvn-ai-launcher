@@ -433,10 +433,13 @@
       return;
     }
     var type = record.type || 'info';
-    row.className = 'msg msg-' + type;
+    row.className = 'msg msg-' + type + (record.queued ? ' msg-queued' : '');
     var label = TYPE_LABELS[type] || type;
     if (type === 'code_exe' || type === 'tool') {
       label = '$ EXECUTE';
+    }
+    if (record.queued) {
+      label += ' · queued (offline)';
     }
     setText(row.firstChild, label);
     renderContent(row.lastChild, record.content || '', record.thought === true ? 'thought' : type);
@@ -521,7 +524,7 @@
 
     if (state.active !== wasActive) {
       invokeIpc('set_tray_busy', { busy: state.active });
-      if (wasActive && !state.active) {
+      if (wasActive && !state.active && document.hidden === true) {
         notifyComplete();
       }
     }
@@ -539,6 +542,96 @@
       body = 'The assistant finished responding.';
     }
     invokeIpc('notify_task_complete', { title: 'Task complete', body: body });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Offline outbox                                                     */
+  /* ------------------------------------------------------------------ */
+
+  var OUTBOX_KEY = 'aqvn_outbox';
+
+  function readOutbox() {
+    try {
+      var raw = window.localStorage.getItem(OUTBOX_KEY);
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function writeOutbox(list) {
+    try {
+      if (list && list.length) {
+        window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(list));
+      } else {
+        window.localStorage.removeItem(OUTBOX_KEY);
+      }
+    } catch (err) {
+      /* storage may be unavailable; the message stays in RAM */
+    }
+  }
+
+  function queueOutbox(text, messageId) {
+    var list = readOutbox();
+    list.push({
+      text: text,
+      context: state.context || '',
+      message_id: messageId || uuid(),
+      queued_at: Date.now()
+    });
+    writeOutbox(list);
+  }
+
+  function markQueuedSent(messageId) {
+    var record = messageId ? state.logs.get(messageId) : null;
+    if (record) {
+      record.queued = false;
+      paintRow(messageId);
+    }
+  }
+
+  /* Replay queued messages in order once a transport is available. A failed
+   * send keeps that message and everything after it in storage for the next
+   * connect, so nothing is silently dropped. */
+  function flushOutbox() {
+    if (!state.online && !state.polling) {
+      return Promise.resolve(0);
+    }
+    var list = readOutbox();
+    var sent = 0;
+
+    function next(index) {
+      if (index >= list.length) {
+        writeOutbox([]);
+        return Promise.resolve(sent);
+      }
+      var item = list[index];
+      var text = item && typeof item.text === 'string' ? item.text : '';
+      if (!text) {
+        return next(index + 1);
+      }
+      return apiCall('message_async', {
+        text: text,
+        context: item.context || state.context || '',
+        message_id: item.message_id || uuid()
+      }).then(
+        function (result) {
+          sent += 1;
+          markQueuedSent(item.message_id);
+          if (result && result.context && result.context !== state.context) {
+            state.context = result.context;
+          }
+          return next(index + 1);
+        },
+        function () {
+          writeOutbox(list.slice(index));
+          return sent;
+        }
+      );
+    }
+
+    return next(0);
   }
 
   function renderContexts() {
@@ -564,9 +657,21 @@
     });
   }
 
-  function setConnection(label, tone) {
-    setText(dom.connection, label);
-    dom.connection.dataset.state = tone || 'offline';
+  /* Three-state LED: green online, amber polling fallback, red offline. */
+  var CONNECTION_STATES = {
+    online: { icon: '\u{1F7E2}', label: 'Online' },
+    polling: { icon: '\u{1F7E1}', label: 'Polling' },
+    offline: { icon: '\u{1F534}', label: 'Offline' }
+  };
+
+  function setConnection(mode) {
+    var key = CONNECTION_STATES[mode] ? mode : 'offline';
+    var info = CONNECTION_STATES[key];
+    setText(dom.connection, info.icon + ' ' + info.label);
+    if (dom.connection) {
+      dom.connection.dataset.state = key;
+      dom.connection.setAttribute('aria-label', 'Connection: ' + info.label);
+    }
   }
 
   function showChatError(message) {
@@ -621,7 +726,7 @@
       state.socket = null;
     }
     state.online = false;
-    setConnection('Offline', 'offline');
+    setConnection('offline');
   }
 
   function connectSocket() {
@@ -656,14 +761,15 @@
     socket.on('connect', function () {
       state.everConnected = true;
       state.online = true;
-      setConnection('Connected', 'online');
+      setConnection('online');
       showChatError('');
       requestState();
+      flushOutbox();
     });
 
     socket.on('disconnect', function (reason) {
       state.online = false;
-      setConnection('Reconnecting…', 'offline');
+      setConnection('offline');
       applyProgress(false, '');
       /* socket.io does not auto-retry a server-initiated disconnect; recover
        * without a page reload (real servers emit one on restart). */
@@ -684,7 +790,7 @@
         sessionExpired();
         return;
       }
-      setConnection('Offline', 'offline');
+      setConnection('offline');
       if (!state.expired) {
         showChatError('Connection problem: ' + message);
       }
@@ -795,7 +901,7 @@
       return;
     }
     state.polling = true;
-    setConnection('Polling', 'online');
+    setConnection('polling');
     var tick = function () {
       if (!state.polling || state.expired) {
         return;
@@ -1104,6 +1210,7 @@
       return;
     }
 
+    var offline = !state.online && !state.polling;
     var messageId = uuid();
     upsertLog({
       id: messageId,
@@ -1112,11 +1219,18 @@
       content: text,
       kvps: {},
       timestamp: Date.now() / 1000,
-      no: Number.MAX_SAFE_INTEGER
+      no: Number.MAX_SAFE_INTEGER,
+      queued: offline
     });
     scrollToBottom();
     dom.input.value = '';
     dom.input.focus();
+
+    if (offline) {
+      queueOutbox(text, messageId);
+      showChatError('Offline - message queued; it will send when the connection returns.');
+      return;
+    }
 
     try {
       var result = await apiCall('message_async', {
@@ -1129,6 +1243,16 @@
         requestState();
       }
     } catch (err) {
+      if (!state.online && !state.polling) {
+        var record = state.logs.get(messageId);
+        if (record) {
+          record.queued = true;
+          paintRow(messageId);
+        }
+        queueOutbox(text, messageId);
+        showChatError('Offline - message queued; it will send when the connection returns.');
+        return;
+      }
       showChatError(err.message);
     }
   }
@@ -1333,7 +1457,7 @@
     dom.send = byId('send-btn');
     dom.stop = byId('stop-btn');
     dom.newChat = byId('new-chat-btn');
-    dom.connection = byId('connection');
+    dom.connection = byId('connection-pill') || byId('connection');
 
     if (dom.messages) {
       dom.messages.addEventListener('click', onMessagesClick);
@@ -1403,7 +1527,7 @@
       }
     });
 
-    setConnection('Offline', 'offline');
+    setConnection('offline');
     applyProgress(false, '');
     showLogin();
   }

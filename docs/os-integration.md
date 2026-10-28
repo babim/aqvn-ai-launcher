@@ -51,7 +51,9 @@ visibility transitions work. See `tools/tray_rig.sh`.
 `tauri-plugin-notification` (pure-Rust D-Bus backend, no system packages) sends
 a native notification when a chat response finishes: the UI invokes
 `notify_task_complete` on the `log_progress_active: true → false` transition,
-with the last progress/result text as the body.
+with the last progress/result text as the body. The notification only fires
+while the window is hidden (`document.hidden === true`); a visible window shows
+the result in place.
 
 Runtime requirement: a session D-Bus daemon plus an
 `org.freedesktop.Notifications` service (any desktop notification daemon). The
@@ -59,6 +61,21 @@ headless rig starts `dunst` for exactly this purpose and captures the
 `Notify` call with `dbus-monitor`. If no notification daemon is available the
 Rust log records the failed send and the permission state; that log is the
 fallback evidence path.
+
+## Connection LED and offline outbox
+
+`#connection-pill` in the topbar shows one of three states:
+
+| State | Pill | Meaning |
+|---|---|---|
+| `online` | 🟢 Online | Socket.IO connected |
+| `polling` | 🟡 Polling | Socket handlers unavailable; `/api/poll` fallback active |
+| `offline` | 🔴 Offline | No transport |
+
+Messages sent with no transport are kept in `localStorage['aqvn_outbox']` and
+rendered optimistically with a queued marker. The socket `connect` handler
+replays the queue in order; a failed replay keeps the remaining messages in
+storage for the next connect.
 
 ## External links
 

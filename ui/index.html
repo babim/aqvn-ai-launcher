@@ -87,7 +87,14 @@
     <header class="topbar">
       <a class="brand" href="index.html">AQVN Workspace</a>
       <span id="active-server-url" class="server-badge" title="Active Server URL">https://a0.matmagoc.com</span>
-      <span id="connection" class="conn" role="status" aria-live="polite">Offline</span>
+      <span
+        id="connection-pill"
+        class="conn"
+        role="status"
+        aria-live="polite"
+        aria-label="Connection: Offline"
+        data-state="offline"
+      >&#128308; Offline</span>
       <div class="topbar-actions">
         <button
           id="toggle-sidebar-btn"

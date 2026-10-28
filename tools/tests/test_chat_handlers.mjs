@@ -1649,3 +1649,27 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     );
   });
 });
+
+describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master toggle', () => {
+  test('VAL-GATEWAY-006: settings.html exposes master connector switch and 4 scope checkboxes', () => {
+    const htmlPath = new URL('../../ui/settings.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /id="connector-enabled"/, 'settings.html must expose master switch #connector-enabled');
+    assert.match(html, /id="scope-files"/, 'settings.html must expose #scope-files');
+    assert.match(html, /id="scope-exec"/, 'settings.html must expose #scope-exec');
+    assert.match(html, /id="scope-browser"/, 'settings.html must expose #scope-browser');
+    assert.match(html, /id="scope-desktop"/, 'settings.html must expose #scope-desktop');
+  });
+
+  test('VAL-GATEWAY-006: settings.js persists and loads connector scopes and master toggle', () => {
+    const jsPath = new URL('../../ui/settings.js', import.meta.url);
+    const js = fs.readFileSync(jsPath, 'utf8');
+
+    assert.match(js, /connector_enabled/, 'settings.js must reference connector_enabled');
+    assert.match(js, /scope_files/, 'settings.js must reference scope_files');
+    assert.match(js, /scope_exec/, 'settings.js must reference scope_exec');
+    assert.match(js, /scope_browser/, 'settings.js must reference scope_browser');
+    assert.match(js, /scope_desktop/, 'settings.js must reference scope_desktop');
+  });
+});

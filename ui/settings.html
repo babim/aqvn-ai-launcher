@@ -334,6 +334,47 @@
           </div>
         </section>
 
+        <section class="card" id="gateway-section">
+          <h2>Outbound Gateway Hub (_a0_connector)</h2>
+          <div class="form-group">
+            <div class="toggle-container">
+              <label class="toggle-switch">
+                <input type="checkbox" id="connector-enabled" name="connector_enabled" checked />
+                <span class="slider"></span>
+              </label>
+              <label for="connector-enabled" class="toggle-label">Enable Outbound Gateway</label>
+            </div>
+            <div class="help-text">
+              Master switch connecting outbound to the upstream workspace server via WebSocket. Toggling off immediately terminates the outbound connection.
+            </div>
+          </div>
+
+          <div class="form-group" id="gateway-scopes-group">
+            <label style="margin-bottom: 8px;">Security Scopes</label>
+            <div class="help-text" style="margin-bottom: 12px;">
+              Granular permission scopes declared in connector_hello handshake.
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                <input type="checkbox" id="scope-files" name="scope_files" checked />
+                <span><strong>Remote Files</strong> (<code>files</code>) — read, write, and patch files in allowed workspace paths</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                <input type="checkbox" id="scope-exec" name="scope_exec" checked />
+                <span><strong>Code Execution</strong> (<code>code_execution</code>) — run shell commands inside local PTY sessions</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                <input type="checkbox" id="scope-browser" name="scope_browser" checked />
+                <span><strong>Host Browser</strong> (<code>browser</code>) — automate local Chrome/Edge via CDP</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                <input type="checkbox" id="scope-desktop" name="scope_desktop" checked />
+                <span><strong>Computer Use</strong> (<code>computer_use</code>) — screen capture and mouse/keyboard injection</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
         <section class="card">
           <h2>Agent Control (RFC &amp; SSH)</h2>
           <div class="form-group">

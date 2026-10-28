@@ -24,6 +24,12 @@ fn default_config_matches_contract_requirements() {
     assert_eq!(DEFAULT_SSH_PORT, 55022);
     assert_eq!(DEFAULT_ALLOWED_PATHS, &["~/Workspace"]);
     assert_eq!(STORE_FILENAME, "settings.json");
+
+    assert!(conf.connector_enabled);
+    assert!(conf.scope_files);
+    assert!(conf.scope_exec);
+    assert!(conf.scope_browser);
+    assert!(conf.scope_desktop);
 }
 
 #[test]
@@ -57,6 +63,11 @@ fn config_json_serde_roundtrip() {
         allowed_paths: vec!["/tmp/workspace".to_string()],
         rfc_port: 55180,
         ssh_port: 55122,
+        connector_enabled: false,
+        scope_files: false,
+        scope_exec: true,
+        scope_browser: false,
+        scope_desktop: true,
     };
 
     let json = serde_json::to_string(&conf).expect("serialize config");
@@ -93,6 +104,8 @@ fn test_store_persistence_roundtrip() {
         rfc_enabled: true,
         rfc_password: "secret-pass".to_string(),
         allowed_paths: vec!["/tmp/test-path".to_string()],
+        connector_enabled: false,
+        scope_files: false,
         ..Default::default()
     };
 
@@ -109,6 +122,9 @@ fn test_store_persistence_roundtrip() {
     assert_eq!(json["rfc_enabled"], true);
     assert_eq!(json["rfc_password"], "secret-pass");
     assert_eq!(json["allowed_paths"][0], "/tmp/test-path");
+    assert_eq!(json["connector_enabled"], false);
+    assert_eq!(json["scope_files"], false);
+    assert_eq!(json["scope_exec"], true);
 
     // Load from store
     let loaded = AppConfig::load_from_store(app.handle()).expect("load from store");
@@ -120,6 +136,9 @@ fn test_store_persistence_roundtrip() {
     assert!(loaded.rfc_enabled);
     assert_eq!(loaded.rfc_password, "secret-pass");
     assert_eq!(loaded.allowed_paths, vec!["/tmp/test-path".to_string()]);
+    assert!(!loaded.connector_enabled);
+    assert!(!loaded.scope_files);
+    assert!(loaded.scope_exec);
 
     // Clean up
     let _ = std::fs::remove_file(store_path);
@@ -145,6 +164,32 @@ fn load_from_file_applies_partial_settings() {
     // Missing keys keep their defaults instead of failing the parse.
     assert_eq!(loaded.ssh_port, DEFAULT_SSH_PORT);
     assert_eq!(loaded.allowed_paths, vec!["~/Workspace"]);
+    assert!(loaded.connector_enabled);
+    assert!(loaded.scope_files);
+    assert!(loaded.scope_exec);
+    assert!(loaded.scope_browser);
+    assert!(loaded.scope_desktop);
 
     let _ = std::fs::remove_file(path);
+
+    // Test partial settings with connector scopes and aliases
+    let path2 = std::env::temp_dir().join(format!(
+        "aqvn-settings-scopes-{}-{unique}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &path2,
+        r#"{"connector_enabled": false, "scope_files": false, "scope_code_execution": false, "scope_computer_use": false}"#,
+    )
+    .expect("write settings fixture 2");
+
+    let loaded2 =
+        aqvn_workspace_lib::config::load_from_file(&path2).expect("settings file 2 must parse");
+    assert!(!loaded2.connector_enabled);
+    assert!(!loaded2.scope_files);
+    assert!(!loaded2.scope_exec);
+    assert!(loaded2.scope_browser);
+    assert!(!loaded2.scope_desktop);
+
+    let _ = std::fs::remove_file(path2);
 }

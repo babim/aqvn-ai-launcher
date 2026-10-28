@@ -1,0 +1,153 @@
+{
+  "change_name": "change45-feat-gateway-settings-scopes",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change45-feat-gateway-settings-scopes/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "cache_read_tokens": 60227579,
+      "change_ref": "change45-feat-gateway-settings-scopes",
+      "input_tokens": 4506159,
+      "lane": "executor",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 379202,
+      "recorded_epoch": "2026-10-28T18:32:12.339Z",
+      "sessions_attributed": 10,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 65112940
+    },
+    {
+      "cache_read_tokens": 35866757,
+      "change_ref": "change45-feat-gateway-settings-scopes",
+      "input_tokens": 4097127,
+      "lane": "verifier",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 409190,
+      "recorded_epoch": "2026-10-28T18:32:12.339Z",
+      "sessions_attributed": 5,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 40373074
+    },
+    {
+      "cache_read_tokens": 0,
+      "change_ref": "change45-feat-gateway-settings-scopes",
+      "input_tokens": 0,
+      "lane": "scout",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 0,
+      "recorded_epoch": "2026-10-28T18:32:12.339Z",
+      "sessions_attributed": 0,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=feat-gateway-settings-scopes; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "action": "no-op",
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change45-feat-gateway-settings-scopes"
+    ],
+    "generated_at": "2026-10-28T23:27:49.143Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change45-feat-gateway-settings-scopes"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "Settings UI exposes checkboxes for each scope and master connector switch",
+      "mission_lineage": {
+        "feature_id": "feat-gateway-settings-scopes",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-GATEWAY-006"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "complete",
+      "task_id": "C45-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Toggling master off immediately terminates the outbound connection",
+      "mission_lineage": {
+        "feature_id": "feat-gateway-settings-scopes",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-GATEWAY-006"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "complete",
+      "task_id": "C45-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "connector_hello scopes match active configuration",
+      "mission_lineage": {
+        "feature_id": "feat-gateway-settings-scopes",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-GATEWAY-006"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "complete",
+      "task_id": "C45-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-28T18:32:12.339Z"
+}

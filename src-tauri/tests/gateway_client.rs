@@ -7,7 +7,10 @@
 //! - test_auto_reconnect_on_disconnect: Re-establishing connection and hello on disconnect.
 //! - test_gateway_scopes_and_toggle: Scope filtering and termination via master toggle.
 
-use aqvn_workspace_lib::connector::client::{build_ws_url, GatewayClient, GatewayConfig};
+use aqvn_workspace_lib::config::{AppConfig, ConfigWatcher};
+use aqvn_workspace_lib::connector::client::{
+    build_ws_url, run_supervised, GatewayClient, GatewayConfig,
+};
 use aqvn_workspace_lib::connector::protocol::{
     ConnectorHello, MSG_TYPE_HELLO, MSG_TYPE_HELLO_ACK, SCOPE_BROWSER, SCOPE_DESKTOP, SCOPE_EXEC,
     SCOPE_FILES,
@@ -279,6 +282,77 @@ async fn test_gateway_scopes_and_toggle() {
         !handle.is_connected(),
         "connection terminated after master stop"
     );
+}
+
+#[tokio::test]
+async fn test_gateway_supervisor_hot_reload_and_master_toggle() {
+    let (stub, port, _server) = spawn_stub_server().await;
+
+    let initial = AppConfig {
+        server_url: format!("http://127.0.0.1:{port}"),
+        connector_enabled: true,
+        scope_files: true,
+        scope_exec: true,
+        scope_browser: false,
+        scope_desktop: false,
+        ..Default::default()
+    };
+    let watcher = ConfigWatcher::new(initial.clone());
+
+    let sup_watcher = watcher.clone();
+    let sup_handle = tokio::spawn(async move {
+        let _ = run_supervised(sup_watcher).await;
+    });
+
+    // 1. Initial connect: scopes should be [files, code_execution]
+    let start = std::time::Instant::now();
+    let mut hello1_recvd = None;
+    while start.elapsed() < Duration::from_secs(5) {
+        if let Some(h) = stub.last_hello.lock().await.clone() {
+            hello1_recvd = Some(h);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let h1 = hello1_recvd.expect("initial handshake must arrive");
+    assert_eq!(
+        h1.scopes,
+        vec![SCOPE_FILES.to_string(), SCOPE_EXEC.to_string()]
+    );
+
+    // 2. Hot-reload config: enable only browser
+    let mut updated = initial.clone();
+    updated.scope_files = false;
+    updated.scope_exec = false;
+    updated.scope_browser = true;
+    *stub.last_hello.lock().await = None;
+    watcher.update(updated.clone());
+
+    let start = std::time::Instant::now();
+    let mut hello2_recvd = None;
+    while start.elapsed() < Duration::from_secs(5) {
+        if let Some(h) = stub.last_hello.lock().await.clone() {
+            hello2_recvd = Some(h);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let h2 = hello2_recvd.expect("handshake after scope reload must arrive");
+    assert_eq!(h2.scopes, vec![SCOPE_BROWSER.to_string()]);
+
+    // 3. Master toggle off: connector_enabled = false terminates connection
+    let mut disabled = updated.clone();
+    disabled.connector_enabled = false;
+    *stub.last_hello.lock().await = None;
+    watcher.update(disabled);
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(
+        stub.last_hello.lock().await.is_none(),
+        "no connection after master toggle disabled"
+    );
+
+    sup_handle.abort();
 }
 
 #[test]

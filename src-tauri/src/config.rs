@@ -19,7 +19,16 @@ pub const DEFAULT_RFC_ENABLED: bool = false;
 pub const DEFAULT_RFC_PORT: u16 = 55080;
 pub const DEFAULT_SSH_PORT: u16 = 55022;
 pub const DEFAULT_ALLOWED_PATHS: &[&str] = &["~/Workspace"];
+pub const DEFAULT_CONNECTOR_ENABLED: bool = true;
+pub const DEFAULT_SCOPE_FILES: bool = true;
+pub const DEFAULT_SCOPE_EXEC: bool = true;
+pub const DEFAULT_SCOPE_BROWSER: bool = true;
+pub const DEFAULT_SCOPE_DESKTOP: bool = true;
 pub const STORE_FILENAME: &str = "settings.json";
+
+const fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -32,6 +41,16 @@ pub struct AppConfig {
     pub allowed_paths: Vec<String>,
     pub rfc_port: u16,
     pub ssh_port: u16,
+    #[serde(default = "default_true")]
+    pub connector_enabled: bool,
+    #[serde(default = "default_true")]
+    pub scope_files: bool,
+    #[serde(default = "default_true", alias = "scope_code_execution")]
+    pub scope_exec: bool,
+    #[serde(default = "default_true")]
+    pub scope_browser: bool,
+    #[serde(default = "default_true", alias = "scope_computer_use")]
+    pub scope_desktop: bool,
 }
 
 impl Default for AppConfig {
@@ -51,6 +70,11 @@ impl Default for AppConfig {
                 .collect(),
             rfc_port: DEFAULT_RFC_PORT,
             ssh_port: DEFAULT_SSH_PORT,
+            connector_enabled: DEFAULT_CONNECTOR_ENABLED,
+            scope_files: DEFAULT_SCOPE_FILES,
+            scope_exec: DEFAULT_SCOPE_EXEC,
+            scope_browser: DEFAULT_SCOPE_BROWSER,
+            scope_desktop: DEFAULT_SCOPE_DESKTOP,
         }
     }
 }
@@ -114,6 +138,37 @@ impl AppConfig {
                 config.ssh_port = p as u16;
             }
         }
+        if let Some(val) = store.get("connector_enabled") {
+            if let Some(b) = val.as_bool() {
+                config.connector_enabled = b;
+            }
+        }
+        if let Some(val) = store.get("scope_files") {
+            if let Some(b) = val.as_bool() {
+                config.scope_files = b;
+            }
+        }
+        if let Some(val) = store
+            .get("scope_exec")
+            .or_else(|| store.get("scope_code_execution"))
+        {
+            if let Some(b) = val.as_bool() {
+                config.scope_exec = b;
+            }
+        }
+        if let Some(val) = store.get("scope_browser") {
+            if let Some(b) = val.as_bool() {
+                config.scope_browser = b;
+            }
+        }
+        if let Some(val) = store
+            .get("scope_desktop")
+            .or_else(|| store.get("scope_computer_use"))
+        {
+            if let Some(b) = val.as_bool() {
+                config.scope_desktop = b;
+            }
+        }
 
         Ok(config)
     }
@@ -132,6 +187,14 @@ impl AppConfig {
         store.set("allowed_paths", serde_json::json!(self.allowed_paths));
         store.set("rfc_port", serde_json::json!(self.rfc_port));
         store.set("ssh_port", serde_json::json!(self.ssh_port));
+        store.set(
+            "connector_enabled",
+            serde_json::json!(self.connector_enabled),
+        );
+        store.set("scope_files", serde_json::json!(self.scope_files));
+        store.set("scope_exec", serde_json::json!(self.scope_exec));
+        store.set("scope_browser", serde_json::json!(self.scope_browser));
+        store.set("scope_desktop", serde_json::json!(self.scope_desktop));
 
         store
             .save()

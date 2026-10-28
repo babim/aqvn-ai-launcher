@@ -936,7 +936,7 @@ async fn test_asset_caching_layer() {
     let proxy = start_proxy(&stub_guard.base).await;
 
     // 1. First request for a static asset (.woff2) -> MISS, fetched upstream, cached locally
-    let url = format!("{}/vendor/fonts/Inter.woff2", proxy.base);
+    let url = format!("{}/vendor/fonts/Inter-test-cache.woff2", proxy.base);
     let resp1 = client()
         .get(&url)
         .header(header::ORIGIN, "tauri://localhost")
@@ -959,7 +959,7 @@ async fn test_asset_caching_layer() {
     assert_eq!(body1.as_ref(), RAW_BODY);
     assert_eq!(
         stub.last_raw_uri.lock().await.as_deref(),
-        Some("/vendor/fonts/Inter.woff2")
+        Some("/vendor/fonts/Inter-test-cache.woff2")
     );
 
     // Reset stub tracking

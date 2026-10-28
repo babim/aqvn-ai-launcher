@@ -15,7 +15,12 @@
     ssh_password: '',
     allowed_paths: ['~/Workspace'],
     rfc_port: 55080,
-    ssh_port: 55022
+    ssh_port: 55022,
+    connector_enabled: true,
+    scope_files: true,
+    scope_exec: true,
+    scope_browser: true,
+    scope_desktop: true
   };
 
   let store = null;
@@ -27,6 +32,11 @@
   const serverProfilesList = document.getElementById('server-profiles-list');
   const newProfileInput = document.getElementById('new-profile-input');
   const addProfileBtn = document.getElementById('add-profile-btn');
+  const connectorEnabledInput = document.getElementById('connector-enabled');
+  const scopeFilesInput = document.getElementById('scope-files');
+  const scopeExecInput = document.getElementById('scope-exec');
+  const scopeBrowserInput = document.getElementById('scope-browser');
+  const scopeDesktopInput = document.getElementById('scope-desktop');
   const rfcEnabledInput = document.getElementById('rfc-enabled');
   const rfcPasswordInput = document.getElementById('rfc-password');
   const sshPasswordInput = document.getElementById('ssh-password');
@@ -204,6 +214,36 @@
 
       const sshPort = await store.get('ssh_port');
       sshPortInput.value = sshPort !== undefined ? sshPort : DEFAULTS.ssh_port;
+
+      const connectorEnabled = await store.get('connector_enabled');
+      if (connectorEnabledInput) {
+        connectorEnabledInput.checked =
+          connectorEnabled !== undefined ? Boolean(connectorEnabled) : DEFAULTS.connector_enabled;
+      }
+
+      const scopeFiles = await store.get('scope_files');
+      if (scopeFilesInput) {
+        scopeFilesInput.checked =
+          scopeFiles !== undefined ? Boolean(scopeFiles) : DEFAULTS.scope_files;
+      }
+
+      const scopeExec = await store.get('scope_exec');
+      if (scopeExecInput) {
+        scopeExecInput.checked =
+          scopeExec !== undefined ? Boolean(scopeExec) : DEFAULTS.scope_exec;
+      }
+
+      const scopeBrowser = await store.get('scope_browser');
+      if (scopeBrowserInput) {
+        scopeBrowserInput.checked =
+          scopeBrowser !== undefined ? Boolean(scopeBrowser) : DEFAULTS.scope_browser;
+      }
+
+      const scopeDesktop = await store.get('scope_desktop');
+      if (scopeDesktopInput) {
+        scopeDesktopInput.checked =
+          scopeDesktop !== undefined ? Boolean(scopeDesktop) : DEFAULTS.scope_desktop;
+      }
     } catch (err) {
       console.error('Failed to load settings from store:', err);
       // Fall back to defaults
@@ -217,6 +257,11 @@
       renderAllowedPaths();
       rfcPortInput.value = DEFAULTS.rfc_port;
       sshPortInput.value = DEFAULTS.ssh_port;
+      if (connectorEnabledInput) connectorEnabledInput.checked = DEFAULTS.connector_enabled;
+      if (scopeFilesInput) scopeFilesInput.checked = DEFAULTS.scope_files;
+      if (scopeExecInput) scopeExecInput.checked = DEFAULTS.scope_exec;
+      if (scopeBrowserInput) scopeBrowserInput.checked = DEFAULTS.scope_browser;
+      if (scopeDesktopInput) scopeDesktopInput.checked = DEFAULTS.scope_desktop;
     }
   }
 
@@ -268,6 +313,20 @@
       await store.set('allowed_paths', allowedPaths);
       await store.set('rfc_port', rfcPort);
       await store.set('ssh_port', sshPort);
+
+      const connectorEnabled = connectorEnabledInput
+        ? connectorEnabledInput.checked
+        : DEFAULTS.connector_enabled;
+      const scopeFiles = scopeFilesInput ? scopeFilesInput.checked : DEFAULTS.scope_files;
+      const scopeExec = scopeExecInput ? scopeExecInput.checked : DEFAULTS.scope_exec;
+      const scopeBrowser = scopeBrowserInput ? scopeBrowserInput.checked : DEFAULTS.scope_browser;
+      const scopeDesktop = scopeDesktopInput ? scopeDesktopInput.checked : DEFAULTS.scope_desktop;
+
+      await store.set('connector_enabled', connectorEnabled);
+      await store.set('scope_files', scopeFiles);
+      await store.set('scope_exec', scopeExec);
+      await store.set('scope_browser', scopeBrowser);
+      await store.set('scope_desktop', scopeDesktop);
       await store.save();
 
       if (window.bridge && typeof window.bridge.saveServerProfiles === 'function') {
@@ -297,6 +356,11 @@
     renderAllowedPaths();
     rfcPortInput.value = DEFAULTS.rfc_port;
     sshPortInput.value = DEFAULTS.ssh_port;
+    if (connectorEnabledInput) connectorEnabledInput.checked = DEFAULTS.connector_enabled;
+    if (scopeFilesInput) scopeFilesInput.checked = DEFAULTS.scope_files;
+    if (scopeExecInput) scopeExecInput.checked = DEFAULTS.scope_exec;
+    if (scopeBrowserInput) scopeBrowserInput.checked = DEFAULTS.scope_browser;
+    if (scopeDesktopInput) scopeDesktopInput.checked = DEFAULTS.scope_desktop;
     showStatus('Reset to defaults (click Save to persist).', 'success');
   }
 

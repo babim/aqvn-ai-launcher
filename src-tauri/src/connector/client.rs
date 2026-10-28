@@ -81,7 +81,12 @@ impl Default for GatewayConfig {
 impl GatewayConfig {
     pub fn from_app_config(app_config: &AppConfig) -> Self {
         Self {
+            enabled: app_config.connector_enabled,
             server_url: app_config.server_url.clone(),
+            scope_files: app_config.scope_files,
+            scope_exec: app_config.scope_exec,
+            scope_browser: app_config.scope_browser,
+            scope_desktop: app_config.scope_desktop,
             ..Default::default()
         }
     }
@@ -259,9 +264,18 @@ impl GatewayClient {
             HeaderValue::from_static("AQVN-Workspace"),
         );
 
-        let (mut stream, _response) = tokio_tungstenite::connect_async(request)
-            .await
-            .map_err(|e| format!("websocket connect error to {ws_url}: {e}"))?;
+        if *shutdown_rx.borrow() {
+            return Ok(());
+        }
+
+        let (mut stream, _response) = tokio::select! {
+            res = tokio_tungstenite::connect_async(request) => {
+                res.map_err(|e| format!("websocket connect error to {ws_url}: {e}"))?
+            }
+            _ = shutdown_rx.changed() => {
+                return Ok(());
+            }
+        };
 
         connected.store(true, Ordering::SeqCst);
 
@@ -280,7 +294,17 @@ impl GatewayClient {
             .map_err(|e| format!("failed to send connector_hello: {e}"))?;
 
         // Wait for acknowledgment message
-        match tokio::time::timeout(Duration::from_secs(10), stream.next()).await {
+        let ack_opt = tokio::select! {
+            res = tokio::time::timeout(Duration::from_secs(10), stream.next()) => {
+                res
+            }
+            _ = shutdown_rx.changed() => {
+                let _ = stream.send(Message::Close(None)).await;
+                return Ok(());
+            }
+        };
+
+        match ack_opt {
             Ok(Some(Ok(Message::Text(ack_text)))) => {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&ack_text) {
                     let msg_type = val
@@ -352,7 +376,7 @@ impl GatewayClient {
                                 Message::Pong(_) => {}
                                 Message::Text(text) => {
                                     if let Some(reply) =
-                                        handlers::dispatch_message_streaming(&text, Some(&tx_out)).await
+                                        handlers::dispatch_message_scoped(&text, Some(&tx_out), &self.config).await
                                     {
                                         let _ = tx_out.send(Message::Text(reply.into())).await;
                                     }

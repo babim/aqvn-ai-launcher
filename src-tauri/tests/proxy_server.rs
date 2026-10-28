@@ -254,6 +254,8 @@ async fn stub_raw_asset(
         "application/javascript"
     } else if path_and_query.ends_with(".woff2") {
         "font/woff2"
+    } else if path_and_query.ends_with(".ttf") {
+        "font/ttf"
     } else if path_and_query.ends_with(".svg") {
         "image/svg+xml"
     } else {
@@ -924,4 +926,197 @@ async fn test_forward_raw_root_and_static_assets() {
         cookie.contains("root_seen=1"),
         "root Set-Cookie must be absorbed in jar"
     );
+}
+
+// ---------------------- local asset caching layer (VAL-WEB-002)
+
+#[tokio::test]
+async fn test_asset_caching_layer() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    // 1. First request for a static asset (.woff2) -> MISS, fetched upstream, cached locally
+    let url = format!("{}/vendor/fonts/Inter.woff2", proxy.base);
+    let resp1 = client()
+        .get(&url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("1st request");
+    assert_eq!(resp1.status(), StatusCode::OK);
+    assert_eq!(
+        resp1.headers().get("x-cache").and_then(|v| v.to_str().ok()),
+        Some("MISS")
+    );
+    assert_eq!(
+        resp1
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("font/woff2")
+    );
+    let body1 = resp1.bytes().await.expect("body1");
+    assert_eq!(body1.as_ref(), RAW_BODY);
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        Some("/vendor/fonts/Inter.woff2")
+    );
+
+    // Reset stub tracking
+    *stub.last_raw_uri.lock().await = None;
+
+    // 2. Second request for the same asset -> HIT, served immediately from cache, no network roundtrip
+    let resp2 = client()
+        .get(&url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("2nd request");
+    assert_eq!(resp2.status(), StatusCode::OK);
+    assert_eq!(
+        resp2.headers().get("x-cache").and_then(|v| v.to_str().ok()),
+        Some("HIT")
+    );
+    let cache_control = resp2
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        cache_control.contains("max-age="),
+        "cache-control: {cache_control}"
+    );
+    let body2 = resp2.bytes().await.expect("body2");
+    assert_eq!(body2.as_ref(), RAW_BODY);
+    // Upstream stub was NOT called on 2nd request
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        None,
+        "second request must be served from cache without upstream call"
+    );
+
+    // 3. Verify other static asset types (.css, .js, .ttf) are cached
+    for (asset_path, mime) in [
+        ("/css/main.css", "text/css"),
+        ("/js/app.js", "application/javascript"),
+        ("/vendor/fonts/Inter.ttf", "font/ttf"),
+    ] {
+        let asset_url = format!("{}{asset_path}", proxy.base);
+        // Miss
+        let r1 = client()
+            .get(&asset_url)
+            .header(header::ORIGIN, "tauri://localhost")
+            .send()
+            .await
+            .expect("r1");
+        assert_eq!(
+            r1.headers().get("x-cache").and_then(|v| v.to_str().ok()),
+            Some("MISS")
+        );
+        assert_eq!(
+            r1.headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some(mime)
+        );
+
+        *stub.last_raw_uri.lock().await = None;
+
+        // Hit
+        let r2 = client()
+            .get(&asset_url)
+            .header(header::ORIGIN, "tauri://localhost")
+            .send()
+            .await
+            .expect("r2");
+        assert_eq!(
+            r2.headers().get("x-cache").and_then(|v| v.to_str().ok()),
+            Some("HIT")
+        );
+        assert_eq!(
+            stub.last_raw_uri.lock().await.as_deref(),
+            None,
+            "{asset_path} hit served without upstream call"
+        );
+    }
+
+    // 4. Verify disk cache persistence across new proxy instance with same cache dir
+    use aqvn_workspace_lib::proxy::cache::AssetCache;
+    let custom_cache_dir =
+        std::env::temp_dir().join(format!("aqvn-test-cache-{}", std::process::id()));
+    let cache_engine = std::sync::Arc::new(AssetCache::new(custom_cache_dir.clone()));
+
+    let (listener, state, info) = server::bind_with_cache(&stub_guard.base, cache_engine.clone())
+        .await
+        .expect("bind proxy with custom cache");
+    let task = tokio::spawn(async move {
+        server::serve(listener, state).await.expect("proxy serve");
+    });
+    let custom_proxy = Running {
+        base: info.url,
+        task,
+    };
+
+    // First request misses and writes to custom_cache_dir
+    let custom_url = format!("{}/vendor/ace/ace.js", custom_proxy.base);
+    let r1 = client()
+        .get(&custom_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("r1 custom");
+    assert_eq!(
+        r1.headers().get("x-cache").and_then(|v| v.to_str().ok()),
+        Some("MISS")
+    );
+
+    // Verify file actually exists on disk under custom_cache_dir
+    let expected_disk_file = cache_engine
+        .disk_path(&stub_guard.base, "/vendor/ace/ace.js")
+        .expect("disk path");
+    assert!(
+        expected_disk_file.is_file(),
+        "cached file must exist on disk at {expected_disk_file:?}"
+    );
+
+    // Drop the first proxy
+    drop(custom_proxy);
+
+    // Create a brand new proxy instance with a fresh in-memory cache pointing to the same disk directory
+    let fresh_cache_engine = std::sync::Arc::new(AssetCache::new(custom_cache_dir.clone()));
+    let (listener2, state2, info2) = server::bind_with_cache(&stub_guard.base, fresh_cache_engine)
+        .await
+        .expect("bind 2nd proxy with same disk cache");
+    let task2 = tokio::spawn(async move {
+        server::serve(listener2, state2)
+            .await
+            .expect("proxy serve 2");
+    });
+    let custom_proxy2 = Running {
+        base: info2.url,
+        task: task2,
+    };
+
+    *stub.last_raw_uri.lock().await = None;
+
+    // Requesting the asset from proxy2 must be served directly from disk cache with HIT
+    let custom_url2 = format!("{}/vendor/ace/ace.js", custom_proxy2.base);
+    let r2 = client()
+        .get(&custom_url2)
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("r2 custom from disk");
+    assert_eq!(
+        r2.headers().get("x-cache").and_then(|v| v.to_str().ok()),
+        Some("HIT")
+    );
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        None,
+        "disk cache hit served without contacting upstream"
+    );
+
+    // Cleanup temp cache
+    let _ = std::fs::remove_dir_all(&custom_cache_dir);
 }

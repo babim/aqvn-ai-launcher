@@ -12,6 +12,7 @@
 //! [`init_script`] as `window.__AQVN_PROXY__`.
 
 use crate::config::ConfigWatcher;
+use crate::proxy::cache::{self, AssetCache};
 use crate::proxy::upstream::{ForwardResponse, Upstream};
 use crate::proxy::ws;
 use axum::body::Body;
@@ -56,12 +57,18 @@ impl ProxyInfo {
 #[derive(Clone)]
 pub struct ProxyState {
     upstream: Arc<RwLock<Arc<Upstream>>>,
+    cache: Arc<AssetCache>,
 }
 
 impl ProxyState {
     pub fn new(upstream: Upstream) -> Self {
+        Self::with_cache(upstream, Arc::new(AssetCache::default()))
+    }
+
+    pub fn with_cache(upstream: Upstream, cache: Arc<AssetCache>) -> Self {
         Self {
             upstream: Arc::new(RwLock::new(Arc::new(upstream))),
+            cache,
         }
     }
 
@@ -69,13 +76,25 @@ impl ProxyState {
         self.upstream.read().await.clone()
     }
 
+    pub fn cache(&self) -> &Arc<AssetCache> {
+        &self.cache
+    }
+
     pub async fn replace(&self, upstream: Upstream) {
         *self.upstream.write().await = Arc::new(upstream);
     }
 }
 
-/// Binds `127.0.0.1:0` and prints the resolved port.
+/// Binds loopback on an ephemeral port with default cache and prints the resolved port.
 pub async fn bind(server_url: &str) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_with_cache(server_url, Arc::new(AssetCache::default())).await
+}
+
+/// Binds loopback on an ephemeral port with specified asset cache and prints the resolved port.
+pub async fn bind_with_cache(
+    server_url: &str,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
     let upstream = Upstream::new(server_url)?;
     let address = SocketAddr::new(BIND_ADDRESS, 0);
     let listener = TcpListener::bind(address)
@@ -90,7 +109,7 @@ pub async fn bind(server_url: &str) -> Result<(TcpListener, ProxyState, ProxyInf
     );
     Ok((
         listener,
-        ProxyState::new(upstream),
+        ProxyState::with_cache(upstream, cache),
         ProxyInfo::from_addr(local),
     ))
 }
@@ -344,20 +363,92 @@ async fn handle_forward_raw(
             origin.as_deref(),
         );
     };
+    let upstream = state.upstream().await;
+    let target_origin = upstream.target().origin();
+    let path = uri.path();
+
+    // Check local asset cache for cacheable GET requests
+    if upstream_method == reqwest::Method::GET && state.cache().is_cacheable(path) {
+        if let Some(cached) = state.cache().get(target_origin, path).await {
+            let mut response = Response::new(Body::from(cached.body));
+            *response.status_mut() = StatusCode::OK;
+            let ct = cached
+                .content_type
+                .unwrap_or_else(|| cache::mime_type_for_path(path).to_string());
+            if let Ok(value) = HeaderValue::from_str(&ct) {
+                response.headers_mut().insert(header::CONTENT_TYPE, value);
+            }
+            response
+                .headers_mut()
+                .insert("x-cache", HeaderValue::from_static("HIT"));
+            response
+                .headers_mut()
+                .insert("x-aqvn-cache", HeaderValue::from_static("HIT"));
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=31536000, immutable"),
+            );
+            return with_cors(response, origin.as_deref());
+        }
+    }
+
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let upstream = state.upstream().await;
     let result = upstream
         .forward_raw(
-            upstream_method,
+            upstream_method.clone(),
             &path_and_query(&uri),
             content_type.as_deref(),
             body.to_vec(),
         )
         .await;
-    upstream_response(result, origin.as_deref())
+
+    match result {
+        Ok(outcome) => {
+            let status = StatusCode::from_u16(outcome.status).unwrap_or(StatusCode::BAD_GATEWAY);
+            let mut response = Response::new(Body::from(outcome.body.clone()));
+            *response.status_mut() = status;
+            if let Some(ref ct) = outcome.content_type {
+                if let Ok(value) = HeaderValue::from_str(ct) {
+                    response.headers_mut().insert(header::CONTENT_TYPE, value);
+                }
+            }
+
+            // Cache successful GET requests for cacheable assets
+            if upstream_method == reqwest::Method::GET
+                && status == StatusCode::OK
+                && state.cache().is_cacheable(path)
+            {
+                state
+                    .cache()
+                    .put(
+                        target_origin,
+                        path,
+                        outcome.content_type.as_deref(),
+                        &outcome.body,
+                    )
+                    .await;
+                response
+                    .headers_mut()
+                    .insert("x-cache", HeaderValue::from_static("MISS"));
+                response
+                    .headers_mut()
+                    .insert("x-aqvn-cache", HeaderValue::from_static("MISS"));
+                response.headers_mut().insert(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("public, max-age=31536000, immutable"),
+                );
+            }
+
+            with_cors(response, origin.as_deref())
+        }
+        Err(err) => with_cors(
+            text_response(StatusCode::BAD_GATEWAY, err),
+            origin.as_deref(),
+        ),
+    }
 }
 
 async fn handle_socket_io(State(state): State<ProxyState>, request: Request<Body>) -> Response {

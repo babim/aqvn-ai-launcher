@@ -7,6 +7,7 @@
 //! kernel-chosen port; the resolved port reaches the UI through
 //! [`server::init_script`], never a hardcoded constant.
 
+pub mod cache;
 pub mod jar;
 pub mod server;
 pub mod upstream;

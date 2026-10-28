@@ -434,13 +434,18 @@
       return;
     }
     var type = record.type || 'info';
-    row.className = 'msg msg-' + type + (record.queued ? ' msg-queued' : '');
+    row.className =
+      'msg msg-' + type +
+      (record.queued ? ' msg-queued' : '') +
+      (record.failed ? ' msg-failed' : '');
     var label = TYPE_LABELS[type] || type;
     if (type === 'code_exe' || type === 'tool') {
       label = '$ EXECUTE';
     }
     if (record.queued) {
       label += ' · queued (offline)';
+    } else if (record.failed) {
+      label += ' · not sent';
     }
     setText(row.firstChild, label);
     renderContent(row.lastChild, record.content || '', record.thought === true ? 'thought' : type);
@@ -551,6 +556,11 @@
 
   var OUTBOX_KEY = 'aqvn_outbox';
 
+  var OUTBOX_MAX_ENTRIES = 50;
+  var OUTBOX_MAX_BYTES = 256 * 1024;
+  /* The drain in flight, so overlapping flushes cannot resend a batch. */
+  var outboxFlush = null;
+
   function readOutbox() {
     try {
       var raw = window.localStorage.getItem(OUTBOX_KEY);
@@ -561,6 +571,8 @@
     }
   }
 
+  /* Returns false when the browser refuses the write so callers can tell the
+   * user that a queued message is not actually persisted. */
   function writeOutbox(list) {
     try {
       if (list && list.length) {
@@ -568,20 +580,77 @@
       } else {
         window.localStorage.removeItem(OUTBOX_KEY);
       }
+      return true;
     } catch (err) {
       /* storage may be unavailable; the message stays in RAM */
+      return false;
     }
   }
 
+  /* Cap the queue by entry count and by total bytes. The oldest entries are
+   * dropped first; the caller reports the drop to the user. */
   function queueOutbox(text, messageId) {
-    var list = readOutbox();
-    list.push({
+    var entry = {
       text: text,
       context: state.context || '',
       message_id: messageId || uuid(),
       queued_at: Date.now()
-    });
-    writeOutbox(list);
+    };
+    if (JSON.stringify([entry]).length > OUTBOX_MAX_BYTES) {
+      return { stored: false, dropped: 0, error: 'the message is too large to queue' };
+    }
+    var list = readOutbox();
+    list.push(entry);
+    var dropped = 0;
+    while (list.length > OUTBOX_MAX_ENTRIES) {
+      list.shift();
+      dropped += 1;
+    }
+    var payload = JSON.stringify(list);
+    while (list.length > 1 && payload.length > OUTBOX_MAX_BYTES) {
+      list.shift();
+      dropped += 1;
+      payload = JSON.stringify(list);
+    }
+    return { stored: writeOutbox(list), dropped: dropped, error: '' };
+  }
+
+  /* Put unclaimed entries back in front of anything queued during the drain. */
+  function requeueOutbox(remaining) {
+    var current = readOutbox();
+    return writeOutbox(remaining.concat(current));
+  }
+
+  /* Storage refused the write: the row must stop claiming a queued delivery. */
+  function markQueueFailed(messageId, reason) {
+    var record = messageId ? state.logs.get(messageId) : null;
+    if (record) {
+      record.queued = false;
+      record.failed = true;
+      paintRow(messageId);
+    }
+    showChatError(
+      'Message not queued: ' + (reason || 'browser storage is unavailable') +
+        '. Copy the text before closing.'
+    );
+  }
+
+  /* Queue a message and report the outcome to the user. */
+  function queueAndReport(text, messageId) {
+    var queued = queueOutbox(text, messageId);
+    if (!queued.stored) {
+      markQueueFailed(messageId, queued.error || 'browser storage is unavailable');
+      return false;
+    }
+    if (queued.dropped) {
+      showChatError(
+        'Offline - message queued. ' + queued.dropped +
+          ' older queued message(s) dropped: the outbox limit is reached.'
+      );
+      return true;
+    }
+    showChatError('Offline - message queued; it will send when the connection returns.');
+    return true;
   }
 
   function markQueuedSent(messageId) {
@@ -592,19 +661,30 @@
     }
   }
 
-  /* Replay queued messages in order once a transport is available. A failed
-   * send keeps that message and everything after it in storage for the next
-   * connect, so nothing is silently dropped. */
+  /* Replay queued messages in order once a transport is available. The batch
+   * is claimed (removed from storage) before the first send, so a reconnect
+   * during the drain cannot replay it. A failed send puts its message and the
+   * ones after it back into storage for the next connect. */
   function flushOutbox() {
+    if (outboxFlush) {
+      /* One drain at a time: an overlapping call joins the running one. */
+      return outboxFlush;
+    }
     if (!state.online && !state.polling) {
       return Promise.resolve(0);
     }
     var list = readOutbox();
+    if (!list.length) {
+      return Promise.resolve(0);
+    }
+    if (!writeOutbox([])) {
+      showChatError('Outbox unavailable: browser storage cannot be updated.');
+      return Promise.resolve(0);
+    }
     var sent = 0;
 
     function next(index) {
       if (index >= list.length) {
-        writeOutbox([]);
         return Promise.resolve(sent);
       }
       var item = list[index];
@@ -626,13 +706,30 @@
           return next(index + 1);
         },
         function () {
-          writeOutbox(list.slice(index));
+          if (!requeueOutbox(list.slice(index))) {
+            showChatError(
+              'Queued message could not be saved again: browser storage is unavailable.'
+            );
+          }
           return sent;
         }
       );
     }
 
-    return next(0);
+    outboxFlush = next(0).then(
+      function (count) {
+        outboxFlush = null;
+        return count;
+      },
+      function (err) {
+        outboxFlush = null;
+        showChatError(
+          'Outbox flush failed: ' + ((err && err.message) || String(err || 'unknown error'))
+        );
+        return sent;
+      }
+    );
+    return outboxFlush;
   }
 
   function renderContexts() {
@@ -1324,8 +1421,7 @@
     dom.input.focus();
 
     if (offline) {
-      queueOutbox(text, messageId);
-      showChatError('Offline - message queued; it will send when the connection returns.');
+      queueAndReport(text, messageId);
       return;
     }
 
@@ -1344,10 +1440,10 @@
         var record = state.logs.get(messageId);
         if (record) {
           record.queued = true;
+          record.failed = false;
           paintRow(messageId);
         }
-        queueOutbox(text, messageId);
-        showChatError('Offline - message queued; it will send when the connection returns.');
+        queueAndReport(text, messageId);
         return;
       }
       showChatError(err.message);

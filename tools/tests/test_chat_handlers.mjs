@@ -87,7 +87,7 @@ function createElementMock(id) {
   return element;
 }
 
-function createHarness() {
+function createHarness(options = {}) {
   const filePath = new URL('../../ui/chat.js', import.meta.url);
   let code = fs.readFileSync(filePath, 'utf8');
 
@@ -105,7 +105,7 @@ __harness__.exports = (function () {
     'renderContent', 'copyCode', 'applyProgress', 'notifyComplete',
     'setConnection', 'sendMessage', 'queueOutbox', 'readOutbox',
     'flushOutbox', 'applyZoom', 'readZoom', 'clampZoom', 'hardRefresh',
-    'reloadCanvas'
+    'reloadCanvas', 'writeOutbox', 'OUTBOX_MAX_ENTRIES', 'OUTBOX_MAX_BYTES'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -179,9 +179,15 @@ __harness__.exports = (function () {
   const localStorageMock = {
     getItem: (key) => (key in store ? store[key] : null),
     setItem: (key, value) => {
+      if (options.storageThrows) {
+        throw new Error('QuotaExceededError: storage is unavailable');
+      }
       store[key] = String(value);
     },
     removeItem: (key) => {
+      if (options.storageThrows) {
+        throw new Error('SecurityError: storage is unavailable');
+      }
       delete store[key];
     }
   };
@@ -1187,5 +1193,159 @@ describe('ui/chat.js UI zoom and hard refresh', () => {
 
   test('VAL-ZOOM-002: index.html exposes #hard-refresh-btn', () => {
     assert.match(readIndexHtml(), /id="hard-refresh-btn"/, 'topbar must expose the hard refresh button');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-CONN-003 hardening: outbox durability                          */
+/* ------------------------------------------------------------------ */
+
+/* Fetch stub for the outbox: records every message_async body and can hold
+ * the response open so a test can act while a drain is in flight. */
+function stubOutboxFetch(harness, options = {}) {
+  const sent = [];
+  const gates = [];
+  let released = false;
+  harness.context.fetch = async (url, requestOptions) => {
+    if (String(url).includes('/proxy/csrf')) {
+      return new Response(JSON.stringify({ token: 't' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    sent.push(JSON.parse(requestOptions.body));
+    if (options.hold && !released) {
+      await new Promise((resolve) => gates.push(resolve));
+    }
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+  return {
+    sent,
+    release: () => {
+      released = true;
+      gates.splice(0).forEach((resolve) => resolve());
+    }
+  };
+}
+
+async function settle(times = 8) {
+  for (let i = 0; i < times; i += 1) {
+    await flushPromises();
+  }
+}
+
+describe('ui/chat.js offline outbox durability', () => {
+  test('VAL-CONN-003: overlapping flushOutbox calls send each queued entry exactly once', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { state, flushOutbox } = harness.exports;
+    state.online = true;
+    harness.store['aqvn_outbox'] = JSON.stringify([
+      { text: 'first', context: 'ctx-1', message_id: 'm-1', queued_at: 1 },
+      { text: 'second', context: 'ctx-1', message_id: 'm-2', queued_at: 2 }
+    ]);
+    const net = stubOutboxFetch(harness, { hold: true });
+
+    const first = flushOutbox();
+    const second = flushOutbox();
+    await settle();
+    net.release();
+    await Promise.all([first, second]);
+    await settle();
+
+    assert.equal(net.sent.length, 2, 'two queued entries must produce exactly two sends');
+    assert.deepEqual(net.sent.map((entry) => entry.text), ['first', 'second']);
+  });
+
+  test('VAL-CONN-003: a queued entry is claimed before the send so a reconnect cannot replay it', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { state, flushOutbox } = harness.exports;
+    state.online = true;
+    harness.store['aqvn_outbox'] = JSON.stringify([
+      { text: 'once', context: 'ctx-1', message_id: 'm-1', queued_at: 1 }
+    ]);
+    const net = stubOutboxFetch(harness, { hold: true });
+
+    const drain = flushOutbox();
+    await settle();
+    assert.equal(
+      harness.store['aqvn_outbox'],
+      undefined,
+      'the claimed entry must leave storage before the send completes'
+    );
+    assert.equal(net.sent.length, 1, 'the claimed entry must be sent');
+
+    const reconnect = flushOutbox();
+    await settle();
+    net.release();
+    await Promise.all([drain, reconnect]);
+    await settle();
+
+    assert.equal(net.sent.length, 1, 'a reconnect during the drain must not resend the claimed entry');
+  });
+
+  test('VAL-CONN-003: the outbox is capped by entry count and total bytes', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { queueOutbox, readOutbox, OUTBOX_MAX_ENTRIES, OUTBOX_MAX_BYTES } = harness.exports;
+
+    const overflow = OUTBOX_MAX_ENTRIES + 20;
+    for (let i = 0; i < overflow; i += 1) {
+      queueOutbox('message ' + i, 'id-' + i);
+    }
+    const queued = readOutbox();
+    assert.ok(
+      queued.length <= OUTBOX_MAX_ENTRIES,
+      `outbox must stay within ${OUTBOX_MAX_ENTRIES} entries, got ${queued.length}`
+    );
+    assert.equal(
+      queued[queued.length - 1].text,
+      'message ' + (overflow - 1),
+      'the newest entry must be kept'
+    );
+
+    const oversized = queueOutbox('x'.repeat(OUTBOX_MAX_BYTES + 16), 'too-big');
+    assert.equal(oversized.stored, false, 'an entry larger than the byte cap must be rejected');
+    assert.equal(
+      readOutbox().length,
+      OUTBOX_MAX_ENTRIES,
+      'the rejected entry must not be stored'
+    );
+  });
+
+  test('VAL-CONN-003: a throwing localStorage surfaces an error and the row stops claiming delivery', async () => {
+    const harness = createHarness({ storageThrows: true });
+    harness.exports.init();
+    const { state, sendMessage, dom } = harness.exports;
+    state.online = false;
+    state.polling = false;
+
+    dom.input.value = 'cannot be stored';
+    await sendMessage({ preventDefault: () => {} });
+
+    const banner = harness.getEl('chat-error');
+    assert.match(
+      banner.textContent,
+      /storage|queue/i,
+      'a storage failure must be surfaced to the user'
+    );
+    assert.equal(banner.hidden, false, 'the error banner must be visible');
+
+    let record = null;
+    state.logs.forEach((entry) => {
+      if (entry.content === 'cannot be stored') {
+        record = entry;
+      }
+    });
+    assert.ok(record, 'the optimistic row must still be visible');
+    assert.notEqual(record.queued, true, 'an unpersisted message must not claim a queued delivery');
+
+    const row = state.rows.get(record.id);
+    assert.doesNotMatch(row.firstChild.textContent, /queued/i, 'the row must not promise delivery');
+    assert.match(row.firstChild.textContent, /not sent/i, 'the row must state that nothing was sent');
   });
 });

@@ -3,6 +3,9 @@
 //! Subordinate modules implement `connector_file_op`, `connector_exec_op`,
 //! `connector_browser_op`, and `connector_computer_use_op`.
 
+pub mod files;
+
+use crate::connector::protocol::MSG_TYPE_FILE_OP;
 use serde_json::Value;
 
 /// Dispatches an incoming JSON message to the appropriate handler.
@@ -30,6 +33,7 @@ pub async fn dispatch_message(text: &str) -> Option<String> {
             })
             .to_string(),
         ),
+        MSG_TYPE_FILE_OP | "file_op" => Some(files::handle_file_op(&envelope).await),
         _ => None,
     }
 }

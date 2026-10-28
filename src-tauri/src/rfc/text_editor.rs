@@ -260,14 +260,14 @@ pub(crate) fn validate_edits(
 
 // --------------------------------------------------------------- edit engine
 
-struct Edit {
-    from: usize,
-    to: usize,
-    content: String,
-    insert: bool,
+pub(crate) struct Edit {
+    pub from: usize,
+    pub to: usize,
+    pub content: String,
+    pub insert: bool,
 }
 
-fn parse_edits(value: &Value) -> Result<Vec<Edit>, DispatchError> {
+pub(crate) fn parse_edits(value: &Value) -> Result<Vec<Edit>, DispatchError> {
     let entries = match value.as_array() {
         Some(entries) if !entries.is_empty() => entries,
         _ => {
@@ -329,7 +329,7 @@ fn content_lines(content: &str) -> Vec<String> {
     lines
 }
 
-fn apply_parsed_edits(text: &str, edits: &[Edit]) -> String {
+pub(crate) fn apply_parsed_edits(text: &str, edits: &[Edit]) -> String {
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     let trailing_newline = text.ends_with('\n');
 
@@ -351,11 +351,11 @@ fn apply_parsed_edits(text: &str, edits: &[Edit]) -> String {
     output
 }
 
-struct ContextPatchResult {
-    content: String,
-    line_from: usize,
-    line_to: usize,
-    hunk_count: usize,
+pub(crate) struct ContextPatchResult {
+    pub content: String,
+    pub line_from: usize,
+    pub line_to: usize,
+    pub hunk_count: usize,
 }
 
 struct Hunk {
@@ -363,7 +363,7 @@ struct Hunk {
     lines: Vec<(char, String)>,
 }
 
-fn apply_context_patch(
+pub(crate) fn apply_context_patch(
     content: &str,
     patch_text: &str,
 ) -> Result<ContextPatchResult, DispatchError> {

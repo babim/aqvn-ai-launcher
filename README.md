@@ -6,16 +6,19 @@ Enterprise-grade desktop and mobile native client built with **Tauri v2** and **
 
 ## Overview
 
-AQVN Workspace combines two unified components into a single native binary:
+AQVN Workspace combines three unified components into a single native binary:
 
-1. **Frontend Client**: Embedded vanilla HTML/CSS/JavaScript webview (no Node/bundler runtime dependency), featuring:
-   - **3-Column Workspace Layout**: Collapsible Sidebar (`Alt+S`), Core Chat, and Right Canvas Host (`Alt+C`) embedding AQVN Intel Orchestrator (`/plugins/aqvn_intel_suite/webui/canvas.html`) via drag-resizable splitters.
-   - **Markdown & Code Highlighting**: In-repo vendored `marked.min.js` and `highlight.min.js` with 1-click code copying, terminal hacker theme (`#0d1117`), and collapsible `<details class="thought-step">` thought sections.
-   - **Focus Mode**: Distraction-free full-screen chat (`F11` / `Ctrl+Shift+F`), auto-centering and focusing composer.
-   - **System Integration & Offline Resilience**: OS notifications on background task completion, 3-state glowing LED indicator (🟢 Online / 🟡 Polling / 🔴 Offline), persistent offline outbox queue (`aqvn_outbox`) with automatic replay on reconnect, smooth UI Zoom (`Ctrl +/-/0`), and Hard Refresh (`Ctrl+Shift+R` / `F5`).
-   - Native window title synchronization (`AQVN AI Workspace`), system tray integration with busy/idle state indicators, and a loopback bridge proxy.
-2. **Backend RFC Host Bridge**: High-performance HTTP daemon (`POST /api/rfc` on port `55080`) and embedded SSH terminal server (port `55022`, powered by `russh`) allowing verified cloud agents to inspect files, browse workspace directories, and execute terminal sessions within an isolated filesystem sandbox.
-   - **Raw Forwarding Proxy**: The Axum loopback proxy seamlessly routes `/plugins/*`, `/extensions/*`, and `/public/*` directly to the upstream server with automated session cookie jar replay and origin spoofing.
+1. **Accelerated Webview Container**: Embedded native desktop webview that loads the **100% full-featured Upstream Web Interface** (Sidebar, Chat, DAG Work Map, Right Canvas, Plugins, Settings, Themes, Prompts) accelerated through local asset pre-caching:
+   - **Local Asset Cache**: Static assets (Inter fonts, CSS, JS libraries) are cached locally on SSD/memory, achieving instant launch times (<100ms FCP) significantly faster than loading over the public web.
+   - **Desktop Notification & Tray Integration**: Native bridge detects agent task completion events and dispatches OS desktop notifications (`notify_task_complete`) when the app is hidden/minimized, and updates System Tray status (Idle 🟢 / Busy 🟡).
+   - **Native Navigation**: Internal app links and iframe canvases navigate inside the webview without opening an external browser; external hyperlinks open cleanly in the system default browser.
+2. **Outbound Host Gateway Hub (`_a0_connector`)**: Zero-config outbound WebSocket client connecting directly to cloud workspace instances over `/ws`, traversing NAT and firewalls without requiring open inbound ports:
+   - **Remote Files (`connector_file_op`)**: Sandboxed file read, write, patch, and file-browser operations within `~/Workspace`, with Transfer Protocol v1 support (SHA-256 validation).
+   - **Remote Execution (`connector_exec_op`)**: Local PTY terminal session execution via `portable-pty`.
+   - **Host Browser Automation (`connector_browser_op`)**: Chrome DevTools Protocol (CDP port 9222) bridge for web navigation, element clicks, typing, and screenshots.
+   - **Host Desktop Control (`connector_computer_use_op`)**: Native screen capture and mouse/keyboard event injection.
+   - **Security Scopes**: Independent user controls to grant/revoke permissions for files, terminal, browser, and desktop.
+3. **Backend RFC Host Bridge (Legacy/Direct)**: High-performance HTTP daemon (`POST /api/rfc` on port `55080`) and embedded SSH terminal server (port `55022`, powered by `russh`) for direct local network control.
 
 ---
 

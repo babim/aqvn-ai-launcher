@@ -105,7 +105,8 @@ __harness__.exports = (function () {
     'renderContent', 'copyCode', 'applyProgress', 'notifyComplete',
     'setConnection', 'sendMessage', 'queueOutbox', 'readOutbox',
     'flushOutbox', 'applyZoom', 'readZoom', 'clampZoom', 'hardRefresh',
-    'reloadCanvas', 'writeOutbox', 'OUTBOX_MAX_ENTRIES', 'OUTBOX_MAX_BYTES'
+    'reloadCanvas', 'writeOutbox', 'OUTBOX_MAX_ENTRIES', 'OUTBOX_MAX_BYTES',
+    'showChat'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -1134,6 +1135,7 @@ describe('ui/chat.js UI zoom and hard refresh', () => {
   test('VAL-ZOOM-002: #hard-refresh-btn resets RAM state, CSRF, socket and canvas iframe', async () => {
     const harness = createHarness();
     harness.exports.init();
+    harness.getEl('login-view').hidden = true;
     const csrf = stubCsrfFetch(harness);
     const { state } = harness.exports;
 
@@ -1168,6 +1170,7 @@ describe('ui/chat.js UI zoom and hard refresh', () => {
     for (const init of [{ key: 'r', ctrlKey: true, shiftKey: true }, { key: 'F5' }]) {
       const harness = createHarness();
       harness.exports.init();
+      harness.getEl('login-view').hidden = true;
       const csrf = stubCsrfFetch(harness);
       let ioCalls = 0;
       harness.context.io = () => {
@@ -1347,5 +1350,115 @@ describe('ui/chat.js offline outbox durability', () => {
     const row = state.rows.get(record.id);
     assert.doesNotMatch(row.firstChild.textContent, /queued/i, 'the row must not promise delivery');
     assert.match(row.firstChild.textContent, /not sent/i, 'the row must state that nothing was sent');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Edge cases: outbox fallback, canvas reload, server sync, LED,      */
+/* and hard-refresh login guard                                       */
+/* ------------------------------------------------------------------ */
+
+describe('ui/chat.js edge cases and connection state hygiene', () => {
+  test('sendMessage falls back to outbox when apiCall(message_async) rejects even if state.online is true', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { state, sendMessage, dom } = harness.exports;
+    state.online = true;
+    state.polling = false;
+
+    harness.context.fetch = async (url) => {
+      if (String(url).includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ token: 't' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: false, error: 'Network failure' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    dom.input.value = 'message during drop';
+    await sendMessage({ preventDefault: () => {} });
+
+    const raw = harness.store['aqvn_outbox'];
+    assert.ok(raw, 'failed send must fall back to aqvn_outbox even if state.online is true');
+    const queued = JSON.parse(raw);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].text, 'message during drop');
+
+    const id = queued[0].message_id;
+    const record = state.logs.get(id);
+    assert.ok(record);
+    assert.equal(record.queued, true, 'record must be marked queued');
+    assert.equal(record.failed, false, 'record must not be marked failed');
+
+    const row = state.rows.get(id);
+    assert.ok(row);
+    assert.match(row.className, /msg-queued/, 'row must have msg-queued class');
+  });
+
+  test('stopPolling restores online connection pill if state.online === true', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { state, stopPolling, setConnection } = harness.exports;
+    const pill = harness.getEl('connection-pill');
+
+    state.online = true;
+    setConnection('polling');
+    assert.equal(pill.dataset.state, 'polling', 'pill should initially be in polling state');
+
+    stopPolling();
+    assert.equal(pill.dataset.state, 'online', 'stopPolling must restore online state when state.online is true');
+  });
+
+  test('hardRefresh on login view skips connectSocket', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const csrf = stubCsrfFetch(harness);
+    const { hardRefresh, dom } = harness.exports;
+
+    dom.loginView.hidden = false;
+    let ioCalls = 0;
+    harness.context.io = () => {
+      ioCalls += 1;
+      return harness.mockIo;
+    };
+
+    const canvas = harness.getEl('canvas-frame');
+    canvas.removeAttribute('src');
+
+    await hardRefresh();
+    await flushPromises();
+
+    assert.equal(csrf.csrf, 1, 'hard refresh still refreshes CSRF on login view');
+    assert.equal(ioCalls, 0, 'connectSocket must not be called when login view is visible');
+    assert.equal(canvas.getAttribute('src'), null, 'reloadCanvas must not be called when login view is visible');
+  });
+
+  test('sidebar server switcher synchronizes dom.serverUrl', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom } = harness.exports;
+    const sidebarSelect = harness.getEl('sidebar-server-select');
+    sidebarSelect.value = 'https://custom-server.example.com';
+    sidebarSelect.dispatch('change', {});
+
+    assert.equal(dom.serverUrl.value, 'https://custom-server.example.com');
+  });
+
+  test('showChat reloads canvas iframe', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { showChat, state } = harness.exports;
+    const canvas = harness.getEl('canvas-frame');
+    canvas.removeAttribute('src');
+
+    showChat();
+    assert.equal(
+      canvas.getAttribute('src'),
+      state.base + '/plugins/aqvn_intel_suite/webui/canvas.html'
+    );
   });
 });

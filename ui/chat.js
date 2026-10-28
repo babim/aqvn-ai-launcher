@@ -637,6 +637,10 @@
 
   /* Queue a message and report the outcome to the user. */
   function queueAndReport(text, messageId) {
+    if (text && typeof text === 'object') {
+      messageId = text.id;
+      text = text.content;
+    }
     var queued = queueOutbox(text, messageId);
     if (!queued.stored) {
       markQueueFailed(messageId, queued.error || 'browser storage is unavailable');
@@ -786,6 +790,7 @@
     dom.loginView.hidden = true;
     dom.chatView.hidden = false;
     dom.input.focus();
+    reloadCanvas();
   }
 
   function showLogin() {
@@ -1031,6 +1036,9 @@
       window.clearTimeout(state.pollTimer);
       state.pollTimer = null;
     }
+    if (state.online === true) {
+      setConnection('online');
+    }
   }
 
   function onServerRestart() {
@@ -1206,6 +1214,9 @@
     } catch (err) {
       showChatError((err && err.message) || String(err || 'CSRF refresh failed'));
     }
+    if (dom.loginView && !dom.loginView.hidden) {
+      return;
+    }
     connectSocket();
     reloadCanvas();
   }
@@ -1376,7 +1387,11 @@
     if (dom.sidebarServerSelect) {
       dom.sidebarServerSelect.addEventListener('change', function () {
         if (dom.sidebarServerSelect.value) {
-          setActiveServer(dom.sidebarServerSelect.value);
+          var target = dom.sidebarServerSelect.value;
+          if (dom.serverUrl) {
+            dom.serverUrl.value = target;
+          }
+          setActiveServer(target);
         }
       });
     }
@@ -1436,17 +1451,17 @@
         requestState();
       }
     } catch (err) {
-      if (!state.online && !state.polling) {
-        var record = state.logs.get(messageId);
-        if (record) {
-          record.queued = true;
-          record.failed = false;
-          paintRow(messageId);
+      var record = state.logs.get(messageId);
+      var row = state.rows.get(messageId);
+      if (record) {
+        record.queued = true;
+        record.failed = false;
+        if (row) {
+          row.className = 'msg msg-user msg-queued';
         }
-        queueAndReport(text, messageId);
-        return;
+        paintRow(messageId);
       }
-      showChatError(err.message);
+      queueAndReport(record || text, messageId);
     }
   }
 

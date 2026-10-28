@@ -1,13 +1,12 @@
 //! Rust-owned cookie jar for the bridge proxy.
 //!
 //! The webview never stores credentials or cookies: the proxy keeps every
-//! `Set-Cookie` value in this jar and replays them upstream. Two families are
-//! runtime-scoped by the chat server:
+//! `Set-Cookie` value in this jar and replays them upstream.
 //!
-//! * `session_<runtime_id>` — authentication session
+//! * `session_<hash>` — authentication session
 //! * `csrf_token_<runtime_id>` — CSRF token the browser normally sets itself
 //!
-//! `runtime_id` changes when the server restarts. Cookies from the previous
+//! `runtime_id` changes when the server restarts. CSRF tokens from the previous
 //! generation are dead, so a new bootstrap drops them before storing the
 //! replacement pair.
 
@@ -136,9 +135,7 @@ impl CookieJar {
 }
 
 fn runtime_scoped_id(name: &str) -> Option<&str> {
-    name.strip_prefix(SESSION_PREFIX)
-        .or_else(|| name.strip_prefix(CSRF_PREFIX))
-        .filter(|id| !id.is_empty())
+    name.strip_prefix(CSRF_PREFIX).filter(|id| !id.is_empty())
 }
 
 #[cfg(test)]
@@ -181,22 +178,28 @@ mod tests {
     #[test]
     fn rotation_drops_previous_generation_cookies() {
         let mut jar = CookieJar::new();
-        jar.store("session_old00000=stale");
+        jar.store("session_db7dddd06e57fbec1602e03fe7473796=active-session");
         jar.apply_bootstrap("old00000", "old-token");
-        jar.store("session_old00000=stale");
-        jar.store("session_new11111=fresh");
+        assert_eq!(
+            jar.get("session_db7dddd06e57fbec1602e03fe7473796"),
+            Some("active-session")
+        );
 
-        jar.apply_bootstrap("new11111", "new-token");
+        jar.apply_bootstrap("763a48897ec809f5", "new-token");
 
-        assert_eq!(jar.runtime_id(), Some("new11111"));
+        assert_eq!(jar.runtime_id(), Some("763a48897ec809f5"));
         assert_eq!(jar.csrf_token(), Some("new-token"));
         assert_eq!(
             jar.session_cookie_name(),
-            Some("session_new11111"),
-            "old generation session dropped, new one kept"
+            Some("session_db7dddd06e57fbec1602e03fe7473796"),
+            "session cookie preserved across bootstrap"
+        );
+        assert_eq!(
+            jar.get("session_db7dddd06e57fbec1602e03fe7473796"),
+            Some("active-session")
         );
         assert_eq!(jar.get("csrf_token_old00000"), None);
-        assert_eq!(jar.get("csrf_token_new11111"), Some("new-token"));
+        assert_eq!(jar.get("csrf_token_763a48897ec809f5"), Some("new-token"));
     }
 
     #[test]
@@ -205,11 +208,13 @@ mod tests {
         jar.apply_bootstrap("abcd1234", "token-1");
 
         assert!(!jar.observes_rotation("session_abcd1234"));
+        assert!(!jar.observes_rotation("session_db7dddd06e57fbec1602e03fe7473796"));
+        assert!(!jar.observes_rotation("session_ffff9999"));
         assert!(!jar.observes_rotation("csrf_token_abcd1234"));
-        assert!(jar.observes_rotation("session_ffff9999"));
         assert!(jar.observes_rotation("csrf_token_ffff9999"));
         assert!(!jar.observes_rotation("other_cookie"));
         assert!(!jar.observes_rotation("session_"));
+        assert!(!jar.observes_rotation("csrf_token_"));
     }
 
     #[test]

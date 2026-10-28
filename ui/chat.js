@@ -166,6 +166,9 @@
   /* ------------------------------------------------------------------ */
 
   function isLoginPage(response) {
+    if (response.status >= 400 && response.status !== 401) {
+      return false;
+    }
     var type = (response.headers.get('content-type') || '').toLowerCase();
     return type.indexOf('text/html') !== -1;
   }
@@ -226,8 +229,9 @@
     try {
       return await response.json();
     } catch (err) {
-      sessionExpired();
-      throw new Error('Session expired');
+      throw new Error(
+        'Failed to parse JSON response from /api/' + name + ': ' + err.message
+      );
     }
   }
 
@@ -467,10 +471,12 @@
             callback({ csrf_token: token, handlers: ['ws_webui'] });
           })
           .catch(function (err) {
-            if (state.everConnected) {
+            var msg = (err && err.message) || String(err || '');
+            var isAuth = /unauthor|forbidden|401|403|invalid session/i.test(msg);
+            if (state.everConnected && isAuth) {
               sessionExpired();
             } else {
-              showChatError(err.message);
+              showChatError(msg);
             }
             callback({});
           });
@@ -538,7 +544,12 @@
         correlationId: correlationId
       },
       function (ack) {
-        var result = ack && Array.isArray(ack.results) ? ack.results[0] : null;
+        var result =
+          ack && typeof ack === 'object'
+            ? Array.isArray(ack.results)
+              ? ack.results[0]
+              : ack
+            : null;
         if (!result) {
           showChatError('state_request returned no result');
           startPolling();
@@ -549,10 +560,24 @@
           return;
         }
         var error = result.error;
-        var code = error && typeof error === 'object' ? error.code : '';
+        var code =
+          error && typeof error === 'object' ? error.code : result.code || '';
         var text =
-          error && typeof error === 'object' ? error.error || code : String(error || '');
-        if (/unauthor|forbidden|session|csrf/i.test(String(code) + ' ' + String(text))) {
+          error && typeof error === 'object'
+            ? error.error || error.message || code
+            : String(error || result.message || code || '');
+        var isNoHandlers =
+          code === 'NO_HANDLERS' ||
+          /no[_\s-]?handlers/i.test(String(code) + ' ' + String(text));
+        if (isNoHandlers) {
+          startPolling();
+          return;
+        }
+        if (
+          /unauthor|forbidden|401|403|csrf|(?:invalid|expired)[_\s-]?session|session[_\s-]?(?:expired|invalid)/i.test(
+            String(code) + ' ' + String(text)
+          )
+        ) {
           sessionExpired();
           return;
         }
@@ -606,7 +631,7 @@
         return;
       }
       apiCall('poll', {
-        context: state.context || '',
+        context: state.context || null,
         log_from: 0,
         notifications_from: 0,
         timezone: TIMEZONE
@@ -618,9 +643,7 @@
         })
         .catch(function (err) {
           if (!state.expired) {
-            stopPolling();
             showChatError(err.message);
-            return;
           }
         });
       state.pollTimer = window.setTimeout(tick, 600);
@@ -648,8 +671,19 @@
           connectSocket();
         }
       })
-      .catch(function () {
-        sessionExpired();
+      .catch(function (err) {
+        var msg = (err && err.message) || String(err || '');
+        var isAuth = /unauthor|forbidden|401|403|invalid session/i.test(msg);
+        if (isAuth) {
+          sessionExpired();
+          return;
+        }
+        showChatError('Reconnecting after restart…');
+        window.setTimeout(function () {
+          if (!state.expired) {
+            onServerRestart();
+          }
+        }, 1500);
       });
   }
 

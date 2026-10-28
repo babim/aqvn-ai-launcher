@@ -1,50 +1,33 @@
 #!/usr/bin/env python3
-"""Generate the AQVN Workspace icon set from a geometric AQVN mark."""
+"""Generate the AQVN Workspace icon set from the master official icon."""
 
+import urllib.request
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-OUT = Path(__file__).resolve().parent.parent / "src-tauri" / "icons"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "src-tauri" / "icons"
+ASSETS = Path(__file__).resolve().parent / "assets"
+MASTER_FILE = ASSETS / "icon-512.png"
+MASTER_URL = "https://a0.matmagoc.com/public/icon-512.png"
 
 BG = (11, 18, 32, 255)
 TEAL = (34, 211, 238, 255)
 WHITE = (248, 250, 252, 255)
 
 
-def draw_mark(size: int) -> Image.Image:
-    """Render the mark at 4x then downsample for clean edges."""
-    scale = 4
-    s = size * scale
-    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((0, 0, s - 1, s - 1), radius=int(s * 0.22), fill=BG)
-
-    cx = s / 2
-    apex_y = s * 0.20
-    base_y = s * 0.80
-    half_base = s * 0.27
-    stroke = max(1, int(s * 0.105))
-
-    draw.line(
-        [(cx, apex_y), (cx - half_base, base_y)],
-        fill=TEAL,
-        width=stroke,
-        joint="curve",
-    )
-    draw.line(
-        [(cx, apex_y), (cx + half_base, base_y)],
-        fill=WHITE,
-        width=stroke,
-        joint="curve",
-    )
-    bar_y = base_y - (base_y - apex_y) * 0.36
-    draw.line(
-        [(cx - half_base * 0.52, bar_y), (cx + half_base * 0.52, bar_y)],
-        fill=TEAL,
-        width=max(1, int(stroke * 0.72)),
-    )
-    return img.resize((size, size), Image.LANCZOS)
+def load_master_icon() -> Image.Image:
+    """Load the 512x512 master icon, fetching from official URL if absent."""
+    if not MASTER_FILE.exists():
+        ASSETS.mkdir(parents=True, exist_ok=True)
+        req = urllib.request.Request(MASTER_URL, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            MASTER_FILE.write_bytes(resp.read())
+    img = Image.open(MASTER_FILE).convert("RGBA")
+    if img.size != (512, 512):
+        img = img.resize((512, 512), Image.LANCZOS)
+    return img
 
 
 def draw_tray(size: int, busy: bool) -> Image.Image:
@@ -77,15 +60,25 @@ def main() -> None:
     # Raw RGBA (32x32) embedded in the binary; avoids pulling the PNG decoder.
     (OUT / "tray-idle.rgba").write_bytes(draw_tray(32, False).tobytes())
     (OUT / "tray-busy.rgba").write_bytes(draw_tray(32, True).tobytes())
-    for name, size in {
+
+    master = load_master_icon()
+    targets = {
         "icon.png": 512,
-        "32x32.png": 32,
+        "128x128@" + "2x.png": 256,
         "128x128.png": 128,
-        "128x128@2x.png": 256,
-    }.items():
-        draw_mark(size).save(OUT / name)
-    draw_mark(256).save(
+        "32x32.png": 32,
+    }
+    for name, size in targets.items():
+        if master.size == (size, size):
+            icon = master.copy()
+        else:
+            icon = master.resize((size, size), Image.LANCZOS)
+        icon.save(OUT / name, format="PNG")
+
+    ico_base = master.resize((256, 256), Image.LANCZOS)
+    ico_base.save(
         OUT / "icon.ico",
+        format="ICO",
         sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
     )
     print(f"wrote icons to {OUT}")

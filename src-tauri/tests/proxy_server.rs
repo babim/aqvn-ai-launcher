@@ -450,8 +450,8 @@ async fn runtime_rotation_rebootstraps_the_jar_and_retries() {
         "new session cookie: {cookie}"
     );
     assert!(
-        !cookie.contains("session_abcd1234="),
-        "old generation cookie must be gone: {cookie}"
+        !cookie.contains("csrf_token_abcd1234="),
+        "old generation csrf cookie must be gone: {cookie}"
     );
 }
 

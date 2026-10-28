@@ -742,6 +742,23 @@ describe('ui/chat.js Markdown rendering and terminal code styling', () => {
     assert.match(html, /bad/, 'the link label survives even when the URL is rejected');
   });
 
+  test('VAL-MD-002: a two-line plain message keeps its line break', () => {
+    const harness = createHarness();
+    const { renderContent } = harness.exports;
+    const node = harness.getEl('md-breaks');
+
+    renderContent(node, 'first line\nsecond line');
+    const html = node.innerHTML;
+
+    assert.match(html, /first line/, 'the first line must be rendered');
+    assert.match(html, /<br\s*\/?>/, 'a single newline must become a <br>');
+    assert.match(html, /second line/, 'the second line must be rendered');
+    assert.ok(
+      html.indexOf('first line') < html.indexOf('<br'),
+      'the break must sit between the two lines'
+    );
+  });
+
   test('VAL-MD-003: code blocks are highlighted and decorated with language badge and Copy button', () => {
     const harness = createHarness();
     const { renderContent } = harness.exports;

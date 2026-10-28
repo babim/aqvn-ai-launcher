@@ -223,6 +223,7 @@
     try {
       return lib.parse(source, {
         gfm: true,
+        breaks: true,
         async: false,
         renderer: markdownRenderer(lib) || undefined
       });

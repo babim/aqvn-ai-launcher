@@ -92,7 +92,8 @@ __harness__.exports = (function () {
     'requestState', 'startPolling', 'stopPolling', 'onServerRestart',
     'sessionExpired', 'state', 'dom', 'showChatError', 'init', 'initLayout',
     'toggleSidebar', 'toggleCanvas', 'handleShortcut', 'applySidebarWidth',
-    'applyCanvasWidth', 'setSidebarCollapsed', 'setCanvasCollapsed'
+    'applyCanvasWidth', 'setSidebarCollapsed', 'setCanvasCollapsed',
+    'renderContent', 'copyCode'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -198,6 +199,14 @@ __harness__.exports = (function () {
   };
 
   vm.createContext(context);
+
+  // Vendor libraries define window.marked / window.hljs in the webview. Load
+  // them into the same sandbox so renderContent can be exercised for real.
+  ['marked.min.js', 'highlight.min.js'].forEach((name) => {
+    const vendorPath = new URL(`../../ui/vendor/${name}`, import.meta.url);
+    vm.runInContext(fs.readFileSync(vendorPath, 'utf8'), context);
+  });
+
   vm.runInContext(code, context);
 
   // Initialize dom references needed by chat.js
@@ -666,5 +675,160 @@ describe('ui/index.html 3-column layout, splitters and panel toggles', () => {
     assert.ok(dom.sidebarServerSelect, 'the sidebar must expose a server switcher');
     assert.equal(dom.sidebarServerSelect.children.length, 1);
     assert.equal(dom.sidebarServerSelect.children[0].value, 'https://a0.matmagoc.com');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-MD-002..004: Markdown, highlight, copy and terminal styling    */
+/* ------------------------------------------------------------------ */
+
+function readChatCss() {
+  return fs.readFileSync(new URL('../../ui/chat.css', import.meta.url), 'utf8');
+}
+
+function readChatJs() {
+  return fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+}
+
+describe('ui/chat.js Markdown rendering and terminal code styling', () => {
+  test('VAL-MD-002: renderContent parses Markdown into structured HTML', () => {
+    const harness = createHarness();
+    const { renderContent } = harness.exports;
+    assert.equal(typeof renderContent, 'function', 'renderContent must exist');
+
+    const node = harness.getEl('md-body');
+    renderContent(
+      node,
+      '# Title\n\n**bold** and *italic*\n\n- one\n- two\n\n> quoted\n\n[link](https://example.com)\n'
+    );
+
+    const html = node.innerHTML;
+    assert.match(html, /<h1>Title<\/h1>/, 'headers must render as <h1>');
+    assert.match(html, /<strong>bold<\/strong>/, 'bold must render as <strong>');
+    assert.match(html, /<em>italic<\/em>/, 'italic must render as <em>');
+    assert.match(html, /<ul>[\s\S]*<li>one<\/li>[\s\S]*<li>two<\/li>/, 'lists must render as <ul>/<li>');
+    assert.match(html, /<blockquote>/, 'blockquotes must render as <blockquote>');
+    assert.match(
+      html,
+      /<a href="https:\/\/example\.com" rel="noopener noreferrer">link<\/a>/,
+      'links must render as anchors with rel=noopener'
+    );
+    assert.doesNotMatch(html, /\*\*bold\*\*/, 'Markdown markers must not leak as plain text');
+  });
+
+  test('VAL-MD-002: renderContent escapes raw HTML and unsafe URLs', () => {
+    const harness = createHarness();
+    const { renderContent } = harness.exports;
+    const node = harness.getEl('md-safe');
+
+    renderContent(node, '<img src=x onerror="alert(1)"> [bad](javascript:alert(1))');
+    const html = node.innerHTML;
+
+    assert.doesNotMatch(html, /<img/i, 'raw HTML must never reach the DOM as markup');
+    assert.match(html, /&lt;img/, 'raw HTML must be escaped to text');
+    assert.doesNotMatch(html, /href="javascript:/i, 'javascript: links must be dropped');
+    assert.match(html, /bad/, 'the link label survives even when the URL is rejected');
+  });
+
+  test('VAL-MD-003: code blocks are highlighted and decorated with language badge and Copy button', () => {
+    const harness = createHarness();
+    const { renderContent } = harness.exports;
+    const node = harness.getEl('md-code');
+
+    renderContent(node, '```js\nconst answer = 42;\n```\n');
+    const html = node.innerHTML;
+
+    assert.match(html, /class="code-block"/, 'code blocks must be wrapped in .code-block');
+    assert.match(html, /class="code-lang">js<\/span>/, 'language badge must show the fence language');
+    assert.match(html, /class="code-copy"[^>]*>Copy<\/button>/, 'a Copy button must be present');
+    assert.match(html, /<pre><code class="hljs language-js">/, 'code must carry hljs language classes');
+    assert.match(html, /<span class="hljs-keyword">const<\/span>/, 'highlight.js must tokenize the code');
+    assert.match(html, /<span class="hljs-number">42<\/span>/, 'highlight.js must color literals');
+  });
+
+  test('VAL-MD-003: Copy button writes the code to navigator.clipboard and shows feedback', async () => {
+    const harness = createHarness();
+    const { copyCode } = harness.exports;
+    assert.equal(typeof copyCode, 'function', 'copyCode must exist');
+
+    let copied = null;
+    harness.context.navigator = {
+      clipboard: {
+        writeText: (value) => {
+          copied = value;
+          return Promise.resolve();
+        }
+      }
+    };
+
+    const button = {
+      textContent: 'Copy',
+      classList: createClassList(),
+      parentNode: null
+    };
+    const block = {
+      classList: createClassList(),
+      querySelector: () => ({ textContent: 'const answer = 42;' }),
+      parentNode: null
+    };
+    block.classList.add('code-block');
+    button.parentNode = block;
+
+    copyCode(button);
+    // Cross-realm promises settle over a couple of macrotasks.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(copied, 'const answer = 42;', 'clipboard.writeText must receive the raw code');
+    assert.equal(button.textContent, 'Copied!', 'button must show copied feedback');
+    assert.ok(button.classList.contains('copied'), 'button must expose the copied state');
+
+    const reset = harness.timeouts.find((t) => t.delay === 1200);
+    assert.ok(reset, 'feedback must reset on a timer');
+    reset.fn();
+    assert.equal(button.textContent, 'Copy', 'button label must return to Copy');
+  });
+
+  test('VAL-MD-004: code_exe and tool messages use the #0d1117 terminal theme and $ EXECUTE branding', () => {
+    const css = readChatCss();
+
+    assert.match(
+      css,
+      /\.msg-code_exe[^{]*\{[^}]*#0d1117/i,
+      'msg-code_exe must paint the #0d1117 terminal background'
+    );
+    assert.match(
+      css,
+      /\.msg-tool[^{]*\{[^}]*#0d1117/i,
+      'msg-tool must paint the #0d1117 terminal background'
+    );
+    assert.match(
+      css,
+      /\.msg-code_exe\s+\.msg-head[^{]*\{[^}]*var\(--accent\)/i,
+      'code_exe header branding must be cyan'
+    );
+    assert.match(
+      css,
+      /\.msg-tool\s+\.msg-head[^{]*\{[^}]*var\(--accent\)/i,
+      'tool header branding must be cyan'
+    );
+    assert.ok(readChatJs().includes("'$ EXECUTE'"), 'code_exe/tool rows must show $ EXECUTE');
+  });
+
+  test("VAL-MD-004: thought content renders in <details class='thought-step'>", () => {
+    const harness = createHarness();
+    const { renderContent } = harness.exports;
+    const node = harness.getEl('md-thought');
+
+    renderContent(node, 'Checking **facts** first', 'thought');
+    const html = node.innerHTML;
+
+    assert.match(html, /^<details class="thought-step">/, 'thought content must be collapsible');
+    assert.match(html, /<summary>Thought<\/summary>/, 'details must expose a summary');
+    assert.match(html, /<strong>facts<\/strong>/, 'thought body must still parse Markdown');
+    assert.match(html, /<\/details>$/, 'details must be closed');
+
+    renderContent(node, 'plain answer', 'agent');
+    assert.doesNotMatch(node.innerHTML, /thought-step/, 'normal messages must not be collapsed');
   });
 });

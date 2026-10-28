@@ -396,7 +396,7 @@ button:disabled {
 }
 
 .msg-body {
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
   font-size: 0.92rem;
   line-height: 1.45;
@@ -581,4 +581,225 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Markdown rendering and terminal code theme                         */
+/* ------------------------------------------------------------------ */
+
+.msg-body p {
+  margin: 0 0 8px;
+}
+
+.msg-body p:last-child {
+  margin-bottom: 0;
+}
+
+.msg-body h1,
+.msg-body h2,
+.msg-body h3,
+.msg-body h4,
+.msg-body h5,
+.msg-body h6 {
+  margin: 10px 0 6px;
+  font-size: 1em;
+  color: var(--ink);
+}
+
+.msg-body ul,
+.msg-body ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+
+.msg-body blockquote {
+  margin: 8px 0;
+  padding: 4px 10px;
+  border-left: 3px solid #22d3ee66;
+  background: #0d1b2c;
+  color: var(--muted);
+}
+
+.msg-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.msg-body code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #0d1117;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86em;
+}
+
+.msg-body img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.msg-body table {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+.msg-body th,
+.msg-body td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.msg-body hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 10px 0;
+}
+
+/* Code blocks: language badge, copy button, dark terminal surface. */
+.code-block {
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0d1117;
+}
+
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  background: #111827;
+  border-bottom: 1px solid var(--line);
+}
+
+.code-lang {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.code-copy {
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  border-radius: 6px;
+}
+
+.code-copy.copied {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 10px;
+  overflow-x: auto;
+  background: #0d1117;
+}
+
+.code-block pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* highlight.js token palette (dark terminal). */
+.hljs-comment,
+.hljs-quote {
+  color: #8b949e;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag {
+  color: #ff7b72;
+}
+
+.hljs-string,
+.hljs-attr,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: #a5d6ff;
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  color: #79c0ff;
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-name {
+  color: #d2a8ff;
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-built_in,
+.hljs-type,
+.hljs-params {
+  color: #ffa657;
+}
+
+.hljs-meta,
+.hljs-meta .hljs-keyword {
+  color: #79c0ff;
+}
+
+.hljs-addition {
+  color: #7ee787;
+}
+
+.hljs-deletion {
+  color: #ffa198;
+}
+
+/* Terminal message surfaces: code_exe and tool runs. */
+.msg-code_exe,
+.msg-tool {
+  background: #0d1117;
+  border-color: #1f6feb55;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.msg-code_exe .msg-head,
+.msg-tool .msg-head {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.1em;
+}
+
+/* Collapsible thought steps. */
+.thought-step {
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b1220;
+}
+
+.thought-step summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.thought-step summary:hover {
+  color: var(--accent);
+}
+
+.thought-body {
+  padding: 0 10px 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
 }

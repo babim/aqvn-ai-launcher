@@ -35,7 +35,10 @@
     warning: 'Warning',
     error: 'Error',
     util: 'Internal',
-    input: 'Input'
+    input: 'Input',
+    thought: 'Thought',
+    thinking: 'Thought',
+    reasoning: 'Thought'
   };
 
   var dom = {};
@@ -99,26 +102,186 @@
     return Promise.resolve();
   }
 
-  /* Message text with real http(s) links. Rust cancels external navigation
-   * and hands the URL to the system browser, so the app page never leaves. */
-  function renderContent(node, text) {
-    node.textContent = '';
-    var pattern = /https?:\/\/[^\s<>"']+/gi;
-    var last = 0;
-    var match;
-    while ((match = pattern.exec(text)) !== null) {
-      if (match.index > last) {
-        node.appendChild(document.createTextNode(text.slice(last, match.index)));
-      }
-      var link = document.createElement('a');
-      link.href = match[0];
-      link.textContent = match[0];
-      link.rel = 'noopener noreferrer';
-      node.appendChild(link);
-      last = match.index + match[0].length;
+  /* ------------------------------------------------------------------ */
+  /* Safe Markdown rendering                                            */
+  /* ------------------------------------------------------------------ */
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /* Only web and mail links survive: javascript:/data: URLs become text. */
+  function safeUrl(value) {
+    var raw = String(value == null ? '' : value).trim();
+    return /^(https?:\/\/|mailto:)/i.test(raw) ? raw : '';
+  }
+
+  function markdownLib() {
+    if (typeof marked !== 'undefined' && marked && typeof marked.parse === 'function') {
+      return marked;
     }
-    if (last < text.length) {
-      node.appendChild(document.createTextNode(text.slice(last)));
+    if (window.marked && typeof window.marked.parse === 'function') {
+      return window.marked;
+    }
+    return null;
+  }
+
+  function highlightLib() {
+    if (typeof hljs !== 'undefined' && hljs && typeof hljs.highlight === 'function') {
+      return hljs;
+    }
+    if (window.hljs && typeof window.hljs.highlight === 'function') {
+      return window.hljs;
+    }
+    return null;
+  }
+
+  function highlightCode(code, lang) {
+    var lib = highlightLib();
+    if (!lib) {
+      return escapeHtml(code);
+    }
+    try {
+      if (lang && typeof lib.getLanguage === 'function' && lib.getLanguage(lang)) {
+        return lib.highlight(code, { language: lang, ignoreIllegals: true }).value;
+      }
+      return lib.highlightAuto(code).value;
+    } catch (err) {
+      return escapeHtml(code);
+    }
+  }
+
+  function renderCodeBlock(token) {
+    var code = token && token.text != null ? token.text : '';
+    var info = String((token && token.lang) || '').trim().split(/\s+/)[0];
+    var lang = /^[a-z0-9+#._-]+$/i.test(info) ? info : '';
+    var body = highlightCode(code, lang);
+    var label = lang ? escapeHtml(lang) : 'text';
+    return (
+      '<div class="code-block">' +
+      '<div class="code-head">' +
+      '<span class="code-lang">' + label + '</span>' +
+      '<button type="button" class="code-copy" data-copy-code aria-label="Copy code">Copy</button>' +
+      '</div>' +
+      '<pre><code class="hljs' + (lang ? ' language-' + escapeHtml(lang) : '') + '">' +
+      body +
+      '</code></pre>' +
+      '</div>'
+    );
+  }
+
+  function markdownRenderer(lib) {
+    if (!lib || typeof lib.Renderer !== 'function') {
+      return null;
+    }
+    var renderer = new lib.Renderer();
+    /* Raw HTML in a message is untrusted: show it as text, never execute it. */
+    renderer.html = function (token) {
+      return escapeHtml(token && token.text != null ? token.text : token);
+    };
+    renderer.code = renderCodeBlock;
+    renderer.link = function (token) {
+      var href = safeUrl(token && token.href);
+      var label =
+        token && token.tokens && this.parser
+          ? this.parser.parseInline(token.tokens)
+          : escapeHtml(token && token.text);
+      if (!href) {
+        return label;
+      }
+      var title = token && token.title ? ' title="' + escapeHtml(token.title) + '"' : '';
+      return (
+        '<a href="' + escapeHtml(href) + '" rel="noopener noreferrer"' + title + '>' + label + '</a>'
+      );
+    };
+    renderer.image = function (token) {
+      var src = safeUrl(token && token.href);
+      var alt = escapeHtml(token && token.text);
+      if (!src || !/^https?:\/\//i.test(src)) {
+        return alt ? '<span class="md-image-alt">' + alt + '</span>' : '';
+      }
+      return (
+        '<img src="' + escapeHtml(src) + '" alt="' + alt +
+        '" loading="lazy" referrerpolicy="no-referrer">'
+      );
+    };
+    return renderer;
+  }
+
+  function renderMarkdown(text) {
+    var source = String(text == null ? '' : text);
+    var lib = markdownLib();
+    if (!lib) {
+      return '<p>' + escapeHtml(source).replace(/\n/g, '<br>') + '</p>';
+    }
+    try {
+      return lib.parse(source, {
+        gfm: true,
+        async: false,
+        renderer: markdownRenderer(lib) || undefined
+      });
+    } catch (err) {
+      return '<p>' + escapeHtml(source).replace(/\n/g, '<br>') + '</p>';
+    }
+  }
+
+  /* Message text rendered as safe Markdown. Code blocks get a language badge
+   * and a 1-click Copy button; thought messages fold into <details>. */
+  function renderContent(node, text, type) {
+    if (!node) {
+      return;
+    }
+    var html = renderMarkdown(text);
+    var kind = String(type == null ? '' : type).toLowerCase();
+    if (type === true || kind === 'thought' || kind === 'thinking' || kind === 'reasoning') {
+      html =
+        '<details class="thought-step">' +
+        '<summary>Thought</summary>' +
+        '<div class="thought-body">' + html + '</div>' +
+        '</details>';
+    }
+    node.innerHTML = html;
+  }
+
+  /* 1-click code copy. The button sits inside .code-block next to <code>. */
+  function copyCode(button) {
+    var block = button;
+    while (block && !(block.classList && block.classList.contains('code-block'))) {
+      block = block.parentNode;
+    }
+    var code = block && block.querySelector ? block.querySelector('code') : null;
+    var text = code ? code.textContent : '';
+    var clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : null;
+    if (!clipboard || typeof clipboard.writeText !== 'function' || !text) {
+      return;
+    }
+    Promise.resolve(clipboard.writeText(text))
+      .then(function () {
+        button.textContent = 'Copied!';
+        button.classList.add('copied');
+        window.setTimeout(function () {
+          button.textContent = 'Copy';
+          button.classList.remove('copied');
+        }, 1200);
+      })
+      .catch(function () {
+        /* Clipboard permission denied: leave the label untouched. */
+      });
+  }
+
+  function onMessagesClick(event) {
+    var target = event.target;
+    while (target && target !== dom.messages) {
+      if (target.classList && target.classList.contains('code-copy')) {
+        copyCode(target);
+        return;
+      }
+      target = target.parentNode;
     }
   }
 
@@ -270,8 +433,12 @@
     }
     var type = record.type || 'info';
     row.className = 'msg msg-' + type;
-    setText(row.firstChild, TYPE_LABELS[type] || type);
-    renderContent(row.lastChild, record.content || '');
+    var label = TYPE_LABELS[type] || type;
+    if (type === 'code_exe' || type === 'tool') {
+      label = '$ EXECUTE';
+    }
+    setText(row.firstChild, label);
+    renderContent(row.lastChild, record.content || '', record.thought === true ? 'thought' : type);
   }
 
   function placeRow(id) {
@@ -1149,6 +1316,10 @@
     dom.stop = byId('stop-btn');
     dom.newChat = byId('new-chat-btn');
     dom.connection = byId('connection');
+
+    if (dom.messages) {
+      dom.messages.addEventListener('click', onMessagesClick);
+    }
 
     state.base = resolveBase();
     dom.proxyUrl.value = state.base;

@@ -88,7 +88,25 @@
       <a class="brand" href="index.html">AQVN Workspace</a>
       <span id="active-server-url" class="server-badge" title="Active Server URL">https://a0.matmagoc.com</span>
       <span id="connection" class="conn" role="status" aria-live="polite">Offline</span>
-      <a class="nav" id="open-settings" href="settings.html">Settings</a>
+      <div class="topbar-actions">
+        <button
+          id="toggle-sidebar-btn"
+          type="button"
+          class="icon-btn"
+          title="Toggle sidebar (Alt+S)"
+          aria-label="Toggle sidebar"
+          aria-pressed="false"
+        >&#9776;</button>
+        <button
+          id="toggle-canvas-btn"
+          type="button"
+          class="icon-btn"
+          title="Toggle Intel Suite canvas (Alt+C)"
+          aria-label="Toggle Intel Suite canvas"
+          aria-pressed="false"
+        >&#9707;</button>
+        <a class="nav" id="open-settings" href="settings.html">Settings</a>
+      </div>
     </header>
 
     <main>
@@ -151,15 +169,34 @@
       </section>
 
       <section id="chat-view" class="chat-shell" aria-label="Conversation" hidden>
-        <nav id="contexts" class="contexts" aria-label="Conversations"></nav>
-        <div class="chat-main">
+        <aside id="sidebar" class="sidebar" aria-label="Sessions and server">
+          <div class="sidebar-head">
+            <span class="sidebar-title">Sessions</span>
+            <button id="new-chat-btn" type="button" class="sidebar-btn">New chat</button>
+          </div>
+          <div class="sidebar-server">
+            <label for="sidebar-server-select">Server</label>
+            <select id="sidebar-server-select" aria-label="Server Switcher"></select>
+          </div>
+          <nav id="contexts" class="contexts" aria-label="Conversations"></nav>
+        </aside>
+
+        <div
+          id="splitter-left"
+          class="splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          tabindex="0"
+        ></div>
+
+        <div id="chat-pane" class="chat-pane">
           <div class="chat-toolbar">
             <div class="chat-title-group">
               <h1>Conversation</h1>
               <span id="chat-server-url" class="chat-server-badge">https://a0.matmagoc.com</span>
             </div>
             <div class="actions">
-              <button id="new-chat-btn" type="button">New chat</button>
               <button id="stop-btn" type="button" disabled>Stop</button>
             </div>
           </div>
@@ -178,6 +215,35 @@
             <button id="send-btn" type="submit">Send</button>
           </form>
         </div>
+
+        <div
+          id="splitter-right"
+          class="splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize Intel Suite canvas"
+          tabindex="0"
+        ></div>
+
+        <aside id="canvas-pane" class="canvas-pane" aria-label="Intel Suite">
+          <div class="canvas-tab">
+            <span class="canvas-tab-title">Intel Suite</span>
+            <div class="canvas-tab-actions">
+              <button
+                id="close-canvas-btn"
+                type="button"
+                title="Close Intel Suite"
+                aria-label="Close Intel Suite"
+              >&#10005;</button>
+            </div>
+          </div>
+          <iframe
+            id="canvas-frame"
+            class="canvas-frame"
+            title="Intel Suite"
+            data-src="/plugins/aqvn_intel_suite/webui/canvas.html"
+          ></iframe>
+        </aside>
       </section>
     </main>
   </body>

@@ -51,6 +51,18 @@ body {
   background: #0b1220cc;
 }
 
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-btn {
+  padding: 5px 10px;
+  line-height: 1;
+}
+
 .brand {
   color: var(--ink);
   font-weight: 600;
@@ -195,24 +207,79 @@ button:disabled {
   font-size: 0.78rem;
 }
 
+/* Three-column shell: sidebar | splitter | chat | splitter | canvas. */
 .chat-shell {
   width: 100%;
-  max-width: 900px;
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 16px;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: stretch;
   height: calc(100vh - 106px);
   min-height: 420px;
 }
 
-.contexts {
+/* Left column: session contexts, New Chat, Server Switcher. */
+#sidebar {
+  flex: 0 0 auto;
+  width: 220px;
+  min-width: 160px;
+  max-width: 400px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  gap: 10px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--panel);
+  overflow: hidden;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-title {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sidebar-head .sidebar-btn {
+  margin-left: auto;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+}
+
+.sidebar-server {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-server label {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.sidebar-server select {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.contexts {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   overflow-y: auto;
 }
 
@@ -236,11 +303,42 @@ button:disabled {
   background: var(--accent-soft);
 }
 
-.chat-main {
-  display: flex;
-  flex-direction: column;
+/* Draggable resize handles between the columns. */
+.splitter {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: var(--line);
+}
+
+.splitter:hover::after,
+.splitter:focus-visible::after,
+.splitter.dragging::after {
+  background: var(--accent);
+}
+
+.splitter:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Center column: messages + composer. */
+#chat-pane {
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -356,9 +454,61 @@ button:disabled {
   min-height: 56px;
 }
 
+/* Right column: Intel Suite tab + canvas iframe. */
+#canvas-pane {
+  flex: 0 0 auto;
+  width: 450px;
+  min-width: 280px;
+  max-width: 800px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.canvas-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.canvas-tab-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.canvas-tab-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.canvas-tab-actions button {
+  padding: 3px 9px;
+  font-size: 0.78rem;
+}
+
+.canvas-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #0b1220;
+}
+
+#sidebar.collapsed,
+#canvas-pane.collapsed {
+  display: none !important;
+}
+
 @media (max-width: 700px) {
   .chat-shell {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
 
   .contexts {

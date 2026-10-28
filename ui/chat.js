@@ -57,7 +57,9 @@
     everConnected: false,
     polling: false,
     pollTimer: null,
-    seq: 0
+    seq: 0,
+    sidebarCollapsed: false,
+    canvasCollapsed: false
   };
 
   function byId(id) {
@@ -688,8 +690,224 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Actions                                                            */
+  /* Layout: 3 columns, splitters, panel toggles                        */
   /* ------------------------------------------------------------------ */
+
+  var SIDEBAR_KEY = 'aqvn_sidebar_collapsed';
+  var CANVAS_KEY = 'aqvn_canvas_collapsed';
+  var CANVAS_PATH = '/plugins/aqvn_intel_suite/webui/canvas.html';
+  var SIDEBAR_MIN = 160;
+  var SIDEBAR_MAX = 400;
+  var CANVAS_MIN = 280;
+  var CANVAS_MAX = 800;
+  var SIDEBAR_DEFAULT = 220;
+  var CANVAS_DEFAULT = 450;
+
+  function readCollapsed(key) {
+    try {
+      return window.localStorage.getItem(key) === 'true';
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function persistCollapsed(key, collapsed) {
+    try {
+      window.localStorage.setItem(key, collapsed ? 'true' : 'false');
+    } catch (err) {
+      /* storage is optional */
+    }
+  }
+
+  function setPanelCollapsed(panel, button, key, collapsed) {
+    if (!panel) {
+      return;
+    }
+    if (collapsed) {
+      panel.setAttribute('hidden', '');
+    } else {
+      panel.removeAttribute('hidden');
+    }
+    panel.classList.toggle('collapsed', !!collapsed);
+    if (button) {
+      button.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+    }
+    persistCollapsed(key, !!collapsed);
+  }
+
+  function setSidebarCollapsed(collapsed) {
+    state.sidebarCollapsed = !!collapsed;
+    setPanelCollapsed(dom.sidebar, dom.toggleSidebarBtn, SIDEBAR_KEY, state.sidebarCollapsed);
+  }
+
+  function setCanvasCollapsed(collapsed) {
+    state.canvasCollapsed = !!collapsed;
+    setPanelCollapsed(dom.canvasPane, dom.toggleCanvasBtn, CANVAS_KEY, state.canvasCollapsed);
+    if (!state.canvasCollapsed) {
+      loadCanvas();
+    }
+  }
+
+  function toggleSidebar() {
+    setSidebarCollapsed(!state.sidebarCollapsed);
+  }
+
+  function toggleCanvas() {
+    setCanvasCollapsed(!state.canvasCollapsed);
+  }
+
+  /* The Intel Suite lives behind the bridge proxy, so the iframe points at
+   * the proxy origin when one is known. */
+  function loadCanvas() {
+    if (!dom.canvasFrame) {
+      return;
+    }
+    var url = state.base ? state.base + CANVAS_PATH : CANVAS_PATH;
+    if (dom.canvasFrame.getAttribute('src') !== url) {
+      dom.canvasFrame.setAttribute('src', url);
+    }
+  }
+
+  function applySidebarWidth(px) {
+    var width = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(px)));
+    state.sidebarWidth = width;
+    if (dom.sidebar) {
+      dom.sidebar.style.width = width + 'px';
+    }
+    return width;
+  }
+
+  function applyCanvasWidth(px) {
+    var width = Math.min(CANVAS_MAX, Math.max(CANVAS_MIN, Math.round(px)));
+    state.canvasWidth = width;
+    if (dom.canvasPane) {
+      dom.canvasPane.style.width = width + 'px';
+    }
+    return width;
+  }
+
+  /* Horizontal drag resize. `invert` handles the right splitter: dragging it
+   * left widens the canvas pane. Arrow keys move the handle by 16px so the
+   * separator stays keyboard-operable. */
+  function bindSplitter(splitter, applyWidth, invert) {
+    if (!splitter) {
+      return;
+    }
+    function step(width) {
+      return applyWidth(invert ? -width : width);
+    }
+    splitter.addEventListener('mousedown', function (event) {
+      if (event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      var startX = event.clientX;
+      var startWidth = invert
+        ? state.canvasWidth || CANVAS_DEFAULT
+        : state.sidebarWidth || SIDEBAR_DEFAULT;
+      splitter.classList.add('dragging');
+      function onMove(moveEvent) {
+        var delta = moveEvent.clientX - startX;
+        applyWidth(invert ? startWidth - delta : startWidth + delta);
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        splitter.classList.remove('dragging');
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    splitter.addEventListener('keydown', function (event) {
+      if (event.key === 'ArrowLeft') {
+        step(-16);
+      } else if (event.key === 'ArrowRight') {
+        step(16);
+      } else {
+        return;
+      }
+      event.preventDefault();
+    });
+  }
+
+  function handleShortcut(event) {
+    if (!event.altKey || event.ctrlKey || event.metaKey) {
+      return false;
+    }
+    var key = String(event.key || '').toLowerCase();
+    if (key === 's') {
+      toggleSidebar();
+    } else if (key === 'c') {
+      toggleCanvas();
+    } else {
+      return false;
+    }
+    event.preventDefault();
+    return true;
+  }
+
+
+  function renderSidebarServers() {
+    if (!dom.sidebarServerSelect) {
+      return;
+    }
+    dom.sidebarServerSelect.innerHTML = '';
+    state.serverProfiles.forEach(function (url) {
+      var opt = document.createElement('option');
+      opt.value = url;
+      opt.textContent = url.replace(/^https?:\/\//, '');
+      if (url === state.serverUrl) {
+        opt.selected = true;
+      }
+      dom.sidebarServerSelect.appendChild(opt);
+    });
+  }
+
+  function initLayout() {
+    dom.sidebar = byId('sidebar');
+    dom.chatPane = byId('chat-pane');
+    dom.canvasPane = byId('canvas-pane');
+    dom.canvasFrame = byId('canvas-frame');
+    dom.splitterLeft = byId('splitter-left');
+    dom.splitterRight = byId('splitter-right');
+    dom.toggleSidebarBtn = byId('toggle-sidebar-btn');
+    dom.toggleCanvasBtn = byId('toggle-canvas-btn');
+    dom.closeCanvasBtn = byId('close-canvas-btn');
+    dom.sidebarServerSelect = byId('sidebar-server-select');
+
+    state.sidebarWidth = SIDEBAR_DEFAULT;
+    state.canvasWidth = CANVAS_DEFAULT;
+
+    setSidebarCollapsed(readCollapsed(SIDEBAR_KEY));
+    setCanvasCollapsed(readCollapsed(CANVAS_KEY));
+    if (!state.canvasCollapsed) {
+      loadCanvas();
+    }
+
+    if (dom.toggleSidebarBtn) {
+      dom.toggleSidebarBtn.addEventListener('click', toggleSidebar);
+    }
+    if (dom.toggleCanvasBtn) {
+      dom.toggleCanvasBtn.addEventListener('click', toggleCanvas);
+    }
+    if (dom.closeCanvasBtn) {
+      dom.closeCanvasBtn.addEventListener('click', function () {
+        setCanvasCollapsed(true);
+      });
+    }
+    if (dom.sidebarServerSelect) {
+      dom.sidebarServerSelect.addEventListener('change', function () {
+        if (dom.sidebarServerSelect.value) {
+          setActiveServer(dom.sidebarServerSelect.value);
+        }
+      });
+    }
+
+    document.addEventListener('keydown', handleShortcut);
+    bindSplitter(dom.splitterLeft, applySidebarWidth, false);
+    bindSplitter(dom.splitterRight, applyCanvasWidth, true);
+    renderSidebarServers();
+  }
 
   async function sendMessage(event) {
     event.preventDefault();
@@ -801,6 +1019,7 @@
         dom.serverProfileSelect.appendChild(opt);
       });
     }
+    renderSidebarServers();
   }
 
   async function setActiveServer(url) {
@@ -933,6 +1152,9 @@
 
     state.base = resolveBase();
     dom.proxyUrl.value = state.base;
+
+    initLayout();
+
     try {
       dom.username.value = window.localStorage.getItem(USER_KEY) || '';
     } catch (err) {

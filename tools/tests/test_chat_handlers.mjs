@@ -3,27 +3,107 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
+function createClassList() {
+  const set = new Set();
+  return {
+    add: (name) => set.add(name),
+    remove: (name) => set.delete(name),
+    contains: (name) => set.has(name),
+    toggle: (name, force) => {
+      const on = force === undefined ? !set.has(name) : !!force;
+      if (on) set.add(name);
+      else set.delete(name);
+      return on;
+    },
+    values: () => Array.from(set)
+  };
+}
+
+function createElementMock(id) {
+  const listeners = {};
+  const attributes = {};
+  const element = {
+    id,
+    value: '',
+    textContent: '',
+    innerHTML: '',
+    hidden: false,
+    disabled: false,
+    dataset: {},
+    style: {},
+    attributes,
+    classList: createClassList(),
+    children: [],
+    options: [],
+    childElementCount: 0,
+    focus: () => {},
+    appendChild: (child) => {
+      element.children.push(child);
+      element.childElementCount = element.children.length;
+      return child;
+    },
+    insertBefore: () => {},
+    addEventListener: (type, fn) => {
+      (listeners[type] = listeners[type] || []).push(fn);
+    },
+    removeEventListener: (type, fn) => {
+      const list = listeners[type] || [];
+      const idx = list.indexOf(fn);
+      if (idx !== -1) list.splice(idx, 1);
+    },
+    dispatch: (type, event) => {
+      (listeners[type] || []).slice().forEach((fn) => fn(event));
+    },
+    getAttribute: (name) => (name in attributes ? attributes[name] : null),
+    setAttribute: (name, value) => {
+      attributes[name] = String(value);
+    },
+    removeAttribute: (name) => {
+      delete attributes[name];
+    },
+    hasAttribute: (name) => name in attributes,
+    listeners
+  };
+  // Real DOM: assigning innerHTML replaces the subtree. Mirror that so
+  // re-rendering a list cannot accumulate stale children in the mock.
+  let innerHTML = '';
+  Object.defineProperty(element, 'innerHTML', {
+    get: () => innerHTML,
+    set: (value) => {
+      innerHTML = String(value);
+      element.children.length = 0;
+      element.childElementCount = 0;
+    }
+  });
+  return element;
+}
+
 function createHarness() {
   const filePath = new URL('../../ui/chat.js', import.meta.url);
   let code = fs.readFileSync(filePath, 'utf8');
 
-  // Hook to extract functions before the closing IIFE
+  // Hook to extract functions before the closing IIFE. `eval` keeps the hook
+  // tolerant: a name that does not exist yet resolves to undefined instead of
+  // throwing, so RED runs report the missing behaviour, not a broken harness.
   const hook = `
-__harness__.exports = {
-  isLoginPage,
-  apiCall,
-  refreshCsrf,
-  connectSocket,
-  disconnectSocket,
-  requestState,
-  startPolling,
-  stopPolling,
-  onServerRestart,
-  sessionExpired,
-  state,
-  dom,
-  showChatError
-};
+__harness__.exports = (function () {
+  var names = [
+    'isLoginPage', 'apiCall', 'refreshCsrf', 'connectSocket', 'disconnectSocket',
+    'requestState', 'startPolling', 'stopPolling', 'onServerRestart',
+    'sessionExpired', 'state', 'dom', 'showChatError', 'init', 'initLayout',
+    'toggleSidebar', 'toggleCanvas', 'handleShortcut', 'applySidebarWidth',
+    'applyCanvasWidth', 'setSidebarCollapsed', 'setCanvasCollapsed'
+  ];
+  var out = {};
+  names.forEach(function (name) {
+    try {
+      out[name] = eval(name);
+    } catch (err) {
+      out[name] = undefined;
+    }
+  });
+  return out;
+})();
 `;
   const lastIndex = code.lastIndexOf('})();');
   if (lastIndex !== -1) {
@@ -33,18 +113,7 @@ __harness__.exports = {
   const elements = {};
   function getEl(id) {
     if (!elements[id]) {
-      elements[id] = {
-        id,
-        value: '',
-        textContent: '',
-        hidden: false,
-        disabled: false,
-        dataset: {},
-        focus: () => {},
-        addEventListener: () => {},
-        appendChild: () => {},
-        options: []
-      };
+      elements[id] = createElementMock(id);
     }
     return elements[id];
   }
@@ -72,6 +141,38 @@ __harness__.exports = {
     disconnect: () => {}
   };
 
+  const docListeners = {};
+  const documentMock = {
+    title: '',
+    readyState: 'loading',
+    body: { classList: createClassList() },
+    getElementById: getEl,
+    createElement: () => createElementMock('el'),
+    createTextNode: () => ({}),
+    addEventListener: (type, fn) => {
+      (docListeners[type] = docListeners[type] || []).push(fn);
+    },
+    removeEventListener: (type, fn) => {
+      const list = docListeners[type] || [];
+      const idx = list.indexOf(fn);
+      if (idx !== -1) list.splice(idx, 1);
+    },
+    fire: (type, event) => {
+      (docListeners[type] || []).slice().forEach((fn) => fn(event));
+    }
+  };
+
+  const store = {};
+  const localStorageMock = {
+    getItem: (key) => (key in store ? store[key] : null),
+    setItem: (key, value) => {
+      store[key] = String(value);
+    },
+    removeItem: (key) => {
+      delete store[key];
+    }
+  };
+
   const context = {
     __harness__: {},
     console,
@@ -81,25 +182,10 @@ __harness__.exports = {
     Headers,
     Response,
     URLSearchParams,
-    document: {
-      title: '',
-      readyState: 'loading',
-      body: {
-        classList: {
-          toggle: () => {}
-        }
-      },
-      getElementById: getEl,
-      createElement: () => ({ appendChild: () => {}, value: '', textContent: '', dataset: {} }),
-      createTextNode: () => ({}),
-      addEventListener: () => {}
-    },
+    document: documentMock,
     window: {
       location: { origin: 'http://localhost:3000', search: '' },
-      localStorage: {
-        getItem: () => null,
-        setItem: () => {}
-      },
+      localStorage: localStorageMock,
       setTimeout: fakeSetTimeout,
       clearTimeout: fakeClearTimeout,
       __AQVN_PROXY__: null,
@@ -129,7 +215,9 @@ __harness__.exports = {
     timeouts,
     mockIo,
     listeners,
-    getEl
+    getEl,
+    store,
+    document: documentMock
   };
 }
 
@@ -415,5 +503,168 @@ describe('ui/chat.js false session expiration & NO_HANDLERS hardening', () => {
       harness.timeouts.length > 0,
       'Retry timeout should be scheduled on transient restart error'
     );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-LAYOUT-001..004: 3-column shell, splitters, panel toggles      */
+/* ------------------------------------------------------------------ */
+
+function readIndexHtml() {
+  return fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+}
+
+/** Extract the element subtree that starts at `id="<id>"`, honouring nesting. */
+function sectionOf(html, id) {
+  const marker = `id="${id}"`;
+  const at = html.indexOf(marker);
+  assert.notEqual(at, -1, `ui/index.html must contain an element with id="${id}"`);
+  const tagStart = html.lastIndexOf('<', at);
+  const tag = html.slice(tagStart, html.indexOf('>', tagStart));
+  const name = (tag.match(/^<([a-z0-9]+)/i) || [])[1];
+  assert.ok(name, `id="${id}" must live in a normal element`);
+
+  // Walk forward counting open/close tags of the same name so nested
+  // same-name elements (e.g. div inside div) do not truncate the subtree.
+  const open = new RegExp(`<${name}(?=[\\s>])`, 'gi');
+  const close = new RegExp(`</${name}\\s*>`, 'gi');
+  let depth = 0;
+  let cursor = tagStart;
+  while (cursor < html.length) {
+    open.lastIndex = cursor;
+    close.lastIndex = cursor;
+    const nextOpen = open.exec(html);
+    const nextClose = close.exec(html);
+    if (!nextClose) {
+      break;
+    }
+    if (nextOpen && nextOpen.index < nextClose.index) {
+      depth += 1;
+      cursor = nextOpen.index + nextOpen[0].length;
+      continue;
+    }
+    depth -= 1;
+    cursor = nextClose.index + nextClose[0].length;
+    if (depth === 0) {
+      return html.slice(tagStart, cursor);
+    }
+  }
+  assert.fail(`element with id="${id}" must be closed`);
+}
+
+describe('ui/index.html 3-column layout, splitters and panel toggles', () => {
+  test('VAL-LAYOUT-001: index.html renders sidebar, chat pane, canvas pane and both splitters', () => {
+    const html = readIndexHtml();
+
+    ['sidebar', 'chat-pane', 'canvas-pane', 'splitter-left', 'splitter-right'].forEach((id) => {
+      assert.ok(html.includes(`id="${id}"`), `ui/index.html must declare #${id}`);
+    });
+
+    const sidebar = sectionOf(html, 'sidebar');
+    assert.ok(sidebar.includes('id="contexts"'), '#sidebar must hold the session context list');
+    assert.ok(sidebar.includes('id="new-chat-btn"'), '#sidebar must hold the New Chat button');
+    assert.ok(sidebar.includes('id="sidebar-server-select"'), '#sidebar must hold the Server Switcher');
+
+    const chatPane = sectionOf(html, 'chat-pane');
+    assert.ok(chatPane.includes('id="messages"'), '#chat-pane must hold the message stream');
+    assert.ok(chatPane.includes('id="composer"'), '#chat-pane must hold the composer');
+
+    const canvas = sectionOf(html, 'canvas-pane');
+    assert.ok(canvas.includes('Intel Suite'), "#canvas-pane must show the 'Intel Suite' tab header");
+    assert.ok(canvas.includes('id="close-canvas-btn"'), '#canvas-pane must hold the close button');
+    assert.ok(canvas.includes('id="canvas-frame"'), '#canvas-pane must hold the canvas iframe');
+  });
+
+  test('VAL-LAYOUT-002: Alt+S and #toggle-sidebar-btn collapse #sidebar and persist the state', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom } = harness.exports;
+
+    assert.equal(dom.sidebar.getAttribute('hidden'), null, 'sidebar starts expanded');
+
+    harness.document.fire('keydown', { altKey: true, key: 's', preventDefault: () => {} });
+    assert.equal(dom.sidebar.getAttribute('hidden'), '', 'Alt+S must hide #sidebar');
+    assert.ok(dom.sidebar.classList.contains('collapsed'), 'Alt+S must mark #sidebar collapsed');
+    assert.equal(
+      harness.store['aqvn_sidebar_collapsed'],
+      'true',
+      'collapsed state must persist in localStorage[aqvn_sidebar_collapsed]'
+    );
+
+    harness.document.fire('keydown', { altKey: true, key: 's', preventDefault: () => {} });
+    assert.equal(dom.sidebar.getAttribute('hidden'), null, 'Alt+S must show #sidebar again');
+    assert.equal(
+      harness.store['aqvn_sidebar_collapsed'],
+      'false',
+      'expanded state must persist in localStorage[aqvn_sidebar_collapsed]'
+    );
+
+    dom.toggleSidebarBtn.dispatch('click', {});
+    assert.equal(dom.sidebar.getAttribute('hidden'), '', '#toggle-sidebar-btn must hide #sidebar');
+    assert.equal(harness.store['aqvn_sidebar_collapsed'], 'true');
+  });
+
+  test('VAL-LAYOUT-003: Alt+C and #toggle-canvas-btn collapse #canvas-pane and load the Intel Suite iframe', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom } = harness.exports;
+
+    harness.document.fire('keydown', { altKey: true, key: 'c', preventDefault: () => {} });
+    assert.equal(dom.canvasPane.getAttribute('hidden'), '', 'Alt+C must hide #canvas-pane');
+    assert.ok(dom.canvasPane.classList.contains('collapsed'), 'Alt+C must mark #canvas-pane collapsed');
+    assert.equal(
+      harness.store['aqvn_canvas_collapsed'],
+      'true',
+      'collapsed state must persist in localStorage[aqvn_canvas_collapsed]'
+    );
+
+    harness.document.fire('keydown', { altKey: true, key: 'c', preventDefault: () => {} });
+    assert.equal(dom.canvasPane.getAttribute('hidden'), null, 'Alt+C must show #canvas-pane again');
+    assert.equal(
+      dom.canvasFrame.getAttribute('src'),
+      '/plugins/aqvn_intel_suite/webui/canvas.html',
+      'opening the canvas must load the Intel Suite page in #canvas-frame'
+    );
+    assert.equal(harness.store['aqvn_canvas_collapsed'], 'false');
+
+    dom.toggleCanvasBtn.dispatch('click', {});
+    assert.equal(dom.canvasPane.getAttribute('hidden'), '', '#toggle-canvas-btn must hide #canvas-pane');
+
+    dom.closeCanvasBtn.dispatch('click', {});
+    assert.equal(dom.canvasPane.getAttribute('hidden'), '', '#close-canvas-btn must close #canvas-pane');
+  });
+
+  test('VAL-LAYOUT-004: dragging the splitters resizes #sidebar and #canvas-pane within bounds', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom } = harness.exports;
+
+    // Left splitter: dragging left widens the sidebar, clamped to [160px, 400px].
+    dom.splitterLeft.dispatch('mousedown', { button: 0, clientX: 220, preventDefault: () => {} });
+    harness.document.fire('mousemove', { clientX: 20 });
+    assert.equal(dom.sidebar.style.width, '160px', 'sidebar must clamp to the 160px minimum');
+
+    harness.document.fire('mousemove', { clientX: 1200 });
+    assert.equal(dom.sidebar.style.width, '400px', 'sidebar must clamp to the 400px maximum');
+
+    harness.document.fire('mouseup', {});
+
+    // Right splitter: dragging left widens the canvas, clamped to [280px, 800px].
+    dom.splitterRight.dispatch('mousedown', { button: 0, clientX: 450, preventDefault: () => {} });
+    harness.document.fire('mousemove', { clientX: 900 });
+    assert.equal(dom.canvasPane.style.width, '280px', 'canvas must clamp to the 280px minimum');
+
+    harness.document.fire('mousemove', { clientX: -900 });
+    assert.equal(dom.canvasPane.style.width, '800px', 'canvas must clamp to the 800px maximum');
+  });
+
+  test('sidebar server switcher lists the active server profiles', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom } = harness.exports;
+
+    assert.ok(dom.sidebarServerSelect, 'the sidebar must expose a server switcher');
+    assert.equal(dom.sidebarServerSelect.children.length, 1);
+    assert.equal(dom.sidebarServerSelect.children[0].value, 'https://a0.matmagoc.com');
   });
 });

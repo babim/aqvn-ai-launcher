@@ -170,3 +170,11 @@ fn main_window_uses_container_configuration() {
         "src/lib.rs must use configure_container_window to point webview window at accelerated proxy"
     );
 }
+
+#[test]
+fn init_script_injects_notification_and_tray_bridge() {
+    let script = aqvn_workspace_lib::proxy::server::init_script(9041);
+    assert!(script.contains("notify_task_complete"));
+    assert!(script.contains("set_tray_busy"));
+    assert!(script.contains("__AQVN_CONTAINER__"));
+}

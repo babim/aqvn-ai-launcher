@@ -120,9 +120,11 @@ pub async fn serve(listener: TcpListener, state: ProxyState) -> std::io::Result<
 }
 
 /// Script injected into the webview before any page script runs.
+pub const CONTAINER_BRIDGE_SCRIPT: &str = include_str!("../../../ui/container.js");
+
 pub fn init_script(port: u16) -> String {
     format!(
-        "window.__AQVN_PROXY__ = Object.freeze({{ url: \"http://127.0.0.1:{port}\", port: {port} }}); window.__AQVN_WINDOW_SHOWN__ = performance.now();"
+        "window.__AQVN_PROXY__ = Object.freeze({{ url: \"http://127.0.0.1:{port}\", port: {port} }}); window.__AQVN_WINDOW_SHOWN__ = performance.now();\n{CONTAINER_BRIDGE_SCRIPT}"
     )
 }
 
@@ -630,6 +632,9 @@ mod tests {
         let script = init_script(54321);
         assert!(script.contains("port: 54321"));
         assert!(script.contains("http://127.0.0.1:54321"));
+        assert!(script.contains("notify_task_complete"));
+        assert!(script.contains("set_tray_busy"));
+        assert!(script.contains("__AQVN_CONTAINER__"));
     }
 
     #[test]

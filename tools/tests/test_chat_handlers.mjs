@@ -1462,3 +1462,190 @@ describe('ui/chat.js edge cases and connection state hygiene', () => {
     );
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* VAL-WEB-004: Injected OS notification and title sync bridge        */
+/* ------------------------------------------------------------------ */
+
+function createContainerHarness(options = {}) {
+  const filePath = new URL('../../ui/container.js', import.meta.url);
+  const code = fs.readFileSync(filePath, 'utf8');
+
+  const elements = {};
+  function getEl(id) {
+    return elements[id] || null;
+  }
+
+  const calls = [];
+  const docListeners = {};
+  const documentMock = {
+    title: 'AQVN Workspace',
+    hidden: options.hidden !== undefined ? options.hidden : false,
+    body: {
+      classList: createClassList(),
+      getAttribute: (name) => (name in attributes ? attributes[name] : null),
+      children: []
+    },
+    getElementById: getEl,
+    querySelector: (selector) => {
+      if (selector === '[aria-busy="true"]') {
+        return options.ariaBusy ? createElementMock('busy-el') : null;
+      }
+      if (selector.includes('stop')) {
+        return elements['stop'] || null;
+      }
+      if (selector.includes('status')) {
+        return elements['status'] || null;
+      }
+      return null;
+    },
+    addEventListener: (type, fn) => {
+      (docListeners[type] = docListeners[type] || []).push(fn);
+    }
+  };
+
+  const attributes = {};
+  const context = {
+    console,
+    document: documentMock,
+    window: {
+      location: { origin: 'http://localhost:3000' },
+      __TAURI_INTERNALS__: {
+        invoke: (command, args) => {
+          calls.push({ command, args });
+          return Promise.resolve();
+        }
+      }
+    }
+  };
+
+  vm.createContext(context);
+  vm.runInContext(code, context);
+
+  return {
+    context,
+    calls,
+    document: documentMock,
+    elements,
+    createElement: createElementMock,
+    bridge: context.window.__AQVN_CONTAINER__
+  };
+}
+
+describe('VAL-WEB-004: test_web_notification_bridge container bridge script', () => {
+  test('test_web_notification_bridge script exists and is readable', () => {
+    const filePath = new URL('../../ui/container.js', import.meta.url);
+    assert.ok(fs.existsSync(filePath), 'ui/container.js must exist');
+    const content = fs.readFileSync(filePath, 'utf8');
+    assert.ok(content.length > 50, 'ui/container.js must contain bridge script');
+  });
+
+  test('test_web_notification_bridge detects task completion from WebSocket state', () => {
+    const harness = createContainerHarness({ hidden: true });
+    const { bridge, calls } = harness;
+    assert.ok(bridge, 'window.__AQVN_CONTAINER__ bridge must be exposed');
+
+    // 1. Socket.IO log_progress active: true
+    bridge.handleWebSocketMessage('42["log_progress", {"active": true, "progress": "Thinking..."}]');
+    assert.equal(bridge.getState().busy, true, 'bridge must enter busy state');
+    const trayBusyCalls = calls.filter((c) => c.command === 'set_tray_busy' && c.args.busy === true);
+    assert.equal(trayBusyCalls.length, 1, 'set_tray_busy(true) must be dispatched');
+
+    // 2. Socket.IO log_progress active: false while hidden
+    bridge.handleWebSocketMessage('42["log_progress", {"active": false, "progress": "Analysis complete"}]');
+    assert.equal(bridge.getState().busy, false, 'bridge must return to idle state');
+    const trayIdleCalls = calls.filter((c) => c.command === 'set_tray_busy' && c.args.busy === false);
+    assert.equal(trayIdleCalls.length, 1, 'set_tray_busy(false) must be dispatched');
+
+    const notifyCalls = calls.filter((c) => c.command === 'notify_task_complete');
+    assert.equal(notifyCalls.length, 1, 'notify_task_complete must be dispatched when hidden');
+    assert.equal(notifyCalls[0].args.title, 'Task complete');
+    assert.match(notifyCalls[0].args.body, /Analysis complete/);
+
+    // 3. Socket.IO state_push snapshot
+    bridge.handleWebSocketMessage('42["state_push", {"snapshot": {"log_progress_active": true, "log_progress": "Refining..."}}]');
+    assert.equal(bridge.getState().busy, true);
+    bridge.handleWebSocketMessage('42["state_push", {"snapshot": {"log_progress_active": false, "log_progress": "All tasks done"}}]');
+    assert.equal(bridge.getState().busy, false);
+    assert.equal(calls.filter((c) => c.command === 'notify_task_complete').length, 2);
+
+    // 4. Raw JSON state
+    bridge.handleWebSocketMessage(JSON.stringify({ active: true, progress: "Running query" }));
+    assert.equal(bridge.getState().busy, true);
+    bridge.handleWebSocketMessage(JSON.stringify({ active: false, progress: "Query finished" }));
+    assert.equal(bridge.getState().busy, false);
+    assert.equal(calls.filter((c) => c.command === 'notify_task_complete').length, 3);
+  });
+
+  test('test_web_notification_bridge detects task completion from DOM state', () => {
+    const harness = createContainerHarness({ hidden: true });
+    const { bridge, calls, document } = harness;
+
+    // Body busy class added
+    document.body.classList.add('busy');
+    bridge.checkDomState();
+    assert.equal(bridge.getState().busy, true, 'body.busy must trigger busy state');
+    assert.equal(calls.filter((c) => c.command === 'set_tray_busy' && c.args.busy === true).length, 1);
+
+    // Body busy class removed
+    document.body.classList.remove('busy');
+    bridge.checkDomState();
+    assert.equal(bridge.getState().busy, false, 'body.busy removal must trigger idle state');
+    assert.equal(calls.filter((c) => c.command === 'set_tray_busy' && c.args.busy === false).length, 1);
+    assert.equal(calls.filter((c) => c.command === 'notify_task_complete').length, 1);
+  });
+
+  test('test_web_notification_bridge dispatches Tauri IPC notify_task_complete only when document.hidden === true', () => {
+    // Visible window: hidden = false
+    const visibleHarness = createContainerHarness({ hidden: false });
+    visibleHarness.bridge.setTaskState(true, 'working visible');
+    visibleHarness.bridge.setTaskState(false, 'done visible');
+    assert.equal(
+      visibleHarness.calls.filter((c) => c.command === 'notify_task_complete').length,
+      0,
+      'visible window must not dispatch notify_task_complete'
+    );
+    assert.equal(
+      visibleHarness.calls.filter((c) => c.command === 'set_tray_busy').length,
+      2,
+      'visible window must still update tray state'
+    );
+
+    // Hidden window: hidden = true
+    const hiddenHarness = createContainerHarness({ hidden: true });
+    hiddenHarness.bridge.setTaskState(true, 'working hidden');
+    hiddenHarness.bridge.setTaskState(false, 'done hidden');
+    assert.equal(
+      hiddenHarness.calls.filter((c) => c.command === 'notify_task_complete').length,
+      1,
+      'hidden window must dispatch notify_task_complete'
+    );
+    assert.equal(hiddenHarness.calls.find((c) => c.command === 'notify_task_complete').args.title, 'Task complete');
+    assert.match(hiddenHarness.calls.find((c) => c.command === 'notify_task_complete').args.body, /done hidden/);
+  });
+
+  test('test_web_notification_bridge updates system tray icon state between idle and busy', () => {
+    const harness = createContainerHarness({ hidden: false });
+    const { bridge, calls } = harness;
+
+    bridge.setTaskState(true);
+    const lastBusy = calls[calls.length - 1];
+    assert.equal(lastBusy.command, 'set_tray_busy');
+    assert.equal(lastBusy.args.busy, true);
+
+    bridge.setTaskState(false);
+    const lastIdle = calls[calls.length - 1];
+    assert.equal(lastIdle.command, 'set_tray_busy');
+    assert.equal(lastIdle.args.busy, false);
+  });
+
+  test('test_web_notification_bridge init_script carries container bridge script', () => {
+    const rsPath = new URL('../../src-tauri/src/proxy/server.rs', import.meta.url);
+    const rsContent = fs.readFileSync(rsPath, 'utf8');
+    assert.match(
+      rsContent,
+      /CONTAINER_BRIDGE_SCRIPT|ui\/container\.js/,
+      'src-tauri/src/proxy/server.rs must reference container bridge script'
+    );
+  });
+});

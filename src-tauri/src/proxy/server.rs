@@ -140,6 +140,9 @@ pub fn router(state: ProxyState) -> Router {
         .route("/benchmark/fcp", any(handle_benchmark_fcp))
         .route(LOGIN_PATH, any(handle_login))
         .route("/api/{*rest}", any(handle_api))
+        .route("/plugins/{*rest}", any(handle_forward_raw))
+        .route("/extensions/{*rest}", any(handle_forward_raw))
+        .route("/public/{*rest}", any(handle_forward_raw))
         .route("/socket.io/", any(handle_socket_io))
         .route("/socket.io", any(handle_socket_io))
         .fallback(handle_not_found)
@@ -311,6 +314,47 @@ async fn handle_api(
     upstream_response(result, origin.as_deref())
 }
 
+/// Raw passthrough for static assets (`/plugins/*`, `/extensions/*`, `/public/*`).
+///
+/// No CSRF token is required: the jar replays its session cookies upstream and
+/// the upstream `Set-Cookie` headers update the jar, so plugin assets load
+/// without the webview ever holding a credential.
+async fn handle_forward_raw(
+    State(state): State<ProxyState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref()) {
+        return with_cors(response, origin.as_deref());
+    }
+    if method == Method::OPTIONS {
+        return with_cors(StatusCode::NO_CONTENT.into_response(), origin.as_deref());
+    }
+    let Ok(upstream_method) = reqwest::Method::from_bytes(method.as_str().as_bytes()) else {
+        return with_cors(
+            text_response(StatusCode::METHOD_NOT_ALLOWED, "unsupported method"),
+            origin.as_deref(),
+        );
+    };
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let upstream = state.upstream().await;
+    let result = upstream
+        .forward_raw(
+            upstream_method,
+            &path_and_query(&uri),
+            content_type.as_deref(),
+            body.to_vec(),
+        )
+        .await;
+    upstream_response(result, origin.as_deref())
+}
+
 async fn handle_socket_io(State(state): State<ProxyState>, request: Request<Body>) -> Response {
     let origin = request_origin(request.headers());
     if let Some(response) = reject_bad_origin(origin.as_deref()) {
@@ -365,7 +409,7 @@ async fn handle_socket_io(State(state): State<ProxyState>, request: Request<Body
 async fn handle_not_found() -> Response {
     text_response(
         StatusCode::NOT_FOUND,
-        "bridge proxy: only /login, /proxy/csrf, /api/*, and /socket.io/ are proxied",
+        "bridge proxy: only /login, /proxy/csrf, /api/*, /plugins/*, /extensions/*, /public/*, and /socket.io/ are proxied",
     )
 }
 

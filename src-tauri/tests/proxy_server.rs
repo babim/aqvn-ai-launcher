@@ -24,6 +24,8 @@ use tokio::task::JoinHandle;
 
 const USERNAME: &str = "admin";
 const PASSWORD: &str = "test-auth-2026";
+/// Non-UTF-8 bytes: any text decoding on the proxy path would corrupt them.
+const RAW_BODY: &[u8] = &[0x00, 0xFF, 0x10, 0x80, 0x7F, 0x0A, 0x0D];
 
 #[derive(Default)]
 struct Stub {
@@ -38,6 +40,8 @@ struct Stub {
     last_csrf_header: Mutex<Option<String>>,
     last_cookie: Mutex<Option<String>>,
     login_bodies: Mutex<Vec<String>>,
+    last_raw_uri: Mutex<Option<String>>,
+    last_raw_origin: Mutex<Option<String>>,
 }
 
 impl Stub {
@@ -77,6 +81,9 @@ async fn start_stub() -> (Arc<Stub>, Running) {
         .route("/api/echo", post(stub_echo))
         .route("/api/rotate", post(stub_rotate))
         .route("/api/always", post(stub_always))
+        .route("/plugins/{*rest}", any(stub_raw_asset))
+        .route("/extensions/{*rest}", any(stub_raw_asset))
+        .route("/public/{*rest}", any(stub_raw_asset))
         .route("/socket.io/", any(stub_socket))
         .with_state(stub.clone());
 
@@ -195,6 +202,34 @@ async fn stub_rotate(State(stub): State<Arc<Stub>>) -> Response {
 async fn stub_always(State(stub): State<Arc<Stub>>) -> Response {
     stub.api_calls.fetch_add(1, Ordering::SeqCst);
     (StatusCode::FORBIDDEN, "always").into_response()
+}
+
+/// Raw asset endpoint: records what arrived and answers with binary bytes.
+async fn stub_raw_asset(
+    State(stub): State<Arc<Stub>>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Response {
+    let path_and_query = uri
+        .path_and_query()
+        .map(|value| value.as_str().to_string())
+        .unwrap_or_else(|| uri.path().to_string());
+    *stub.last_raw_uri.lock().await = Some(path_and_query.clone());
+    *stub.last_raw_origin.lock().await = header_string(&headers, "origin");
+    *stub.last_cookie.lock().await = header_string(&headers, "cookie");
+
+    if path_and_query.ends_with("/missing") {
+        return (StatusCode::NOT_FOUND, "missing").into_response();
+    }
+
+    (
+        [
+            (header::CONTENT_TYPE, "image/png".to_string()),
+            (header::SET_COOKIE, "raw_seen=1; Path=/".to_string()),
+        ],
+        RAW_BODY,
+    )
+        .into_response()
 }
 
 async fn stub_socket(
@@ -603,4 +638,131 @@ async fn upstream_client_rejects_off_origin_redirects() {
     let target = upstream::Target::parse("https://chat.example.com").expect("target");
     assert!(target.same_origin(&url::Url::parse("https://chat.example.com/x").expect("url")));
     assert!(!target.same_origin(&url::Url::parse("https://evil.example/x").expect("url")));
+}
+
+// ------------------------------------ raw asset routes (VAL-PROXY-001)
+
+#[tokio::test]
+async fn test_forward_raw_plugins() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    let response = client()
+        .get(format!(
+            "{}/plugins/aqvn_intel_suite/webui/canvas.html?tab=1",
+            proxy.base
+        ))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("plugins request");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/png"),
+        "upstream Content-Type must pass through"
+    );
+    let bytes = response.bytes().await.expect("body");
+    assert_eq!(bytes.as_ref(), RAW_BODY, "binary body must be byte-exact");
+
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        Some("/plugins/aqvn_intel_suite/webui/canvas.html?tab=1"),
+        "path and query reach the upstream unchanged"
+    );
+    assert_eq!(
+        stub.last_raw_origin.lock().await.as_deref(),
+        Some(stub_guard.base.as_str()),
+        "proxy spoofs the target origin"
+    );
+    assert_eq!(
+        stub.csrf_calls.load(Ordering::SeqCst),
+        0,
+        "raw routes must not require a CSRF bootstrap"
+    );
+}
+
+#[tokio::test]
+async fn test_forward_raw_extensions_and_public() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    for path in ["/extensions/aqvn/loader.js", "/public/branding/logo.svg"] {
+        let response = client()
+            .get(format!("{}{path}", proxy.base))
+            .header(header::ORIGIN, "tauri://localhost")
+            .send()
+            .await
+            .expect("raw request");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            stub.last_raw_uri.lock().await.as_deref(),
+            Some(path),
+            "{path} reaches the upstream"
+        );
+        assert_eq!(
+            stub.last_raw_origin.lock().await.as_deref(),
+            Some(stub_guard.base.as_str()),
+            "{path} carries the spoofed origin"
+        );
+    }
+
+    let missing = client()
+        .get(format!("{}/extensions/missing", proxy.base))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("missing request");
+    assert_eq!(
+        missing.status(),
+        StatusCode::NOT_FOUND,
+        "upstream status passes through"
+    );
+}
+
+#[tokio::test]
+async fn test_forward_raw_cookie_replay() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+    login(&proxy.base).await;
+
+    let response = client()
+        .get(format!(
+            "{}/plugins/aqvn_intel_suite/webui/canvas.html",
+            proxy.base
+        ))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("plugins request");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let cookie = stub.last_cookie.lock().await.clone().unwrap_or_default();
+    assert!(
+        cookie.contains("session_abcd1234="),
+        "session cookie must be replayed upstream: {cookie}"
+    );
+    assert!(
+        cookie.contains("csrf_token_abcd1234=token-1"),
+        "bootstrapped cookies must be replayed upstream: {cookie}"
+    );
+
+    // The stub answers with `Set-Cookie: raw_seen=1`; the jar must store it
+    // and replay it on the next raw request.
+    let second = client()
+        .get(format!("{}/public/branding/logo.svg", proxy.base))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("public request");
+    assert_eq!(second.status(), StatusCode::OK);
+    let cookie = stub.last_cookie.lock().await.clone().unwrap_or_default();
+    assert!(
+        cookie.contains("raw_seen=1"),
+        "upstream Set-Cookie must update the jar: {cookie}"
+    );
 }

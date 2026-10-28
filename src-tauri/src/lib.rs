@@ -100,8 +100,11 @@ pub fn run() {
                 .find(|w| w.label == "main")
                 .expect("main window config not found in tauri.conf.json");
 
+            let container_config =
+                app::links::configure_container_window(window_config, proxy_info.port);
+
             let nav_handle = app.handle().clone();
-            WebviewWindowBuilder::from_config(app.handle(), window_config)?
+            WebviewWindowBuilder::from_config(app.handle(), &container_config)?
                 .initialization_script(proxy::server::init_script(proxy_info.port))
                 .on_navigation(move |url| app::links::handle_navigation(&nav_handle, url))
                 .on_document_title_changed(|window, title| {

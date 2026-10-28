@@ -23,6 +23,21 @@ pub fn classify(url: &Url) -> Nav {
     classify_with_proxy(url, None)
 }
 
+/// Returns the webview container root URL pointing to the local loopback proxy.
+pub fn container_url(port: u16) -> Url {
+    Url::parse(&format!("http://{}:{port}/", std::net::Ipv4Addr::LOCALHOST))
+        .expect("valid container root url")
+}
+
+/// Configures a Tauri window config to load the webview container from the local accelerated proxy.
+pub fn configure_container_window(
+    config: &tauri::utils::config::WindowConfig,
+    proxy_port: u16,
+) -> tauri::utils::config::WindowConfig {
+    let mut config = config.clone();
+    config.url = tauri::WebviewUrl::External(container_url(proxy_port));
+    config
+}
 /// Classifies a navigation target, allowing the local bridge proxy.
 pub fn classify_with_proxy(url: &Url, proxy_port: Option<u16>) -> Nav {
     let app_host = url.host_str() == Some("tauri.localhost");

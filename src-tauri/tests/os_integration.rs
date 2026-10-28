@@ -76,3 +76,97 @@ fn hotkey_is_alt_space_and_parses() {
         .expect("Alt+Space must parse as a shortcut");
     assert_eq!(shortcut.to_string().to_lowercase(), "alt+space");
 }
+
+#[test]
+fn container_window_config_points_to_accelerated_proxy() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let raw = std::fs::read_to_string(manifest_dir.join("tauri.conf.json")).unwrap();
+    let conf: tauri::utils::config::Config = serde_json::from_str(&raw).unwrap();
+    let main_window = conf.app.windows.iter().find(|w| w.label == "main").unwrap();
+    let configured = links::configure_container_window(main_window, 9041);
+    assert_eq!(
+        configured.url,
+        tauri::WebviewUrl::External(links::container_url(9041))
+    );
+}
+
+#[test]
+fn test_container_navigation_policy() {
+    let port = 9041;
+    let container_root = links::container_url(port);
+    assert_eq!(container_root.as_str(), "http://127.0.0.1:9041/");
+    assert_eq!(
+        links::classify_with_proxy(&container_root, Some(port)),
+        links::Nav::App,
+        "container root must stay in webview"
+    );
+
+    // Internal app routes and frames stay inside the webview
+    let internal_routes = [
+        "http://127.0.0.1:9041/",
+        "http://127.0.0.1:9041/index.html",
+        "http://127.0.0.1:9041/login",
+        "http://127.0.0.1:9041/settings.html",
+        "http://127.0.0.1:9041/plugins/aqvn_intel_suite/webui/canvas.html",
+        "http://127.0.0.1:9041/extensions/my_extension/index.html",
+        "http://127.0.0.1:9041/public/asset.png",
+        "http://127.0.0.1:9041/vendor/marked.min.js",
+        "http://127.0.0.1:9041/css/app.css",
+        "http://127.0.0.1:9041/js/bundle.js",
+        "http://localhost:9041/plugins/aqvn_intel_suite/webui/canvas.html",
+        "tauri://localhost/index.html",
+        "http://tauri.localhost/index.html",
+        "about:blank",
+    ];
+    for raw in internal_routes {
+        let url = Url::parse(raw).expect("valid url");
+        assert_eq!(
+            links::classify_with_proxy(&url, Some(port)),
+            links::Nav::App,
+            "Internal route {raw} must stay in webview"
+        );
+    }
+
+    // External links open in system default browser
+    let external_links = [
+        "https://example.com/docs",
+        "https://github.com/aqvn/workspace",
+        "http://example.com/login",
+        "http://127.0.0.1:8080/plugins/canvas.html",
+        "http://localhost:3000/api",
+        "https://a0.matmagoc.com/chat",
+    ];
+    for raw in external_links {
+        let url = Url::parse(raw).expect("valid url");
+        assert_eq!(
+            links::classify_with_proxy(&url, Some(port)),
+            links::Nav::External,
+            "External link {raw} must open in system browser"
+        );
+    }
+
+    // Blocked schemes
+    let blocked_schemes = [
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "ftp://mirror.example.com",
+    ];
+    for raw in blocked_schemes {
+        let url = Url::parse(raw).expect("valid url");
+        assert_eq!(
+            links::classify_with_proxy(&url, Some(port)),
+            links::Nav::Blocked,
+            "Unsupported scheme {raw} must be blocked"
+        );
+    }
+}
+
+#[test]
+fn main_window_uses_container_configuration() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib_rs.contains("configure_container_window"),
+        "src/lib.rs must use configure_container_window to point webview window at accelerated proxy"
+    );
+}

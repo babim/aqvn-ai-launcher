@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod config;
+pub mod connector;
 pub mod proxy;
 #[cfg(not(target_os = "android"))]
 pub mod rfc;
@@ -67,6 +68,14 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     if let Err(err) = ssh::server::run_supervised(ssh_supervisor).await {
                         eprintln!("{err}");
+                    }
+                });
+
+                // Outbound Gateway Hub client: connects to upstream /ws
+                let gateway_supervisor = watcher.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(err) = connector::client::run_supervised(gateway_supervisor).await {
+                        eprintln!("Gateway supervisor error: {err}");
                     }
                 });
             }

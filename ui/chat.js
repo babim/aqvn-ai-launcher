@@ -976,6 +976,10 @@
   var CANVAS_MAX = 800;
   var SIDEBAR_DEFAULT = 220;
   var CANVAS_DEFAULT = 450;
+  var ZOOM_KEY = 'aqvn_zoom';
+  var ZOOM_MIN = 0.7;
+  var ZOOM_MAX = 2.0;
+  var ZOOM_STEP = 0.1;
 
   function readCollapsed(key) {
     try {
@@ -1040,6 +1044,72 @@
     if (dom.canvasFrame.getAttribute('src') !== url) {
       dom.canvasFrame.setAttribute('src', url);
     }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* UI zoom and hard refresh                                           */
+  /* ------------------------------------------------------------------ */
+
+  function clampZoom(value) {
+    var n = value === null || value === undefined || value === '' ? 1 : Number(value);
+    if (!isFinite(n)) {
+      n = 1;
+    }
+    n = Math.round(n * 100) / 100;
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n));
+  }
+
+  function applyZoom(level) {
+    var zoom = clampZoom(level);
+    document.body.style.zoom = String(zoom);
+    try {
+      window.localStorage.setItem(ZOOM_KEY, String(zoom));
+    } catch (err) {
+      /* storage is optional */
+    }
+    return zoom;
+  }
+
+  function readZoom() {
+    try {
+      return clampZoom(window.localStorage.getItem(ZOOM_KEY));
+    } catch (err) {
+      return 1;
+    }
+  }
+
+  function zoomIn() {
+    return applyZoom(readZoom() + ZOOM_STEP);
+  }
+
+  function zoomOut() {
+    return applyZoom(readZoom() - ZOOM_STEP);
+  }
+
+  function resetZoom() {
+    return applyZoom(1);
+  }
+
+  /* Force the Intel Suite iframe to reload even when the URL is unchanged. */
+  function reloadCanvas() {
+    if (!dom.canvasFrame) {
+      return;
+    }
+    dom.canvasFrame.removeAttribute('src');
+    loadCanvas();
+  }
+
+  /* Full client reset: RAM message state, CSRF token, Socket.IO and canvas. */
+  async function hardRefresh() {
+    clearLogs();
+    applyProgress(false, '');
+    try {
+      await refreshCsrf();
+    } catch (err) {
+      showChatError((err && err.message) || String(err || 'CSRF refresh failed'));
+    }
+    connectSocket();
+    reloadCanvas();
   }
 
   function applySidebarWidth(px) {
@@ -1118,8 +1188,26 @@
 
   function handleShortcut(event) {
     var key = String(event.key || '').toLowerCase();
+    if (key === 'f5' || (event.ctrlKey && event.shiftKey && key === 'r')) {
+      hardRefresh();
+      event.preventDefault();
+      return true;
+    }
     if (key === 'f11' || (event.ctrlKey && event.shiftKey && key === 'f')) {
       toggleFocusMode();
+      event.preventDefault();
+      return true;
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      if (key === '=' || key === '+') {
+        zoomIn();
+      } else if (key === '-' || key === '_') {
+        zoomOut();
+      } else if (key === '0') {
+        resetZoom();
+      } else {
+        return false;
+      }
       event.preventDefault();
       return true;
     }
@@ -1165,6 +1253,7 @@
     dom.toggleCanvasBtn = byId('toggle-canvas-btn');
     dom.closeCanvasBtn = byId('close-canvas-btn');
     dom.sidebarServerSelect = byId('sidebar-server-select');
+    dom.hardRefreshBtn = byId('hard-refresh-btn');
 
     state.sidebarWidth = SIDEBAR_DEFAULT;
     state.canvasWidth = CANVAS_DEFAULT;
@@ -1194,6 +1283,13 @@
       });
     }
 
+    if (dom.hardRefreshBtn) {
+      dom.hardRefreshBtn.addEventListener('click', function () {
+        hardRefresh();
+      });
+    }
+
+    applyZoom(readZoom());
     document.addEventListener('keydown', handleShortcut);
     bindSplitter(dom.splitterLeft, applySidebarWidth, false);
     bindSplitter(dom.splitterRight, applyCanvasWidth, true);

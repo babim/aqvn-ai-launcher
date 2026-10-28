@@ -104,7 +104,8 @@ __harness__.exports = (function () {
     'applyCanvasWidth', 'setSidebarCollapsed', 'setCanvasCollapsed',
     'renderContent', 'copyCode', 'applyProgress', 'notifyComplete',
     'setConnection', 'sendMessage', 'queueOutbox', 'readOutbox',
-    'flushOutbox'
+    'flushOutbox', 'applyZoom', 'readZoom', 'clampZoom', 'hardRefresh',
+    'reloadCanvas'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -157,7 +158,7 @@ __harness__.exports = (function () {
   const documentMock = {
     title: '',
     readyState: 'loading',
-    body: { classList: createClassList() },
+    body: { classList: createClassList(), style: {} },
     getElementById: getEl,
     createElement: () => createElementMock('el'),
     createTextNode: () => ({}),
@@ -1049,5 +1050,125 @@ describe('ui/chat.js notifications, connection LED and offline outbox', () => {
     assert.equal(sent[0].context, 'ctx-1');
     assert.equal(sent[0].message_id, 'm-1');
     assert.equal(harness.store['aqvn_outbox'], undefined, 'outbox must clear after flush');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-ZOOM-001..002: UI zoom and hard refresh                        */
+/* ------------------------------------------------------------------ */
+
+function stubCsrfFetch(harness) {
+  const calls = { csrf: 0 };
+  harness.context.fetch = async (url) => {
+    if (String(url).includes('/proxy/csrf')) {
+      calls.csrf += 1;
+      return new Response(JSON.stringify({ token: 'csrf-' + calls.csrf }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+  return calls;
+}
+
+describe('ui/chat.js UI zoom and hard refresh', () => {
+  test('VAL-ZOOM-001: Ctrl +/-/0 adjust body zoom within [0.7, 2.0] and persist it', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const body = harness.document.body;
+    const key = (init) => Object.assign({ preventDefault: () => {} }, init);
+
+    harness.document.fire('keydown', key({ key: '=', ctrlKey: true }));
+    assert.equal(body.style.zoom, '1.1', 'Ctrl + must zoom in by one step');
+    harness.document.fire('keydown', key({ key: '+', ctrlKey: true }));
+    assert.equal(body.style.zoom, '1.2', 'Ctrl + must accumulate zoom steps');
+    harness.document.fire('keydown', key({ key: '-', ctrlKey: true }));
+    assert.equal(body.style.zoom, '1.1', 'Ctrl - must zoom out by one step');
+    harness.document.fire('keydown', key({ key: '0', ctrlKey: true }));
+    assert.equal(body.style.zoom, '1', 'Ctrl 0 must reset zoom to 1.0');
+    assert.equal(harness.store['aqvn_zoom'], '1', 'zoom must persist in localStorage aqvn_zoom');
+
+    const { applyZoom, clampZoom } = harness.exports;
+    assert.equal(typeof applyZoom, 'function', 'applyZoom must exist');
+    assert.equal(clampZoom(9), 2, 'zoom clamps at 2.0');
+    assert.equal(clampZoom(0.1), 0.7, 'zoom clamps at 0.7');
+    assert.equal(applyZoom(9), 2, 'applyZoom returns the clamped value');
+    assert.equal(body.style.zoom, '2', 'clamped zoom is applied to document.body');
+    assert.equal(harness.store['aqvn_zoom'], '2', 'clamped zoom is persisted');
+  });
+
+  test('VAL-ZOOM-001: stored aqvn_zoom is applied on init', () => {
+    const harness = createHarness();
+    harness.store['aqvn_zoom'] = '1.5';
+    harness.exports.init();
+    assert.equal(harness.document.body.style.zoom, '1.5', 'init must apply the stored zoom');
+  });
+
+  test('VAL-ZOOM-002: #hard-refresh-btn resets RAM state, CSRF, socket and canvas iframe', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const csrf = stubCsrfFetch(harness);
+    const { state } = harness.exports;
+
+    state.logs.set('stale', { id: 'stale', content: 'old' });
+    state.order.push('stale');
+    state.rows.set('stale', {});
+
+    let ioCalls = 0;
+    harness.context.io = () => {
+      ioCalls += 1;
+      return harness.mockIo;
+    };
+
+    harness.getEl('hard-refresh-btn').dispatch('click', { preventDefault: () => {} });
+    await flushPromises();
+    await flushPromises();
+
+    assert.equal(state.logs.size, 0, 'hard refresh must clear RAM logs');
+    assert.equal(state.order.length, 0, 'hard refresh must clear the log order');
+    assert.equal(state.rows.size, 0, 'hard refresh must clear rendered rows');
+    assert.equal(csrf.csrf, 1, 'hard refresh must re-fetch CSRF exactly once');
+    assert.equal(state.csrf, 'csrf-1', 'hard refresh must store the fresh CSRF token');
+    assert.equal(ioCalls, 1, 'hard refresh must reconnect Socket.IO');
+    assert.equal(
+      harness.getEl('canvas-frame').getAttribute('src'),
+      state.base + '/plugins/aqvn_intel_suite/webui/canvas.html',
+      'hard refresh must reload the canvas iframe'
+    );
+  });
+
+  test('VAL-ZOOM-002: Ctrl+Shift+R and F5 trigger the hard refresh', async () => {
+    for (const init of [{ key: 'r', ctrlKey: true, shiftKey: true }, { key: 'F5' }]) {
+      const harness = createHarness();
+      harness.exports.init();
+      const csrf = stubCsrfFetch(harness);
+      let ioCalls = 0;
+      harness.context.io = () => {
+        ioCalls += 1;
+        return harness.mockIo;
+      };
+
+      let prevented = false;
+      harness.document.fire('keydown', {
+        preventDefault: () => {
+          prevented = true;
+        },
+        ...init
+      });
+      await flushPromises();
+      await flushPromises();
+
+      assert.ok(prevented, `${init.key} must prevent the browser default`);
+      assert.equal(csrf.csrf, 1, `${init.key} must re-fetch CSRF`);
+      assert.equal(ioCalls, 1, `${init.key} must reconnect Socket.IO`);
+    }
+  });
+
+  test('VAL-ZOOM-002: index.html exposes #hard-refresh-btn', () => {
+    assert.match(readIndexHtml(), /id="hard-refresh-btn"/, 'topbar must expose the hard refresh button');
   });
 });

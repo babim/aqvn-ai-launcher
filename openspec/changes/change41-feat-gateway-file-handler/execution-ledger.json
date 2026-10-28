@@ -101,9 +101,14 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "completed",
       "task_id": "C41-001",
-      "touched_files": [],
+      "touched_files": [
+        "src-tauri/src/connector/handlers/files.rs",
+        "src-tauri/src/connector/handlers/mod.rs",
+        "src-tauri/src/connector/protocol.rs",
+        "src-tauri/tests/gateway_files.rs"
+      ],
       "verifier_verdict_refs": []
     },
     {
@@ -122,9 +127,14 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "completed",
       "task_id": "C41-002",
-      "touched_files": [],
+      "touched_files": [
+        "src-tauri/src/connector/handlers/files.rs",
+        "src-tauri/src/connector/handlers/mod.rs",
+        "src-tauri/src/connector/protocol.rs",
+        "src-tauri/tests/gateway_files.rs"
+      ],
       "verifier_verdict_refs": []
     },
     {
@@ -143,9 +153,14 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "completed",
       "task_id": "C41-003",
-      "touched_files": [],
+      "touched_files": [
+        "src-tauri/src/connector/handlers/files.rs",
+        "src-tauri/src/connector/handlers/mod.rs",
+        "src-tauri/src/connector/protocol.rs",
+        "src-tauri/tests/gateway_files.rs"
+      ],
       "verifier_verdict_refs": []
     }
   ],

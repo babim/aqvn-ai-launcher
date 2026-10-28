@@ -4,9 +4,9 @@
 
 ## Execution tasks
 
-- [x] C41-001: Handles connector_file_op for read, write, patch, and list
-- [x] C41-002: Rejects path traversal or symlink escapes outside sandbox
-- [x] C41-003: Replies with connector_file_op_result over WebSocket
+- [ ] C41-001: Handles connector_file_op for read, write, patch, and list
+- [ ] C41-002: Rejects path traversal or symlink escapes outside sandbox
+- [ ] C41-003: Replies with connector_file_op_result over WebSocket
 
 ## Task inventory
 

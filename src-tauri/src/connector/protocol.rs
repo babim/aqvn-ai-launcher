@@ -16,6 +16,9 @@ pub const MSG_TYPE_EXEC_OP_RESULT: &str = "connector_exec_op_result";
 pub const MSG_TYPE_BROWSER_OP: &str = "connector_browser_op";
 pub const MSG_TYPE_BROWSER_OP_RESULT: &str = "connector_browser_op_result";
 
+pub const MSG_TYPE_COMPUTER_USE_OP: &str = "connector_computer_use_op";
+pub const MSG_TYPE_COMPUTER_USE_OP_RESULT: &str = "connector_computer_use_op_result";
+
 pub const RUNTIME_TERMINAL: &str = "terminal";
 
 pub const TRANSFER_PROTOCOL_V1: &str = "v1";
@@ -281,6 +284,75 @@ pub struct ConnectorBrowserOpResult {
     pub pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectorComputerUseOp {
+    #[serde(rename = "type", default)]
+    pub msg_type: Option<String>,
+    #[serde(default)]
+    pub op: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    #[serde(default)]
+    pub button: Option<String>,
+    #[serde(default)]
+    pub clicks: Option<u32>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub keys: Option<Vec<String>>,
+    #[serde(default)]
+    pub modifiers: Option<Vec<String>>,
+    #[serde(default)]
+    pub delta_x: Option<f64>,
+    #[serde(default)]
+    pub delta_y: Option<f64>,
+    #[serde(default)]
+    pub start_x: Option<f64>,
+    #[serde(default)]
+    pub start_y: Option<f64>,
+    #[serde(default)]
+    pub end_x: Option<f64>,
+    #[serde(default)]
+    pub end_y: Option<f64>,
+    #[serde(default)]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub quality: Option<u8>,
+    #[serde(default)]
+    pub display_id: Option<u32>,
+    #[serde(default)]
+    pub active_window: Option<bool>,
+    #[serde(default)]
+    pub params: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectorComputerUseOpResult {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub op: String,
+    pub id: String,
+    pub success: bool,
+    pub status: String,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }

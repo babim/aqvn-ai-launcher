@@ -506,6 +506,20 @@ button:disabled {
   display: none !important;
 }
 
+/* Focus mode: hide the side panels, center the conversation. */
+body.focus-mode #sidebar,
+body.focus-mode #canvas-pane,
+body.focus-mode .splitter {
+  display: none !important;
+}
+
+body.focus-mode #chat-pane {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 840px;
+  margin: 0 auto;
+}
+
 @media (max-width: 700px) {
   .chat-shell {
     flex-direction: column;

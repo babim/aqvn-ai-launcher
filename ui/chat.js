@@ -62,7 +62,8 @@
     pollTimer: null,
     seq: 0,
     sidebarCollapsed: false,
-    canvasCollapsed: false
+    canvasCollapsed: false,
+    focusMode: false
   };
 
   function byId(id) {
@@ -997,11 +998,28 @@
     });
   }
 
+  function setFocusMode(enabled) {
+    state.focusMode = !!enabled;
+    document.body.classList.toggle('focus-mode', state.focusMode);
+    if (state.focusMode && dom.input && typeof dom.input.focus === 'function') {
+      dom.input.focus();
+    }
+  }
+
+  function toggleFocusMode() {
+    setFocusMode(!state.focusMode);
+  }
+
   function handleShortcut(event) {
+    var key = String(event.key || '').toLowerCase();
+    if (key === 'f11' || (event.ctrlKey && event.shiftKey && key === 'f')) {
+      toggleFocusMode();
+      event.preventDefault();
+      return true;
+    }
     if (!event.altKey || event.ctrlKey || event.metaKey) {
       return false;
     }
-    var key = String(event.key || '').toLowerCase();
     if (key === 's') {
       toggleSidebar();
     } else if (key === 'c') {

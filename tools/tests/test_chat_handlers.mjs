@@ -832,3 +832,62 @@ describe('ui/chat.js Markdown rendering and terminal code styling', () => {
     assert.doesNotMatch(node.innerHTML, /thought-step/, 'normal messages must not be collapsed');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* VAL-FOCUS-001: focus mode toggle, layout and composer focus        */
+/* ------------------------------------------------------------------ */
+
+describe('ui/chat.js Focus Mode and hotkeys', () => {
+  test('VAL-FOCUS-001: F11 and Ctrl+Shift+F toggle .focus-mode and focus the composer', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom } = harness.exports;
+    const body = harness.document.body;
+    let focused = 0;
+    dom.input.focus = () => {
+      focused += 1;
+    };
+    const key = (init) => Object.assign({ preventDefault: () => {} }, init);
+
+    assert.equal(body.classList.contains('focus-mode'), false, 'focus mode starts off');
+
+    harness.document.fire('keydown', key({ key: 'F11' }));
+    assert.ok(body.classList.contains('focus-mode'), 'F11 must enable focus mode');
+    assert.equal(focused, 1, 'entering focus mode must focus #message-input');
+
+    harness.document.fire('keydown', key({ key: 'F11' }));
+    assert.equal(body.classList.contains('focus-mode'), false, 'F11 must toggle focus mode off');
+
+    harness.document.fire('keydown', key({ key: 'f', ctrlKey: true, shiftKey: true }));
+    assert.ok(body.classList.contains('focus-mode'), 'Ctrl+Shift+F must enable focus mode');
+    assert.equal(focused, 2, 'Ctrl+Shift+F must focus #message-input');
+
+    harness.document.fire('keydown', key({ key: 'F', ctrlKey: true, shiftKey: true }));
+    assert.equal(body.classList.contains('focus-mode'), false, 'Ctrl+Shift+F must toggle focus mode off');
+  });
+
+  test('VAL-FOCUS-001: .focus-mode hides side panels and centers #chat-pane at 840px', () => {
+    const css = readChatCss();
+
+    assert.match(
+      css,
+      /\.focus-mode\s+#sidebar/i,
+      '.focus-mode must hide #sidebar'
+    );
+    assert.match(
+      css,
+      /\.focus-mode\s+#canvas-pane/i,
+      '.focus-mode must hide #canvas-pane'
+    );
+    assert.match(
+      css,
+      /\.focus-mode\s+\.splitter/i,
+      '.focus-mode must hide the splitters'
+    );
+    assert.match(
+      css,
+      /\.focus-mode\s+#chat-pane[^{]*\{[^}]*max-width:\s*840px/i,
+      '.focus-mode must center #chat-pane with max-width: 840px'
+    );
+  });
+});

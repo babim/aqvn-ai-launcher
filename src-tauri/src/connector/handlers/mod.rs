@@ -3,10 +3,11 @@
 //! Subordinate modules implement `connector_file_op`, `connector_exec_op`,
 //! `connector_browser_op`, and `connector_computer_use_op`.
 
+pub mod browser;
 pub mod exec;
 pub mod files;
 
-use crate::connector::protocol::{MSG_TYPE_EXEC_OP, MSG_TYPE_FILE_OP};
+use crate::connector::protocol::{MSG_TYPE_BROWSER_OP, MSG_TYPE_EXEC_OP, MSG_TYPE_FILE_OP};
 use serde_json::Value;
 
 /// Dispatches an incoming JSON message with an optional streaming sender.
@@ -41,6 +42,7 @@ pub async fn dispatch_message_streaming(
         MSG_TYPE_EXEC_OP | "exec_op" => {
             Some(exec::handle_exec_op_with_sender(&envelope, sender).await)
         }
+        MSG_TYPE_BROWSER_OP | "browser_op" => Some(browser::handle_browser_op(&envelope).await),
         _ => None,
     }
 }

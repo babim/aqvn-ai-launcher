@@ -13,6 +13,9 @@ pub const MSG_TYPE_FILE_OP_RESULT: &str = "connector_file_op_result";
 pub const MSG_TYPE_EXEC_OP: &str = "connector_exec_op";
 pub const MSG_TYPE_EXEC_OP_RESULT: &str = "connector_exec_op_result";
 
+pub const MSG_TYPE_BROWSER_OP: &str = "connector_browser_op";
+pub const MSG_TYPE_BROWSER_OP_RESULT: &str = "connector_browser_op_result";
+
 pub const RUNTIME_TERMINAL: &str = "terminal";
 
 pub const TRANSFER_PROTOCOL_V1: &str = "v1";
@@ -215,6 +218,69 @@ pub struct ConnectorExecOpResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     pub done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectorBrowserOp {
+    #[serde(rename = "type", default)]
+    pub msg_type: Option<String>,
+    #[serde(default)]
+    pub op: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub selector: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub expression: Option<String>,
+    #[serde(default)]
+    pub script: Option<String>,
+    #[serde(default)]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub full_page: Option<bool>,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    #[serde(default)]
+    pub port: Option<u16>,
+    #[serde(default)]
+    pub cdp_url: Option<String>,
+    #[serde(default)]
+    pub params: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectorBrowserOpResult {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub op: String,
+    pub id: String,
+    pub success: bool,
+    pub status: String,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }

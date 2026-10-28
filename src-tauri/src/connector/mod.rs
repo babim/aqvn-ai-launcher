@@ -10,4 +10,6 @@ pub mod handlers;
 pub mod protocol;
 
 pub use client::{GatewayClient, GatewayConfig, GatewayHandle};
-pub use protocol::{ConnectorHello, ConnectorHelloAck, ScopeConfig};
+pub use protocol::{
+    ConnectorBrowserOp, ConnectorBrowserOpResult, ConnectorHello, ConnectorHelloAck, ScopeConfig,
+};

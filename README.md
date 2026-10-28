@@ -8,8 +8,14 @@ Enterprise-grade desktop and mobile native client built with **Tauri v2** and **
 
 AQVN Workspace combines two unified components into a single native binary:
 
-1. **Frontend Client**: Embedded vanilla HTML/CSS/JavaScript webview (no Node/bundler runtime dependency), featuring native window title synchronization (`AQVN AI Workspace`), system tray integration with busy/idle state indicators, desktop notifications, and a loopback bridge proxy that enables clean, secure communication with upstream workspace servers.
+1. **Frontend Client**: Embedded vanilla HTML/CSS/JavaScript webview (no Node/bundler runtime dependency), featuring:
+   - **3-Column Workspace Layout**: Collapsible Sidebar (`Alt+S`), Core Chat, and Right Canvas Host (`Alt+C`) embedding AQVN Intel Orchestrator (`/plugins/aqvn_intel_suite/webui/canvas.html`) via drag-resizable splitters.
+   - **Markdown & Code Highlighting**: In-repo vendored `marked.min.js` and `highlight.min.js` with 1-click code copying, terminal hacker theme (`#0d1117`), and collapsible `<details class="thought-step">` thought sections.
+   - **Focus Mode**: Distraction-free full-screen chat (`F11` / `Ctrl+Shift+F`), auto-centering and focusing composer.
+   - **System Integration & Offline Resilience**: OS notifications on background task completion, 3-state glowing LED indicator (🟢 Online / 🟡 Polling / 🔴 Offline), persistent offline outbox queue (`aqvn_outbox`) with automatic replay on reconnect, smooth UI Zoom (`Ctrl +/-/0`), and Hard Refresh (`Ctrl+Shift+R` / `F5`).
+   - Native window title synchronization (`AQVN AI Workspace`), system tray integration with busy/idle state indicators, and a loopback bridge proxy.
 2. **Backend RFC Host Bridge**: High-performance HTTP daemon (`POST /api/rfc` on port `55080`) and embedded SSH terminal server (port `55022`, powered by `russh`) allowing verified cloud agents to inspect files, browse workspace directories, and execute terminal sessions within an isolated filesystem sandbox.
+   - **Raw Forwarding Proxy**: The Axum loopback proxy seamlessly routes `/plugins/*`, `/extensions/*`, and `/public/*` directly to the upstream server with automated session cookie jar replay and origin spoofing.
 
 ---
 

@@ -24,6 +24,22 @@ fn app_pages_navigate_inside_the_webview() {
 }
 
 #[test]
+fn proxy_url_navigates_inside_the_webview() {
+    let url = Url::parse("http://127.0.0.1:9041/plugins/aqvn_intel_suite/webui/canvas.html")
+        .expect("test url parses");
+    assert_eq!(
+        links::classify_with_proxy(&url, Some(9041)),
+        links::Nav::App,
+        "proxy url on matching port must stay in webview"
+    );
+    assert_eq!(
+        links::classify_with_proxy(&url, Some(8080)),
+        links::Nav::External,
+        "proxy url on non-matching port must be external"
+    );
+}
+
+#[test]
 fn external_https_is_handed_to_the_system_browser() {
     for raw in ["https://example.com/docs", "http://localhost:3000/x"] {
         let url = Url::parse(raw).expect("test url parses");

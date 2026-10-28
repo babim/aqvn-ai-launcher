@@ -4,7 +4,7 @@
 //! `http(s)` navigation is cancelled and handed to the system browser through
 //! `tauri-plugin-shell`, so the chat surface never leaves the app origin.
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::ShellExt;
 use url::Url;
 
@@ -20,9 +20,25 @@ pub enum Nav {
 
 /// Classifies a navigation target without side effects.
 pub fn classify(url: &Url) -> Nav {
+    classify_with_proxy(url, None)
+}
+
+/// Classifies a navigation target, allowing the local bridge proxy.
+pub fn classify_with_proxy(url: &Url, proxy_port: Option<u16>) -> Nav {
     let app_host = url.host_str() == Some("tauri.localhost");
     if app_host || matches!(url.scheme(), "tauri" | "about" | "data" | "blob") {
         Nav::App
+    } else if let Some(port) = proxy_port {
+        if url.scheme() == "http"
+            && (url.host_str() == Some("127.0.0.1") || url.host_str() == Some("localhost"))
+            && url.port() == Some(port)
+        {
+            Nav::App
+        } else if matches!(url.scheme(), "http" | "https") {
+            Nav::External
+        } else {
+            Nav::Blocked
+        }
     } else if matches!(url.scheme(), "http" | "https") {
         Nav::External
     } else {
@@ -36,7 +52,10 @@ pub fn classify(url: &Url) -> Nav {
 /// deprecated upstream in favour of a newer plugin but remains functional here.
 #[allow(deprecated)]
 pub fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
-    match classify(url) {
+    let proxy_port = app
+        .try_state::<crate::proxy::server::ProxyInfo>()
+        .map(|p| p.port);
+    match classify_with_proxy(url, proxy_port) {
         Nav::App => true,
         Nav::External => {
             match app.shell().open(url.as_str(), None) {

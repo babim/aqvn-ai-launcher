@@ -1,0 +1,420 @@
+{
+  "affected_surfaces": [
+    {
+      "coverage_status": "covered",
+      "owner_skill": "aqvn-opsx-doit",
+      "path": "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "reason": "Bridge surface for feature feat-web-proxy-passthrough.",
+      "required_task_ids": [
+        "C36-001",
+        "C36-002",
+        "C36-003",
+        "C36-004"
+      ],
+      "surface_id": "surf:36-feat-web-proxy-passthrough",
+      "type": "script"
+    }
+  ],
+  "bounded_assumptions": [],
+  "confidence": "high",
+  "config_source": "mission-bind",
+  "conflict_policy": {
+    "config_vs_evidence": "mission-bind scaffold; feature feat-web-proxy-passthrough"
+  },
+  "coverage_map": [
+    {
+      "change_name": "change36-feat-web-proxy-passthrough",
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_class": "declared-but-unproven",
+      "sync_class": "in-sync",
+      "trust_class": "low"
+    }
+  ],
+  "decision": {
+    "blocked": false,
+    "result_posture": "append-required",
+    "roadmap_mode": "append-roadmap"
+  },
+  "decision_table": [
+    {
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_score": 1,
+      "note": "mission bridge scaffold for feat-web-proxy-passthrough",
+      "sync_score": 1,
+      "trust_score": 1
+    }
+  ],
+  "dependency_graph": {
+    "acyclic": true,
+    "critical_path": [
+      "C36-001",
+      "C36-002",
+      "C36-003",
+      "C36-004"
+    ],
+    "edges": [
+      {
+        "from": "C36-001",
+        "reason": "sequential scaffold",
+        "to": "C36-002"
+      },
+      {
+        "from": "C36-002",
+        "reason": "sequential scaffold",
+        "to": "C36-003"
+      },
+      {
+        "from": "C36-003",
+        "reason": "sequential scaffold",
+        "to": "C36-004"
+      }
+    ]
+  },
+  "execution_posture_hints": [
+    {
+      "change_name": "change36-feat-web-proxy-passthrough",
+      "confidence": "high",
+      "implementation_lane_shape": "bounded-single-lane",
+      "posture": "implementation-heavy",
+      "reason": "bridge script with self-test"
+    }
+  ],
+  "execution_surface_hints": [
+    {
+      "change_name": "change36-feat-web-proxy-passthrough",
+      "confidence": "high",
+      "reason": "bridge script fits native-subagents surface",
+      "surface": "native-subagents"
+    }
+  ],
+  "final_preflight": {
+    "checks": [
+      {
+        "evidence_refs": [
+          "openspec/changes/change36-feat-web-proxy-passthrough/tasks.md"
+        ],
+        "name": "active_changes",
+        "notes": "scaffold-bound change not yet implemented",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change36-feat-web-proxy-passthrough/specs/"
+        ],
+        "name": "specs",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change36-feat-web-proxy-passthrough/tasks.md"
+        ],
+        "name": "semantic_gate",
+        "notes": "scaffold sections emitted; atoms unexecuted",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change36-feat-web-proxy-passthrough/roadmap-audit.json"
+        ],
+        "name": "schema_gate",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "handoff_packet",
+        "notes": "handoff completeness declared, not yet exercised",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "terminal_closeout",
+        "notes": "closeout happens at archive time",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change36-feat-web-proxy-passthrough/execution-ledger.json"
+        ],
+        "name": "audit_sync",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change36-feat-web-proxy-passthrough/roadmap-audit.json#numbering_policy"
+        ],
+        "name": "numbering_justification",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "overlap_matrix",
+        "notes": "new bridge scaffold; no archived change refreshed",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [],
+        "name": "residual_taxonomy",
+        "notes": "typed residual: not-yet-executed scaffold",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "second_pass_evidence",
+        "notes": "second pass runs in the doit drain, not at bind",
+        "status": "not-applicable"
+      }
+    ],
+    "residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "status": "typed-residual"
+  },
+  "granularity_gate": {
+    "complexity_expansion_complete": true,
+    "dependency_graph_acyclic": true,
+    "missing_surface_ids": "none",
+    "no_umbrella_only_coverage": true,
+    "notes": "mission bridge scaffold for feat-web-proxy-passthrough; 4 task atoms",
+    "one_task_per_affected_skill": true,
+    "single_shared_file_no_fake_parallel": "single-shared-file-no-fake-parallel: serial scaffold",
+    "status": "pass"
+  },
+  "handoff_completeness": {
+    "closeout_bundle": "emitted at archive time by the standard closeout flow",
+    "confidence_lifecycle": "declared-but-unproven until the verifier atom passes",
+    "evidence_claim_map": "opsx-mission-bind.mjs binds feature feat-web-proxy-passthrough to change change36-feat-web-proxy-passthrough.",
+    "must_not_merge_before": [
+      "not-yet-executed: proposals-only scaffold for feat-web-proxy-passthrough; implementation deferred to the doit drain"
+    ],
+    "route_verdict": "native-subagents lane; owner aqvn-opsx-doit",
+    "safe_to_run_in_parallel_with": [
+      "other mission-bridge features with disjoint write_scope"
+    ],
+    "severity_waivers": "none",
+    "task_dag": "C36-001 -> C36-002 -> C36-003 -> C36-004",
+    "workstream_lanes": [
+      "impl/script atoms"
+    ]
+  },
+  "historical_overlap_matrix": [
+    {
+      "check": "historical_overlap",
+      "evidence_refs": [
+        "openspec/changes/change36-feat-web-proxy-passthrough/proposal.md"
+      ],
+      "rationale": "Auto-scaffolded by opsx-mission-bind.mjs for mission feature feat-web-proxy-passthrough.",
+      "verdict": "none"
+    },
+    {
+      "check": "why_not_refresh_old_archive",
+      "evidence_refs": [
+        "openspec/changes/change36-feat-web-proxy-passthrough/proposal.md"
+      ],
+      "rationale": "New bridge scaffold; no archived change is refreshed.",
+      "verdict": "follow-on-not-refresh"
+    },
+    {
+      "check": "why_follow_on_valid",
+      "evidence_refs": [
+        "openspec/changes/change36-feat-web-proxy-passthrough/proposal.md"
+      ],
+      "rationale": "Binds Factory mission feature feat-web-proxy-passthrough to an openspec change.",
+      "verdict": "valid"
+    },
+    {
+      "check": "why_not_delivery_or_local_residual",
+      "evidence_refs": [
+        "openspec/changes/change36-feat-web-proxy-passthrough/proposal.md"
+      ],
+      "rationale": "A bridge scaffold, not a local env or delivery residual.",
+      "verdict": "not-delivery-not-local"
+    }
+  ],
+  "next_task_hint": {
+    "execution_surface_hint": "native-subagents",
+    "reason": "first atom on the critical path",
+    "selected_change": "change36-feat-web-proxy-passthrough",
+    "task_id": "C36-001"
+  },
+  "numbering_policy": {
+    "default_rule": "global-max-plus-one over the archive baseline (highest_existing_ordinal 35); selected ordinal 36",
+    "highest_existing_ordinal": 35,
+    "lineage_authorized": true,
+    "lineage_authorized_by": "opsx-mission-bind.mjs (mission d398e923-10d9-46b0-af7c-32a71e95a347)",
+    "mode": "global-max-plus-one",
+    "selected_change": "change36-feat-web-proxy-passthrough",
+    "selected_ordinal": 36
+  },
+  "open_questions": [],
+  "orchestration_core_refs": {
+    "closeout_bundle_ref": "openspec/changes/change36-feat-web-proxy-passthrough/roadmap-audit.json#terminal_closeout",
+    "confidence_lifecycle_ref": "openspec/changes/change36-feat-web-proxy-passthrough/roadmap-audit.json#second_pass_evidence",
+    "evidence_claim_map_ref": "openspec/changes/change36-feat-web-proxy-passthrough/roadmap-audit.json#surface_to_task_coverage",
+    "migration_note": "mission bridge scaffold for feature feat-web-proxy-passthrough",
+    "packet_ref": "openspec/changes/change36-feat-web-proxy-passthrough/proposal.md",
+    "required_for_handoff": false,
+    "route_verdict_ref": "openspec/changes/change36-feat-web-proxy-passthrough/roadmap-audit.json#handoff_completeness",
+    "severity_waiver_policy_ref": "openspec/changes/change36-feat-web-proxy-passthrough/roadmap-audit.json#residuals",
+    "task_dag_ref": "openspec/changes/change36-feat-web-proxy-passthrough/roadmap-audit.json#dependency_graph",
+    "workstream_lane_refs": [
+      "openspec/changes/change36-feat-web-proxy-passthrough/execution-ledger.json#lanes"
+    ]
+  },
+  "parallelization_hints": {
+    "batchable_lanes": [],
+    "change_name": "change36-feat-web-proxy-passthrough",
+    "critical_path": [
+      "C36-001",
+      "C36-002",
+      "C36-003",
+      "C36-004"
+    ],
+    "no_fake_parallel_note": "Serial scaffold",
+    "sequential_gates": [
+      "C36-001",
+      "C36-002",
+      "C36-003",
+      "C36-004"
+    ]
+  },
+  "repo_mode": "aqvn-native",
+  "residuals": [],
+  "schema_version": "aqvn_opsx_roadmap_audit/v2",
+  "second_pass_evidence": {
+    "blocking_residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "evidence_refs": [],
+    "independence": "verifier runs in a separate lane from the implementing atoms",
+    "reviewer_lane": "independent-subagent (the final verification atom)",
+    "status": "typed-residual"
+  },
+  "semantic_validations": [
+    {
+      "name": "change36-feat-web-proxy-passthrough_valid",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_problem_map_fit",
+      "note": "mission bridge scaffold for feat-web-proxy-passthrough",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_claim_ceiling_check",
+      "note": "proposals-only scaffold; claims stay bounded until the doit drain",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_route_drift_check",
+      "note": "bound 1:1 to the mission feature; no alternate route",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_agent_consistency_check",
+      "note": "single owner_skill aqvn-opsx-doit across all atoms",
+      "status": "planned"
+    }
+  ],
+  "surface_to_task_coverage": [
+    {
+      "coverage_status": "covered",
+      "surface_id": "surf:36-feat-web-proxy-passthrough",
+      "task_ids": [
+        "C36-001",
+        "C36-002",
+        "C36-003",
+        "C36-004"
+      ]
+    }
+  ],
+  "task_inventory": [
+    {
+      "affected_surface_ids": [
+        "surf:36-feat-web-proxy-passthrough"
+      ],
+      "complexity": 1,
+      "dependencies": [],
+      "details": "Requests to /, /login.css, /vendor/*, /css/*, /js/* are forwarded to upstream",
+      "execution_surface_hint": "native-subagents",
+      "id": "C36-001",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-WEB-001. Seeded RED: behavior unmet. GREEN: behavior met and VAL-WEB-001 pass.",
+      "title": "Requests to /, /login.css, /vendor/*, /css/*, /js/* are forwarded to upstream",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:36-feat-web-proxy-passthrough"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C36-001"
+      ],
+      "details": "Content-Type, status codes, and headers are preserved",
+      "execution_surface_hint": "native-subagents",
+      "id": "C36-002",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-WEB-001. Seeded RED: behavior unmet. GREEN: behavior met and VAL-WEB-001 pass.",
+      "title": "Content-Type, status codes, and headers are preserved",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:36-feat-web-proxy-passthrough"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C36-002"
+      ],
+      "details": "Session cookies from CookieJar are replayed and upstream Set-Cookie headers are absorbed",
+      "execution_surface_hint": "native-subagents",
+      "id": "C36-003",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-WEB-001. Seeded RED: behavior unmet. GREEN: behavior met and VAL-WEB-001 pass.",
+      "title": "Session cookies from CookieJar are replayed and upstream Set-Cookie headers are absorbed",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:36-feat-web-proxy-passthrough"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C36-003"
+      ],
+      "details": "Integration tests in src-tauri/tests/proxy_server.rs pass cleanly",
+      "execution_surface_hint": "native-subagents",
+      "id": "C36-004",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-WEB-001. Seeded RED: behavior unmet. GREEN: behavior met and VAL-WEB-001 pass.",
+      "title": "Integration tests in src-tauri/tests/proxy_server.rs pass cleanly",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    }
+  ],
+  "terminal_closeout": {
+    "evidence_refs": [],
+    "no_active_change_gate": "not-applicable",
+    "reserved_change": false,
+    "status": "not-needed"
+  }
+}

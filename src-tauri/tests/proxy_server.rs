@@ -77,7 +77,11 @@ async fn start_stub() -> (Arc<Stub>, Running) {
     let router = Router::new()
         .route("/api/csrf_token", get(stub_csrf))
         .route("/login", post(stub_login))
-        .route("/", get(|| async { "home" }))
+        .route("/", get(stub_root))
+        .route("/login.css", any(stub_raw_asset))
+        .route("/vendor/{*rest}", any(stub_raw_asset))
+        .route("/css/{*rest}", any(stub_raw_asset))
+        .route("/js/{*rest}", any(stub_raw_asset))
         .route("/api/echo", post(stub_echo))
         .route("/api/rotate", post(stub_rotate))
         .route("/api/always", post(stub_always))
@@ -204,6 +208,28 @@ async fn stub_always(State(stub): State<Arc<Stub>>) -> Response {
     (StatusCode::FORBIDDEN, "always").into_response()
 }
 
+async fn stub_root(
+    State(stub): State<Arc<Stub>>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Response {
+    let path_and_query = uri
+        .path_and_query()
+        .map(|value| value.as_str().to_string())
+        .unwrap_or_else(|| uri.path().to_string());
+    *stub.last_raw_uri.lock().await = Some(path_and_query);
+    *stub.last_raw_origin.lock().await = header_string(&headers, "origin");
+    *stub.last_cookie.lock().await = header_string(&headers, "cookie");
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8".to_string()),
+            (header::SET_COOKIE, "root_seen=1; Path=/".to_string()),
+        ],
+        "<!DOCTYPE html><html><body>AQVN Workspace</body></html>",
+    )
+        .into_response()
+}
+
 /// Raw asset endpoint: records what arrived and answers with binary bytes.
 async fn stub_raw_asset(
     State(stub): State<Arc<Stub>>,
@@ -222,9 +248,21 @@ async fn stub_raw_asset(
         return (StatusCode::NOT_FOUND, "missing").into_response();
     }
 
+    let content_type = if path_and_query.ends_with(".css") {
+        "text/css"
+    } else if path_and_query.ends_with(".js") {
+        "application/javascript"
+    } else if path_and_query.ends_with(".woff2") {
+        "font/woff2"
+    } else if path_and_query.ends_with(".svg") {
+        "image/svg+xml"
+    } else {
+        "image/png"
+    };
+
     (
         [
-            (header::CONTENT_TYPE, "image/png".to_string()),
+            (header::CONTENT_TYPE, content_type.to_string()),
             (header::SET_COOKIE, "raw_seen=1; Path=/".to_string()),
         ],
         RAW_BODY,
@@ -764,5 +802,126 @@ async fn test_forward_raw_cookie_replay() {
     assert!(
         cookie.contains("raw_seen=1"),
         "upstream Set-Cookie must update the jar: {cookie}"
+    );
+}
+
+// ---------------------- root & static assets passthrough (VAL-WEB-001)
+
+#[tokio::test]
+async fn test_forward_raw_root_and_static_assets() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    // 1. Root path (/)
+    let response = client()
+        .get(format!("{}/", proxy.base))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("root request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("text/html; charset=utf-8")
+    );
+    let html = response.text().await.expect("root body");
+    assert!(html.contains("AQVN Workspace"));
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        Some("/"),
+        "root path reaches upstream"
+    );
+
+    // 2. /login.css
+    let response = client()
+        .get(format!("{}/login.css", proxy.base))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("login.css request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("text/css")
+    );
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        Some("/login.css"),
+        "login.css reaches upstream"
+    );
+
+    // 3. Static assets: /vendor/*, /css/*, /js/*, /public/*
+    for (path, mime) in [
+        ("/vendor/fonts/Inter.woff2", "font/woff2"),
+        ("/vendor/marked.min.js", "application/javascript"),
+        ("/css/app.css", "text/css"),
+        ("/js/bundle.js", "application/javascript"),
+        ("/public/branding/logo.svg", "image/svg+xml"),
+    ] {
+        let response = client()
+            .get(format!("{}{path}", proxy.base))
+            .header(header::ORIGIN, "tauri://localhost")
+            .send()
+            .await
+            .expect("static asset request");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some(mime),
+            "Content-Type for {path}"
+        );
+        let bytes = response.bytes().await.expect("body");
+        assert_eq!(
+            bytes.as_ref(),
+            RAW_BODY,
+            "binary bytes preserved for {path}"
+        );
+        assert_eq!(
+            stub.last_raw_uri.lock().await.as_deref(),
+            Some(path),
+            "{path} reaches upstream"
+        );
+        assert_eq!(
+            stub.last_raw_origin.lock().await.as_deref(),
+            Some(stub_guard.base.as_str()),
+            "{path} has spoofed origin"
+        );
+    }
+
+    // 4. Verify CSRF calls count remains 0 (no CSRF token required)
+    assert_eq!(
+        stub.csrf_calls.load(Ordering::SeqCst),
+        0,
+        "static asset requests must not require CSRF token"
+    );
+
+    // 5. Session cookie replay and Set-Cookie absorption
+    login(&proxy.base).await;
+
+    let response = client()
+        .get(format!("{}/vendor/test.js", proxy.base))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("vendor request after login");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let cookie = stub.last_cookie.lock().await.clone().unwrap_or_default();
+    assert!(
+        cookie.contains("session_abcd1234="),
+        "session cookie must be replayed on static asset request"
+    );
+    assert!(
+        cookie.contains("root_seen=1"),
+        "root Set-Cookie must be absorbed in jar"
     );
 }

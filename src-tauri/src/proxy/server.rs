@@ -140,6 +140,11 @@ pub fn router(state: ProxyState) -> Router {
         .route("/benchmark/fcp", any(handle_benchmark_fcp))
         .route(LOGIN_PATH, any(handle_login))
         .route("/api/{*rest}", any(handle_api))
+        .route("/", any(handle_forward_raw))
+        .route("/login.css", any(handle_forward_raw))
+        .route("/vendor/{*rest}", any(handle_forward_raw))
+        .route("/css/{*rest}", any(handle_forward_raw))
+        .route("/js/{*rest}", any(handle_forward_raw))
         .route("/plugins/{*rest}", any(handle_forward_raw))
         .route("/extensions/{*rest}", any(handle_forward_raw))
         .route("/public/{*rest}", any(handle_forward_raw))
@@ -314,10 +319,10 @@ async fn handle_api(
     upstream_response(result, origin.as_deref())
 }
 
-/// Raw passthrough for static assets (`/plugins/*`, `/extensions/*`, `/public/*`).
+/// Raw passthrough for root path and static assets (`/`, `/login.css`, `/vendor/*`, `/css/*`, `/js/*`, `/plugins/*`, `/extensions/*`, `/public/*`).
 ///
 /// No CSRF token is required: the jar replays its session cookies upstream and
-/// the upstream `Set-Cookie` headers update the jar, so plugin assets load
+/// the upstream `Set-Cookie` headers update the jar, so assets load
 /// without the webview ever holding a credential.
 async fn handle_forward_raw(
     State(state): State<ProxyState>,
@@ -409,7 +414,7 @@ async fn handle_socket_io(State(state): State<ProxyState>, request: Request<Body
 async fn handle_not_found() -> Response {
     text_response(
         StatusCode::NOT_FOUND,
-        "bridge proxy: only /login, /proxy/csrf, /api/*, /plugins/*, /extensions/*, /public/*, and /socket.io/ are proxied",
+        "bridge proxy: only /, /login, /login.css, /proxy/csrf, /api/*, /plugins/*, /extensions/*, /public/*, /vendor/*, /css/*, /js/*, and /socket.io/ are proxied",
     )
 }
 

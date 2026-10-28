@@ -1,13 +1,12 @@
 # RFC / Host-Bridge Protocol Notes
 
 This directory is the home for protocol notes about the upstream cloud workspace
-server we stay wire-compatible with (upstream project: Agent Zero v2.14).
+server we stay wire-compatible with (upstream protocol v2.14).
 
 ## Whitelabel exclusion
 
-The repo-wide whitelabel gate (`rg -i "agentzero|agent0|agent zero"`) excludes
-`docs/rfc-spec/**`. Naming the upstream project is allowed **only here**. Code,
-UI strings, bundle metadata, comments, and commit content stay AQVN-branded.
+The repo-wide whitelabel gate enforces zero upstream branding. Code,
+UI strings, bundle metadata, comments, and commit content stay strictly AQVN-branded.
 
 ## Wire notes (landed findings)
 

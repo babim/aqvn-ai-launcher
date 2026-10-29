@@ -332,9 +332,14 @@
   }
 
   function applyZoom(level) {
-    if (typeof document === 'undefined' || !document.body) return 1;
+    if (typeof document === 'undefined') return 1;
     var zoom = clampZoom(level);
-    document.body.style.zoom = String(zoom);
+    if (document.documentElement && document.documentElement.style) {
+      document.documentElement.style.zoom = String(zoom);
+    }
+    if (document.body && document.body.style) {
+      document.body.style.zoom = String(zoom);
+    }
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem(ZOOM_KEY, String(zoom));
@@ -365,9 +370,10 @@
   }
 
   function restoreZoom() {
-    if (typeof document !== 'undefined' && document.body) {
+    if (typeof document !== 'undefined' && (document.body || document.documentElement)) {
       applyZoom(readZoom());
-    } else if (typeof document !== 'undefined' && document.addEventListener) {
+    }
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('DOMContentLoaded', function () {
         applyZoom(readZoom());
       });
@@ -391,78 +397,100 @@
   }
 
   function installKeyboardShortcuts(dom) {
-    var target =
-      dom ||
-      (typeof window !== 'undefined' && typeof window.addEventListener === 'function'
-        ? window
-        : typeof document !== 'undefined' && typeof document.addEventListener === 'function'
-          ? document
-          : null);
-    if (!target) return;
-
-    target.addEventListener('keydown', function (e) {
+    function keyHandler(e) {
       var key = String(e.key || '').toLowerCase();
-      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
-        if (typeof e.preventDefault === 'function') {
-          e.preventDefault();
-        }
-        if (
-          typeof window !== 'undefined' &&
-          window.__TAURI_INTERNALS__ &&
-          typeof window.__TAURI_INTERNALS__.invoke === 'function'
-        ) {
-          window.__TAURI_INTERNALS__.invoke('open_settings');
-        } else {
-          invokeIpc('open_settings');
-        }
-      } else if (e.key === 'F1') {
-        if (typeof e.preventDefault === 'function') {
-          e.preventDefault();
-        }
-        if (
-          typeof window !== 'undefined' &&
-          window.__TAURI_INTERNALS__ &&
-          typeof window.__TAURI_INTERNALS__.invoke === 'function'
-        ) {
-          window.__TAURI_INTERNALS__.invoke('open_help');
-        } else {
-          invokeIpc('open_help');
-        }
-      } else if (
-        key === 'f11' ||
-        ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'f')
-      ) {
-        if (typeof e.preventDefault === 'function') {
-          e.preventDefault();
-        }
-        toggleFocusMode();
-      } else if (
-        key === 'f5' ||
-        ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'r')
-      ) {
-        if (typeof e.preventDefault === 'function') {
-          e.preventDefault();
-        }
-        hardRefresh();
-      } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
-        if (key === '=' || key === '+' || e.code === 'NumpadAdd') {
-          if (typeof e.preventDefault === 'function') {
-            e.preventDefault();
+      var isCtrl = Boolean(e.ctrlKey || e.metaKey);
+
+      if (!isCtrl && !e.altKey) {
+        if (e.key === 'F1') {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          if (
+            typeof window !== 'undefined' &&
+            window.__TAURI_INTERNALS__ &&
+            typeof window.__TAURI_INTERNALS__.invoke === 'function'
+          ) {
+            window.__TAURI_INTERNALS__.invoke('open_help');
+          } else {
+            invokeIpc('open_help');
           }
-          zoomIn();
-        } else if (key === '-' || key === '_' || e.code === 'NumpadSubtract') {
-          if (typeof e.preventDefault === 'function') {
-            e.preventDefault();
-          }
-          zoomOut();
-        } else if (key === '0' || e.code === 'Numpad0') {
-          if (typeof e.preventDefault === 'function') {
-            e.preventDefault();
-          }
-          resetZoom();
+          return;
+        }
+        if (e.key === 'F5') {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          hardRefresh();
+          return;
+        }
+        if (key === 'f11') {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          toggleFocusMode();
+          return;
         }
       }
-    });
+
+      if (isCtrl && !e.altKey) {
+        if (e.key === ',') {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          if (
+            typeof window !== 'undefined' &&
+            window.__TAURI_INTERNALS__ &&
+            typeof window.__TAURI_INTERNALS__.invoke === 'function'
+          ) {
+            window.__TAURI_INTERNALS__.invoke('open_settings');
+          } else {
+            invokeIpc('open_settings');
+          }
+          return;
+        }
+        if (e.shiftKey && (key === 'f' || e.code === 'KeyF')) {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          toggleFocusMode();
+          return;
+        }
+        if (e.shiftKey && (key === 'r' || e.code === 'KeyR')) {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          hardRefresh();
+          return;
+        }
+        // Zoom in: Ctrl+=, Ctrl++, or NumpadAdd (can have shiftKey or not)
+        if (key === '=' || key === '+' || e.code === 'Equal' || e.code === 'NumpadAdd') {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          zoomIn();
+          return;
+        }
+        // Zoom out: Ctrl+-, Ctrl+_, or NumpadSubtract
+        if (!e.shiftKey && (key === '-' || key === '_' || e.code === 'Minus' || e.code === 'NumpadSubtract')) {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          zoomOut();
+          return;
+        }
+        // Reset zoom: Ctrl+0, Numpad0, or Digit0
+        if (!e.shiftKey && (key === '0' || e.code === 'Digit0' || e.code === 'Numpad0')) {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          resetZoom();
+          return;
+        }
+      }
+    }
+
+    function wheelHandler(e) {
+      if (e.ctrlKey || e.metaKey) {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        if (e.deltaY < 0) {
+          zoomIn();
+        } else if (e.deltaY > 0) {
+          zoomOut();
+        }
+      }
+    }
+
+    if (dom && typeof dom.addEventListener === 'function') {
+      dom.addEventListener('keydown', keyHandler, true);
+    } else {
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('keydown', keyHandler, true);
+        window.addEventListener('wheel', wheelHandler, { passive: false, capture: true });
+      }
+    }
   }
 
   var bridgeApi = {

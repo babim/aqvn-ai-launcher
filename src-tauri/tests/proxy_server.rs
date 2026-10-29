@@ -1398,3 +1398,22 @@ async fn test_proxy_prefers_stable_port_55088() {
     );
     drop(listener);
 }
+
+#[tokio::test]
+async fn test_html_response_injects_container_bridge() {
+    let (_stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    let response = client()
+        .get(format!("{}/", proxy.base))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("root request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = response.text().await.expect("root body");
+    assert!(
+        html.contains("__aqvn_bridge__"),
+        "root HTML response must contain injected container bridge"
+    );
+}

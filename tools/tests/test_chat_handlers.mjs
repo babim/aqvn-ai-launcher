@@ -1742,6 +1742,10 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     assert.equal(fireKey('0'), true);
     assert.equal(document.body.style.zoom, '1');
     assert.equal(store['aqvn_zoom'], '1');
+
+    // Zoom in with Shift (Ctrl+Shift+= on standard keyboard)
+    assert.equal(fireKey('+', true, { shiftKey: true }), true);
+    assert.equal(document.body.style.zoom, '1.1');
   });
 
   test('test_web_notification_bridge handles hard refresh shortcuts (F5, Ctrl+Shift+R)', () => {

@@ -61,17 +61,23 @@ impl ProxyInfo {
 pub struct ProxyState {
     upstream: Arc<RwLock<Arc<Upstream>>>,
     cache: Arc<AssetCache>,
+    port: u16,
 }
 
 impl ProxyState {
     pub fn new(upstream: Upstream) -> Self {
-        Self::with_cache(upstream, Arc::new(AssetCache::default()))
+        Self::with_cache_and_port(upstream, Arc::new(AssetCache::default()), 0)
     }
 
     pub fn with_cache(upstream: Upstream, cache: Arc<AssetCache>) -> Self {
+        Self::with_cache_and_port(upstream, cache, 0)
+    }
+
+    pub fn with_cache_and_port(upstream: Upstream, cache: Arc<AssetCache>, port: u16) -> Self {
         Self {
             upstream: Arc::new(RwLock::new(Arc::new(upstream))),
             cache,
+            port,
         }
     }
 
@@ -81,6 +87,10 @@ impl ProxyState {
 
     pub fn cache(&self) -> &Arc<AssetCache> {
         &self.cache
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
     }
 
     pub async fn replace(&self, upstream: Upstream) {
@@ -125,7 +135,7 @@ pub async fn bind_with_cache(
     );
     Ok((
         listener,
-        ProxyState::with_cache(upstream, cache),
+        ProxyState::with_cache_and_port(upstream, cache, local.port()),
         ProxyInfo::from_addr(local),
     ))
 }
@@ -142,6 +152,39 @@ pub fn init_script(port: u16) -> String {
     format!(
         "window.__AQVN_PROXY__ = Object.freeze({{ url: \"http://127.0.0.1:{port}\", port: {port} }}); window.__AQVN_WINDOW_SHOWN__ = performance.now();\n{CONTAINER_BRIDGE_SCRIPT}"
     )
+}
+
+/// Injects the container bridge script into upstream HTML bodies so that
+/// splash-screen document.write calls and dynamic webui pages execute the bridge.
+pub fn inject_container_bridge(html_bytes: &[u8], port: u16) -> Vec<u8> {
+    let Ok(html) = std::str::from_utf8(html_bytes) else {
+        return html_bytes.to_vec();
+    };
+    if html.contains("__AQVN_CONTAINER__") || html.contains("__aqvn_bridge__") {
+        return html_bytes.to_vec();
+    }
+    let script = format!(
+        "<script id=\"__aqvn_bridge__\">{}</script>",
+        init_script(port)
+    );
+    let bytes = html.as_bytes();
+    if let Some(pos) = html.rfind("</body>") {
+        let mut out = Vec::with_capacity(html_bytes.len() + script.len() + 16);
+        out.extend_from_slice(&bytes[..pos]);
+        out.extend_from_slice(script.as_bytes());
+        out.extend_from_slice(&bytes[pos..]);
+        out
+    } else if let Some(pos) = html.find("</head>") {
+        let mut out = Vec::with_capacity(html_bytes.len() + script.len() + 16);
+        out.extend_from_slice(&bytes[..pos]);
+        out.extend_from_slice(script.as_bytes());
+        out.extend_from_slice(&bytes[pos..]);
+        out
+    } else {
+        let mut out = html_bytes.to_vec();
+        out.extend_from_slice(script.as_bytes());
+        out
+    }
 }
 
 /// Keeps the proxy pointed at the configured server; a change resets the jar.
@@ -498,7 +541,16 @@ async fn handle_forward_raw(
     match result {
         Ok(outcome) => {
             let status = StatusCode::from_u16(outcome.status).unwrap_or(StatusCode::BAD_GATEWAY);
-            let mut response = Response::new(Body::from(outcome.body.clone()));
+            let mut body_bytes = outcome.body.clone();
+            let is_html = status == StatusCode::OK
+                && outcome
+                    .content_type
+                    .as_deref()
+                    .is_some_and(|ct| ct.contains("text/html"));
+            if is_html && state.port() > 0 {
+                body_bytes = inject_container_bridge(&body_bytes, state.port());
+            }
+            let mut response = Response::new(Body::from(body_bytes));
             *response.status_mut() = status;
             if let Some(ref ct) = outcome.content_type {
                 if let Ok(value) = HeaderValue::from_str(ct) {

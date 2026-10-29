@@ -88,7 +88,11 @@ async fn start_stub() -> (Arc<Stub>, Running) {
         .route("/plugins/{*rest}", any(stub_raw_asset))
         .route("/extensions/{*rest}", any(stub_raw_asset))
         .route("/public/{*rest}", any(stub_raw_asset))
+        .route("/ui/{*rest}", any(stub_raw_asset))
+        .route("/sw.js", any(stub_raw_asset))
+        .route("/components/{*rest}", any(stub_raw_asset))
         .route("/socket.io/", any(stub_socket))
+        .fallback(stub_raw_asset)
         .with_state(stub.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1263,4 +1267,83 @@ async fn login_json_still_works() {
 
     let body = login(&proxy.base).await;
     assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
+async fn test_forward_raw_webui_and_fallback_routes() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    for path in [
+        "/ui/index",
+        "/ui/asset-bundle",
+        "/sw.js",
+        "/sw.js?version=2026.1",
+        "/components/nav.js",
+        "/some/future/page.html",
+    ] {
+        let response = client()
+            .get(format!("{}{path}", proxy.base))
+            .header(header::ORIGIN, "tauri://localhost")
+            .send()
+            .await
+            .expect("webui/fallback request");
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{path} status must be OK"
+        );
+        let bytes = response.bytes().await.expect("body");
+        assert_eq!(bytes.as_ref(), RAW_BODY, "{path} body preserved");
+        assert_eq!(
+            stub.last_raw_uri.lock().await.as_deref(),
+            Some(path),
+            "{path} reaches upstream stub"
+        );
+    }
+
+    // Verify /sw.js and /ui/asset-bundle are NOT cached
+    for uncacheable in ["/sw.js", "/ui/asset-bundle", "/ui/index"] {
+        *stub.last_raw_uri.lock().await = None;
+        let response = client()
+            .get(format!("{}{uncacheable}", proxy.base))
+            .header(header::ORIGIN, "tauri://localhost")
+            .send()
+            .await
+            .expect("repeat request");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response.headers().get("x-cache").is_none(),
+            "{uncacheable} must not have x-cache header"
+        );
+        assert_eq!(
+            stub.last_raw_uri.lock().await.as_deref(),
+            Some(uncacheable),
+            "{uncacheable} must reach upstream on every call"
+        );
+    }
+
+    // Verify /components/nav.js IS cached (static js asset)
+    let comp_url = format!("{}/components/nav.js", proxy.base);
+    *stub.last_raw_uri.lock().await = None;
+    let hit_res = client()
+        .get(&comp_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("hit request");
+    assert_eq!(hit_res.status(), StatusCode::OK);
+    assert_eq!(
+        hit_res
+            .headers()
+            .get("x-cache")
+            .and_then(|v| v.to_str().ok()),
+        Some("HIT"),
+        "/components/nav.js must be served from cache on repeat"
+    );
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        None,
+        "/components/nav.js HIT must not call upstream"
+    );
 }

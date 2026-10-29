@@ -167,6 +167,9 @@ impl AssetCache {
 /// Checks whether an asset path has a static cacheable extension.
 pub fn is_cacheable(path: &str) -> bool {
     let clean = path.split('?').next().unwrap_or(path);
+    if clean == "/sw.js" || clean.ends_with("/sw.js") || clean.starts_with("/ui/asset-bundle") {
+        return false;
+    }
     let Some(dot_idx) = clean.rfind('.') else {
         return false;
     };
@@ -252,4 +255,27 @@ fn meta_file_path(path: &Path) -> PathBuf {
     let mut os = path.as_os_str().to_os_string();
     os.push(".meta");
     PathBuf::from(os)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_cacheable_rules() {
+        assert!(is_cacheable("/css/main.css"));
+        assert!(is_cacheable("/js/app.js"));
+        assert!(is_cacheable("/vendor/font.woff2"));
+        assert!(is_cacheable("/components/button.js"));
+        assert!(is_cacheable("/components/button.js?v=123"));
+
+        // Uncacheable dynamic endpoints / service worker
+        assert!(!is_cacheable("/sw.js"));
+        assert!(!is_cacheable("/sw.js?version=2026.1"));
+        assert!(!is_cacheable("/ui/index"));
+        assert!(!is_cacheable("/ui/asset-bundle"));
+        assert!(!is_cacheable("/ui/asset-bundle?v=1"));
+        assert!(!is_cacheable("/ui/asset-bundle/bundle.js"));
+        assert!(!is_cacheable("/some/future/page.html"));
+    }
 }

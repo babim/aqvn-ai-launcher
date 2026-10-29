@@ -169,9 +169,12 @@ pub fn router(state: ProxyState) -> Router {
         .route("/plugins/{*rest}", any(handle_forward_raw))
         .route("/extensions/{*rest}", any(handle_forward_raw))
         .route("/public/{*rest}", any(handle_forward_raw))
+        .route("/ui/{*rest}", any(handle_forward_raw))
+        .route("/sw.js", any(handle_forward_raw))
+        .route("/components/{*rest}", any(handle_forward_raw))
         .route("/socket.io/", any(handle_socket_io))
         .route("/socket.io", any(handle_socket_io))
-        .fallback(handle_not_found)
+        .fallback(handle_forward_raw)
         .with_state(state)
 }
 
@@ -409,7 +412,7 @@ async fn handle_api(
     upstream_response(result, origin.as_deref())
 }
 
-/// Raw passthrough for root path and static assets (`/`, `/login.css`, `/vendor/*`, `/css/*`, `/js/*`, `/plugins/*`, `/extensions/*`, `/public/*`).
+/// Raw passthrough for root path, webui assets, and fallback unhandled paths (`/`, `/login.css`, `/vendor/*`, `/css/*`, `/js/*`, `/plugins/*`, `/extensions/*`, `/public/*`, `/ui/*`, `/sw.js`, `/components/*`).
 ///
 /// No CSRF token is required: the jar replays its session cookies upstream and
 /// the upstream `Set-Cookie` headers update the jar, so assets load
@@ -571,13 +574,6 @@ async fn handle_socket_io(State(state): State<ProxyState>, request: Request<Body
         )
         .await;
     upstream_response(result, origin.as_deref())
-}
-
-async fn handle_not_found() -> Response {
-    text_response(
-        StatusCode::NOT_FOUND,
-        "bridge proxy: only /, /login, /login.css, /proxy/csrf, /api/*, /plugins/*, /extensions/*, /public/*, /vendor/*, /css/*, /js/*, and /socket.io/ are proxied",
-    )
 }
 
 fn upstream_response(result: Result<ForwardResponse, String>, origin: Option<&str>) -> Response {

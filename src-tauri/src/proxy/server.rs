@@ -244,6 +244,7 @@ async fn handle_proxy_csrf(State(state): State<ProxyState>, headers: HeaderMap) 
 async fn handle_login(
     State(state): State<ProxyState>,
     method: Method,
+    uri: Uri,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
@@ -256,37 +257,105 @@ async fn handle_login(
     if method == Method::OPTIONS {
         return with_cors(StatusCode::NO_CONTENT.into_response(), origin.as_deref());
     }
-
-    let login: LoginBody = match serde_json::from_slice(&body) {
-        Ok(login) => login,
-        Err(err) => {
-            return with_cors(
-                text_response(
-                    StatusCode::BAD_REQUEST,
-                    format!("login body must be JSON {{username,password}}: {err}"),
-                ),
-                origin.as_deref(),
-            )
-        }
-    };
-    if login.username.trim().is_empty() || login.password.is_empty() {
+    if method == Method::GET {
+        return handle_forward_raw(State(state), method, uri, headers, body).await;
+    }
+    if method != Method::POST {
         return with_cors(
             text_response(
-                StatusCode::BAD_REQUEST,
-                "username and password are required".to_string(),
+                StatusCode::METHOD_NOT_ALLOWED,
+                format!("method {method} is not supported for {LOGIN_PATH}"),
             ),
             origin.as_deref(),
         );
     }
 
+    let is_json = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|val| val.to_str().ok())
+        .is_some_and(|ct| ct.contains("application/json"))
+        || body.first() == Some(&b'{');
+
+    if is_json {
+        let login: LoginBody = match serde_json::from_slice(&body) {
+            Ok(login) => login,
+            Err(err) => {
+                return with_cors(
+                    text_response(
+                        StatusCode::BAD_REQUEST,
+                        format!("login body must be JSON {{username,password}}: {err}"),
+                    ),
+                    origin.as_deref(),
+                );
+            }
+        };
+        if login.username.trim().is_empty() || login.password.is_empty() {
+            return with_cors(
+                text_response(
+                    StatusCode::BAD_REQUEST,
+                    "username and password are required".to_string(),
+                ),
+                origin.as_deref(),
+            );
+        }
+
+        let upstream = state.upstream().await;
+        let response = match upstream.login(&login.username, &login.password).await {
+            Ok(()) => Json(json!({ "ok": true })).into_response(),
+            Err(err) => (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "ok": false, "error": err })),
+            )
+                .into_response(),
+        };
+        return with_cors(response, origin.as_deref());
+    }
+
+    let mut username = String::new();
+    let mut password = String::new();
+    let mut next = String::new();
+
+    for (key, val) in url::form_urlencoded::parse(&body) {
+        match key.as_ref() {
+            "username" => username = val.into_owned(),
+            "password" => password = val.into_owned(),
+            "next" => next = val.into_owned(),
+            _ => {}
+        }
+    }
+
+    if next.is_empty() {
+        if let Some(query) = uri.query() {
+            for (key, val) in url::form_urlencoded::parse(query.as_bytes()) {
+                if key == "next" {
+                    next = val.into_owned();
+                    break;
+                }
+            }
+        }
+    }
+
+    let redirect_target = if !next.is_empty() && next != "/login" && !next.starts_with("//") {
+        next
+    } else {
+        "/".to_string()
+    };
+
     let upstream = state.upstream().await;
-    let response = match upstream.login(&login.username, &login.password).await {
-        Ok(()) => Json(json!({ "ok": true })).into_response(),
-        Err(err) => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "ok": false, "error": err })),
-        )
-            .into_response(),
+    let response = match upstream.login(&username, &password).await {
+        Ok(()) => {
+            let location = HeaderValue::try_from(redirect_target.as_str())
+                .unwrap_or_else(|_| HeaderValue::from_static("/"));
+            (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response()
+        }
+        Err(err) => {
+            let error_query =
+                url::form_urlencoded::byte_serialize(err.as_bytes()).collect::<String>();
+            let error_location = format!("/login?error={error_query}");
+            let location = HeaderValue::try_from(error_location.as_str())
+                .unwrap_or_else(|_| HeaderValue::from_static("/login"));
+            (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response()
+        }
     };
     with_cors(response, origin.as_deref())
 }

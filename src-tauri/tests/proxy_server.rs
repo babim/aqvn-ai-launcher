@@ -76,7 +76,7 @@ async fn start_stub() -> (Arc<Stub>, Running) {
     let stub = Arc::new(Stub::new());
     let router = Router::new()
         .route("/api/csrf_token", get(stub_csrf))
-        .route("/login", post(stub_login))
+        .route("/login", post(stub_login).get(stub_login_page))
         .route("/", get(stub_root))
         .route("/login.css", any(stub_raw_asset))
         .route("/vendor/{*rest}", any(stub_raw_asset))
@@ -150,6 +150,28 @@ async fn stub_login(State(stub): State<Arc<Stub>>, body: axum::body::Bytes) -> R
                 format!("session_{runtime_id}=sid-login-{runtime_id}; Path=/"),
             ),
         ],
+    )
+        .into_response()
+}
+
+async fn stub_login_page(
+    State(stub): State<Arc<Stub>>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Response {
+    let path_and_query = uri
+        .path_and_query()
+        .map(|value| value.as_str().to_string())
+        .unwrap_or_else(|| uri.path().to_string());
+    *stub.last_raw_uri.lock().await = Some(path_and_query);
+    *stub.last_raw_origin.lock().await = header_string(&headers, "origin");
+    *stub.last_cookie.lock().await = header_string(&headers, "cookie");
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8".to_string()),
+            (header::SET_COOKIE, "login_page_seen=1; Path=/".to_string()),
+        ],
+        "<!DOCTYPE html><html><body>Login Page</body></html>",
     )
         .into_response()
 }
@@ -1119,4 +1141,126 @@ async fn test_asset_caching_layer() {
 
     // Cleanup temp cache
     let _ = std::fs::remove_dir_all(&custom_cache_dir);
+}
+
+// -------------------------------- GET /login passthrough and Form POST
+
+#[tokio::test]
+async fn login_get_proxies_upstream_html() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    let response = client()
+        .get(format!("{}/login", proxy.base))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("get login request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("text/html; charset=utf-8")
+    );
+    let text = response.text().await.expect("login text");
+    assert!(text.contains("Login Page"));
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        Some("/login"),
+        "GET /login reaches upstream"
+    );
+}
+
+#[tokio::test]
+async fn login_form_urlencoded_redirects() {
+    let (_stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    let no_redirect_client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("no redirect client");
+
+    // 1. Successful login without next -> redirects to /
+    let response = no_redirect_client
+        .post(format!("{}/login", proxy.base))
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(format!("username={USERNAME}&password={PASSWORD}"))
+        .send()
+        .await
+        .expect("form login request");
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|v| v.to_str().ok()),
+        Some("/")
+    );
+
+    // 2. Successful login with next query parameter -> redirects to next target
+    let response = no_redirect_client
+        .post(format!("{}/login?next=/chat", proxy.base))
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(format!("username={USERNAME}&password={PASSWORD}"))
+        .send()
+        .await
+        .expect("form login request with next query");
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|v| v.to_str().ok()),
+        Some("/chat")
+    );
+
+    // 3. Successful login with next in body -> redirects to next target
+    let response = no_redirect_client
+        .post(format!("{}/login", proxy.base))
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(format!(
+            "username={USERNAME}&password={PASSWORD}&next=/dashboard"
+        ))
+        .send()
+        .await
+        .expect("form login request with next in body");
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|v| v.to_str().ok()),
+        Some("/dashboard")
+    );
+
+    // 4. Failed login with wrong password -> redirects to /login?error=...
+    let response = no_redirect_client
+        .post(format!("{}/login", proxy.base))
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body("username=admin&password=wrongpassword")
+        .send()
+        .await
+        .expect("bad form login");
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        location.starts_with("/login?error="),
+        "failed login must redirect to /login?error=..., got: {location}"
+    );
+}
+
+#[tokio::test]
+async fn login_json_still_works() {
+    let (_stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    let body = login(&proxy.base).await;
+    assert_eq!(body["ok"], true);
 }

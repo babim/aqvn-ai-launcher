@@ -25,6 +25,26 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
     }
 
+    #[cfg(not(target_os = "android"))]
+    {
+        builder = builder.on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let close_to_tray = window
+                        .app_handle()
+                        .try_state::<config::ConfigWatcher>()
+                        .map(|w| w.current().close_to_tray)
+                        .unwrap_or(true);
+                    if close_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        eprintln!("aqvn: main window hidden to tray");
+                    }
+                }
+            }
+        });
+    }
+
     builder
         .setup(|app| {
             let initial_config =

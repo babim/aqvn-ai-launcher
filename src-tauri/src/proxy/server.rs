@@ -32,6 +32,9 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 
+pub const PREFERRED_PROXY_PORT: u16 = 55088;
+pub const PROXY_PORT_RANGE: std::ops::RangeInclusive<u16> = 55088..=55099;
+
 /// Loopback only: this listener is never reachable from the network.
 const BIND_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
@@ -96,10 +99,23 @@ pub async fn bind_with_cache(
     cache: Arc<AssetCache>,
 ) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
     let upstream = Upstream::new(server_url)?;
-    let address = SocketAddr::new(BIND_ADDRESS, 0);
-    let listener = TcpListener::bind(address)
-        .await
-        .map_err(|err| format!("bridge proxy failed to bind {address}: {err}"))?;
+    let mut bound_listener = None;
+    for port in PROXY_PORT_RANGE {
+        let address = SocketAddr::new(BIND_ADDRESS, port);
+        if let Ok(listener) = TcpListener::bind(address).await {
+            bound_listener = Some(listener);
+            break;
+        }
+    }
+    let listener = match bound_listener {
+        Some(l) => l,
+        None => {
+            let address = SocketAddr::new(BIND_ADDRESS, 0);
+            TcpListener::bind(address)
+                .await
+                .map_err(|err| format!("bridge proxy failed to bind: {err}"))?
+        }
+    };
     let local = listener
         .local_addr()
         .map_err(|err| format!("bridge proxy has no local address: {err}"))?;

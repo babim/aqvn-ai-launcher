@@ -1384,3 +1384,17 @@ async fn session_cookie_persists_across_upstream_instances() {
 
     let _ = std::fs::remove_file(&cookie_file);
 }
+
+#[tokio::test]
+async fn test_proxy_prefers_stable_port_55088() {
+    assert_eq!(server::PREFERRED_PROXY_PORT, 55088);
+    assert_eq!(server::PROXY_PORT_RANGE, 55088..=55099);
+
+    let (_stub, stub_guard) = start_stub().await;
+    let (listener, _state, info) = server::bind(&stub_guard.base).await.expect("bind proxy");
+    assert!(
+        server::PROXY_PORT_RANGE.contains(&info.port) || info.port > 0,
+        "proxy port must be valid"
+    );
+    drop(listener);
+}

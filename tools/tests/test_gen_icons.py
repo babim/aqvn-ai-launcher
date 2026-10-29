@@ -57,6 +57,13 @@ def test_gen_icons_runs_and_creates_all_icons():
         "icon.png should match master icon-512.png"
     )
 
+    # Verify tray-idle matches 32x32 logo directly
+    tray_idle_png = Image.open(ICONS_DIR / "tray-idle.png")
+    icon_32_png = Image.open(ICONS_DIR / "32x32.png")
+    assert list(tray_idle_png.getdata()) == list(icon_32_png.getdata()), (
+        "tray-idle.png must use official 32x32 logo directly"
+    )
+
 
 if __name__ == "__main__":
     test_gen_icons_runs_and_creates_all_icons()

@@ -1,7 +1,7 @@
 //! System tray.
 //!
 //! Linux never emits tray click events, so show/hide is a menu item by design.
-//! The icon doubles as a status indicator: teal ring while idle, amber disc
+//! The icon doubles as a status indicator: official logo while idle, amber badge dot
 //! while a chat response is streaming.
 
 use tauri::image::Image;

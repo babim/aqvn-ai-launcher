@@ -1,8 +1,8 @@
 //! Tests for configuration and store settings (VAL-SCAF-010/011/012).
 
 use aqvn_workspace_lib::config::{
-    AppConfig, ConfigWatcher, DEFAULT_ALLOWED_PATHS, DEFAULT_GLOBAL_HOTKEY, DEFAULT_RFC_ENABLED,
-    DEFAULT_RFC_PORT, DEFAULT_SERVER_URL, DEFAULT_SSH_PORT, STORE_FILENAME,
+    AppConfig, ConfigWatcher, DEFAULT_ALLOWED_PATHS, DEFAULT_CLOSE_TO_TRAY, DEFAULT_GLOBAL_HOTKEY,
+    DEFAULT_RFC_ENABLED, DEFAULT_RFC_PORT, DEFAULT_SERVER_URL, DEFAULT_SSH_PORT, STORE_FILENAME,
 };
 use tauri::Manager;
 
@@ -32,6 +32,8 @@ fn default_config_matches_contract_requirements() {
     assert!(conf.scope_desktop);
     assert_eq!(conf.global_hotkey, DEFAULT_GLOBAL_HOTKEY);
     assert_eq!(DEFAULT_GLOBAL_HOTKEY, "Alt+Space");
+    assert!(conf.close_to_tray);
+    const { assert!(DEFAULT_CLOSE_TO_TRAY) };
 }
 
 #[test]
@@ -71,6 +73,7 @@ fn config_json_serde_roundtrip() {
         scope_browser: false,
         scope_desktop: true,
         global_hotkey: "Alt+Space".to_string(),
+        close_to_tray: false,
     };
 
     let json = serde_json::to_string(&conf).expect("serialize config");
@@ -109,6 +112,7 @@ fn test_store_persistence_roundtrip() {
         allowed_paths: vec!["/tmp/test-path".to_string()],
         connector_enabled: false,
         scope_files: false,
+        close_to_tray: false,
         ..Default::default()
     };
 
@@ -128,6 +132,7 @@ fn test_store_persistence_roundtrip() {
     assert_eq!(json["connector_enabled"], false);
     assert_eq!(json["scope_files"], false);
     assert_eq!(json["scope_exec"], true);
+    assert_eq!(json["close_to_tray"], false);
 
     // Load from store
     let loaded = AppConfig::load_from_store(app.handle()).expect("load from store");
@@ -142,6 +147,7 @@ fn test_store_persistence_roundtrip() {
     assert!(!loaded.connector_enabled);
     assert!(!loaded.scope_files);
     assert!(loaded.scope_exec);
+    assert!(!loaded.close_to_tray);
 
     // Clean up
     let _ = std::fs::remove_file(store_path);

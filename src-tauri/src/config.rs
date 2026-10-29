@@ -25,6 +25,7 @@ pub const DEFAULT_SCOPE_EXEC: bool = true;
 pub const DEFAULT_SCOPE_BROWSER: bool = true;
 pub const DEFAULT_SCOPE_DESKTOP: bool = true;
 pub const DEFAULT_GLOBAL_HOTKEY: &str = "Alt+Space";
+pub const DEFAULT_CLOSE_TO_TRAY: bool = true;
 pub const STORE_FILENAME: &str = "settings.json";
 
 fn default_global_hotkey() -> String {
@@ -58,6 +59,8 @@ pub struct AppConfig {
     pub scope_desktop: bool,
     #[serde(default = "default_global_hotkey")]
     pub global_hotkey: String,
+    #[serde(default = "default_true")]
+    pub close_to_tray: bool,
 }
 
 impl Default for AppConfig {
@@ -83,6 +86,7 @@ impl Default for AppConfig {
             scope_browser: DEFAULT_SCOPE_BROWSER,
             scope_desktop: DEFAULT_SCOPE_DESKTOP,
             global_hotkey: DEFAULT_GLOBAL_HOTKEY.to_string(),
+            close_to_tray: DEFAULT_CLOSE_TO_TRAY,
         }
     }
 }
@@ -182,6 +186,11 @@ impl AppConfig {
                 config.global_hotkey = s.to_string();
             }
         }
+        if let Some(val) = store.get("close_to_tray") {
+            if let Some(b) = val.as_bool() {
+                config.close_to_tray = b;
+            }
+        }
 
         Ok(config)
     }
@@ -209,6 +218,7 @@ impl AppConfig {
         store.set("scope_browser", serde_json::json!(self.scope_browser));
         store.set("scope_desktop", serde_json::json!(self.scope_desktop));
         store.set("global_hotkey", serde_json::json!(self.global_hotkey));
+        store.set("close_to_tray", serde_json::json!(self.close_to_tray));
 
         store
             .save()

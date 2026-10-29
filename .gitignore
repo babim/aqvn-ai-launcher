@@ -30,3 +30,7 @@ local.properties
 # OS / editor
 .DS_Store
 *.swp
+
+# OpenSpec governance tracking
+openspec/
+

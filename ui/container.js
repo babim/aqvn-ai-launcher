@@ -319,6 +319,77 @@
     return active;
   }
 
+  var ZOOM_KEY = 'aqvn_zoom';
+  var ZOOM_MIN = 0.7;
+  var ZOOM_MAX = 2.0;
+  var ZOOM_STEP = 0.1;
+
+  function clampZoom(value) {
+    var n = value === null || value === undefined || value === '' ? 1 : Number(value);
+    if (!isFinite(n)) n = 1;
+    n = Math.round(n * 100) / 100;
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n));
+  }
+
+  function applyZoom(level) {
+    if (typeof document === 'undefined' || !document.body) return 1;
+    var zoom = clampZoom(level);
+    document.body.style.zoom = String(zoom);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(ZOOM_KEY, String(zoom));
+      }
+    } catch (err) {}
+    return zoom;
+  }
+
+  function readZoom() {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return clampZoom(window.localStorage.getItem(ZOOM_KEY));
+      }
+    } catch (err) {}
+    return 1;
+  }
+
+  function zoomIn() {
+    return applyZoom(readZoom() + ZOOM_STEP);
+  }
+
+  function zoomOut() {
+    return applyZoom(readZoom() - ZOOM_STEP);
+  }
+
+  function resetZoom() {
+    return applyZoom(1);
+  }
+
+  function restoreZoom() {
+    if (typeof document !== 'undefined' && document.body) {
+      applyZoom(readZoom());
+    } else if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('DOMContentLoaded', function () {
+        applyZoom(readZoom());
+      });
+    }
+  }
+
+  function hardRefresh() {
+    if (typeof location !== 'undefined' && typeof location.reload === 'function') {
+      try {
+        location.reload();
+      } catch (e) {}
+    } else if (
+      typeof window !== 'undefined' &&
+      window.location &&
+      typeof window.location.reload === 'function'
+    ) {
+      try {
+        window.location.reload();
+      } catch (e) {}
+    }
+  }
+
   function installKeyboardShortcuts(dom) {
     var target =
       dom ||
@@ -330,6 +401,7 @@
     if (!target) return;
 
     target.addEventListener('keydown', function (e) {
+      var key = String(e.key || '').toLowerCase();
       if ((e.ctrlKey || e.metaKey) && e.key === ',') {
         if (typeof e.preventDefault === 'function') {
           e.preventDefault();
@@ -357,13 +429,38 @@
           invokeIpc('open_help');
         }
       } else if (
-        e.key === 'F11' ||
-        ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f'))
+        key === 'f11' ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'f')
       ) {
         if (typeof e.preventDefault === 'function') {
           e.preventDefault();
         }
         toggleFocusMode();
+      } else if (
+        key === 'f5' ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'r')
+      ) {
+        if (typeof e.preventDefault === 'function') {
+          e.preventDefault();
+        }
+        hardRefresh();
+      } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+        if (key === '=' || key === '+' || e.code === 'NumpadAdd') {
+          if (typeof e.preventDefault === 'function') {
+            e.preventDefault();
+          }
+          zoomIn();
+        } else if (key === '-' || key === '_' || e.code === 'NumpadSubtract') {
+          if (typeof e.preventDefault === 'function') {
+            e.preventDefault();
+          }
+          zoomOut();
+        } else if (key === '0' || e.code === 'Numpad0') {
+          if (typeof e.preventDefault === 'function') {
+            e.preventDefault();
+          }
+          resetZoom();
+        }
       }
     });
   }
@@ -377,6 +474,12 @@
     installKeyboardShortcuts: installKeyboardShortcuts,
     toggleFocusMode: toggleFocusMode,
     installFocusModeStyles: installFocusModeStyles,
+    applyZoom: applyZoom,
+    readZoom: readZoom,
+    zoomIn: zoomIn,
+    zoomOut: zoomOut,
+    resetZoom: resetZoom,
+    hardRefresh: hardRefresh,
     getState: function () {
       return {
         busy: state.busy,
@@ -398,4 +501,5 @@
   installDomObserver();
   installKeyboardShortcuts();
   installFocusModeStyles();
+  restoreZoom();
 })();

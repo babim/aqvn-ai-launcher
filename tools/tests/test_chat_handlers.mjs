@@ -1478,13 +1478,15 @@ function createContainerHarness(options = {}) {
 
   const calls = [];
   const docListeners = {};
+  const store = {};
   const documentMock = {
     title: 'AQVN Workspace',
     hidden: options.hidden !== undefined ? options.hidden : false,
     body: {
       classList: createClassList(),
       getAttribute: (name) => (name in attributes ? attributes[name] : null),
-      children: []
+      children: [],
+      style: {}
     },
     getElementById: getEl,
     querySelector: (selector) => {
@@ -1505,11 +1507,32 @@ function createContainerHarness(options = {}) {
   };
 
   const attributes = {};
+  let reloaded = false;
   const context = {
     console,
     document: documentMock,
+    location: {
+      origin: 'http://localhost:3000',
+      reload: () => {
+        reloaded = true;
+      }
+    },
     window: {
-      location: { origin: 'http://localhost:3000' },
+      location: {
+        origin: 'http://localhost:3000',
+        reload: () => {
+          reloaded = true;
+        }
+      },
+      localStorage: {
+        getItem: (k) => (k in store ? store[k] : null),
+        setItem: (k, v) => {
+          store[k] = String(v);
+        },
+        removeItem: (k) => {
+          delete store[k];
+        }
+      },
       addEventListener: (type, fn) => {
         (docListeners[type] = docListeners[type] || []).push(fn);
       },
@@ -1532,6 +1555,8 @@ function createContainerHarness(options = {}) {
     docListeners,
     elements,
     createElement: createElementMock,
+    getReloaded: () => reloaded,
+    store,
     bridge: context.window.__AQVN_CONTAINER__
   };
 }
@@ -1673,6 +1698,81 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     assert.equal(prevented, true, 'Ctrl+, must call preventDefault()');
     const openSettingsCalls = calls.filter((c) => c.command === 'open_settings');
     assert.equal(openSettingsCalls.length, 1, 'open_settings IPC command must be dispatched');
+  });
+
+  test('test_web_notification_bridge handles zoom shortcuts (Ctrl+=, Ctrl+-, Ctrl+0) and sets body.style.zoom', () => {
+    const harness = createContainerHarness();
+    const { document, docListeners, store } = harness;
+    const keydownListeners = docListeners['keydown'] || [];
+    assert.ok(keydownListeners.length > 0, 'keydown listener must be registered');
+
+    function fireKey(key, ctrlKey = true, extra = {}) {
+      let prevented = false;
+      const event = {
+        ctrlKey,
+        metaKey: false,
+        shiftKey: false,
+        altKey: false,
+        key,
+        preventDefault: () => {
+          prevented = true;
+        },
+        ...extra
+      };
+      for (const fn of keydownListeners) {
+        fn(event);
+      }
+      return prevented;
+    }
+
+    // Zoom in: Ctrl+=
+    assert.equal(fireKey('='), true);
+    assert.equal(document.body.style.zoom, '1.1');
+    assert.equal(store['aqvn_zoom'], '1.1');
+
+    // Zoom in again: Ctrl++
+    assert.equal(fireKey('+'), true);
+    assert.equal(document.body.style.zoom, '1.2');
+
+    // Zoom out: Ctrl+-
+    assert.equal(fireKey('-'), true);
+    assert.equal(document.body.style.zoom, '1.1');
+
+    // Reset zoom: Ctrl+0
+    assert.equal(fireKey('0'), true);
+    assert.equal(document.body.style.zoom, '1');
+    assert.equal(store['aqvn_zoom'], '1');
+  });
+
+  test('test_web_notification_bridge handles hard refresh shortcuts (F5, Ctrl+Shift+R)', () => {
+    const harness = createContainerHarness();
+    const { docListeners, getReloaded } = harness;
+    const keydownListeners = docListeners['keydown'] || [];
+
+    function fireKey(key, ctrlKey = false, shiftKey = false) {
+      let prevented = false;
+      const event = {
+        ctrlKey,
+        metaKey: false,
+        shiftKey,
+        altKey: false,
+        key,
+        preventDefault: () => {
+          prevented = true;
+        }
+      };
+      for (const fn of keydownListeners) {
+        fn(event);
+      }
+      return prevented;
+    }
+
+    // F5
+    assert.equal(fireKey('F5'), true);
+    assert.equal(getReloaded(), true);
+
+    // Ctrl+Shift+R
+    assert.equal(fireKey('R', true, true), true);
   });
 });
 

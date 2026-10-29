@@ -49,12 +49,12 @@ pub fn classify_with_proxy(url: &Url, proxy_port: Option<u16>) -> Nav {
             && url.port() == Some(port)
         {
             Nav::App
-        } else if matches!(url.scheme(), "http" | "https") {
+        } else if matches!(url.scheme(), "http" | "https" | "mailto") {
             Nav::External
         } else {
             Nav::Blocked
         }
-    } else if matches!(url.scheme(), "http" | "https") {
+    } else if matches!(url.scheme(), "http" | "https" | "mailto") {
         Nav::External
     } else {
         Nav::Blocked

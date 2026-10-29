@@ -260,13 +260,14 @@
     attach();
   }
 
-  function installKeyboardShortcuts() {
+  function installKeyboardShortcuts(dom) {
     var target =
-      typeof window !== 'undefined' && typeof window.addEventListener === 'function'
+      dom ||
+      (typeof window !== 'undefined' && typeof window.addEventListener === 'function'
         ? window
         : typeof document !== 'undefined' && typeof document.addEventListener === 'function'
           ? document
-          : null;
+          : null);
     if (!target) return;
 
     target.addEventListener('keydown', function (e) {
@@ -283,6 +284,19 @@
         } else {
           invokeIpc('open_settings');
         }
+      } else if (e.key === 'F1') {
+        if (typeof e.preventDefault === 'function') {
+          e.preventDefault();
+        }
+        if (
+          typeof window !== 'undefined' &&
+          window.__TAURI_INTERNALS__ &&
+          typeof window.__TAURI_INTERNALS__.invoke === 'function'
+        ) {
+          window.__TAURI_INTERNALS__.invoke('open_help');
+        } else {
+          invokeIpc('open_help');
+        }
       }
     });
   }
@@ -293,6 +307,7 @@
     updateTrayBusy: updateTrayBusy,
     handleWebSocketMessage: handleWebSocketMessage,
     checkDomState: checkDomState,
+    installKeyboardShortcuts: installKeyboardShortcuts,
     getState: function () {
       return {
         busy: state.busy,

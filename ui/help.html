@@ -17,111 +17,402 @@
       body {
         margin: 0;
         min-height: 100vh;
-        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         background: radial-gradient(circle at 30% 20%, #10243a, #070d16 65%);
         color: #e6edf7;
+        line-height: 1.5;
+      }
+      .top-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+      }
+      .nav-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        border: 1px solid #22d3ee55;
+        border-radius: 8px;
+        background: #0b1220;
+        color: #22d3ee;
+        font-size: 0.85rem;
+        font-weight: 500;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background-color 0.15s ease, border-color 0.15s ease;
+      }
+      .nav-btn:hover,
+      .nav-btn:focus-visible {
+        background: #132c46;
+        border-color: #22d3ee;
+        outline: none;
       }
       main {
-        max-width: 760px;
+        max-width: 820px;
         margin: 0 auto;
-        padding: 40px 24px 48px;
+        padding: 32px 24px 56px;
+      }
+      .header-area {
+        margin-bottom: 28px;
       }
       h1 {
-        margin: 0 0 0.25rem;
-        font-size: 1.5rem;
+        margin: 0 0 6px;
+        font-size: 1.6rem;
         letter-spacing: 0.02em;
         color: #f1f5f9;
       }
       .subtitle {
-        margin: 0 0 1.5rem;
+        margin: 0;
         color: #93a4bd;
-        font-size: 0.9rem;
+        font-size: 0.92rem;
       }
       .card {
         background: #0b1220cc;
         border: 1px solid #1e2f45;
         border-radius: 14px;
-        padding: 20px 24px;
-        margin-bottom: 20px;
+        padding: 24px;
+        margin-bottom: 22px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
       }
       .card h2 {
-        margin: 0 0 14px;
-        font-size: 1.1rem;
+        margin: 0 0 16px;
+        font-size: 1.15rem;
         color: #22d3ee;
-      }
-      .shortcut-list {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 12px 20px;
+        display: flex;
         align-items: center;
+        gap: 8px;
+      }
+      .shortcut-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .shortcut-table th {
+        text-align: left;
+        padding: 8px 12px;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #64748b;
+        border-bottom: 1px solid #1e2f45;
+      }
+      .shortcut-table td {
+        padding: 12px;
+        border-bottom: 1px solid #132235;
+        vertical-align: middle;
+      }
+      .shortcut-table tr:last-child td {
+        border-bottom: none;
+      }
+      .shortcut-table tr:hover td {
+        background: #0f1c2d44;
       }
       .kbd-badge {
         display: inline-block;
-        padding: 4px 10px;
+        padding: 4px 9px;
         font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-        font-size: 0.85rem;
+        font-size: 0.82rem;
+        font-weight: 600;
         color: #38bdf8;
         background: #0f172a;
         border: 1px solid #0284c7;
         border-radius: 6px;
         box-shadow: 0 2px 0 #0369a1;
+        white-space: nowrap;
       }
-      .shortcut-desc {
+      .shortcut-action {
+        font-weight: 500;
+        color: #e2e8f0;
         font-size: 0.92rem;
-        color: #cbd5e1;
       }
-      .feature-item {
+      .shortcut-detail {
+        font-size: 0.82rem;
+        color: #94a3b8;
+        margin-top: 2px;
+      }
+      .feature-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      @media (max-width: 640px) {
+        .feature-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .feature-box {
+        background: #070d16;
+        border: 1px solid #1a2a3e;
+        border-radius: 10px;
+        padding: 16px;
+      }
+      .feature-box-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+        font-size: 0.98rem;
+        color: #f1f5f9;
+        font-weight: 600;
+      }
+      .scope-tag {
+        font-family: ui-monospace, monospace;
+        font-size: 0.72rem;
+        padding: 2px 6px;
+        background: #0369a133;
+        border: 1px solid #0284c755;
+        border-radius: 4px;
+        color: #38bdf8;
+      }
+      .feature-box p {
+        margin: 0;
+        font-size: 0.86rem;
+        color: #94a3b8;
+        line-height: 1.45;
+      }
+      .note-box {
+        background: #17255422;
+        border: 1px solid #1d4ed844;
+        border-radius: 10px;
+        padding: 14px 18px;
         margin-bottom: 12px;
       }
-      .feature-item strong {
-        color: #e2e8f0;
+      .note-box:last-child {
+        margin-bottom: 0;
       }
-      .feature-item p {
-        margin: 4px 0 0;
-        font-size: 0.88rem;
-        color: #94a3b8;
-        line-height: 1.4;
+      .note-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #93c5fd;
+        margin-bottom: 4px;
+      }
+      .note-desc {
+        font-size: 0.85rem;
+        color: #cbd5e1;
+        line-height: 1.45;
+      }
+      .actions-bar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-top: 28px;
+      }
+      .primary-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 11px 24px;
+        border: 1px solid #22d3ee;
+        border-radius: 10px;
+        background: #0284c7;
+        color: #ffffff;
+        font: inherit;
+        font-size: 0.92rem;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+      }
+      .primary-btn:hover {
+        background: #0369a1;
+      }
+      .secondary-btn {
+        padding: 11px 20px;
+        border: 1px solid #1e2f45;
+        border-radius: 10px;
+        background: #0b1220;
+        color: #93a4bd;
+        font: inherit;
+        font-size: 0.92rem;
+        cursor: pointer;
+        transition: background-color 0.15s ease, color 0.15s ease;
+      }
+      .secondary-btn:hover {
+        background: #132c46;
+        color: #e6edf7;
       }
     </style>
   </head>
   <body>
     <main>
-      <h1>AQVN Workspace — Help &amp; Shortcuts</h1>
-      <p class="subtitle">Quick reference for desktop controls, keyboard shortcuts, and bridge services.</p>
+      <div class="top-nav">
+        <a class="nav-btn" href="settings.html" id="nav-to-settings">&larr; Open Settings</a>
+        <button type="button" class="nav-btn" id="close-btn" onclick="window.close()">Close &times;</button>
+      </div>
 
-      <section class="card">
-        <h2>Keyboard Shortcuts</h2>
-        <div class="shortcut-list">
-          <div><span class="kbd-badge">Alt + Space</span></div>
-          <div class="shortcut-desc">Toggle workspace window (Show / Hide) [configurable in Settings]</div>
+      <div class="header-area">
+        <h1>AQVN Workspace — Help &amp; Shortcuts</h1>
+        <p class="subtitle">Bảng tra cứu phím tắt máy tính, hướng dẫn điều khiển Agent và lưu ý bảo mật.</p>
+      </div>
 
-          <div><span class="kbd-badge">Ctrl + ,</span> / <span class="kbd-badge">⌘ + ,</span></div>
-          <div class="shortcut-desc">Open Launcher Settings</div>
+      <!-- Section 1: Keyboard Shortcuts -->
+      <section class="card" id="shortcuts-section">
+        <h2>Phím tắt hệ thống (Keyboard Shortcuts)</h2>
+        <table class="shortcut-table" aria-label="Bảng phím tắt ứng dụng">
+          <thead>
+            <tr>
+              <th style="width: 240px;">Phím tắt (Shortcut)</th>
+              <th>Thao tác &amp; Mô tả (Action &amp; Description)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <span class="kbd-badge">Alt + Space</span>
+              </td>
+              <td>
+                <div class="shortcut-action">Ẩn / Hiện nhanh cửa sổ từ bất cứ đâu (Global Summon)</div>
+                <div class="shortcut-detail">Thu nhỏ hoặc gọi cửa sổ ứng dụng lên màn hình chính. Có thể tùy chỉnh trong Settings.</div>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span class="kbd-badge">Ctrl + ,</span> &nbsp;/&nbsp; <span class="kbd-badge">⌘ + ,</span>
+              </td>
+              <td>
+                <div class="shortcut-action">Mở Cài đặt launcher (Settings)</div>
+                <div class="shortcut-detail">Cấu hình kết nối server, bảo mật Agent, phím tắt và danh mục thư mục được phép.</div>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span class="kbd-badge">F1</span>
+              </td>
+              <td>
+                <div class="shortcut-action">Mở Trợ giúp &amp; Phím tắt này (Help &amp; Shortcuts)</div>
+                <div class="shortcut-detail">Hiển thị nhanh trang tài liệu tham khảo và bảng phím tắt này bất cứ lúc nào.</div>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span class="kbd-badge">F11</span> &nbsp;/&nbsp; <span class="kbd-badge">Ctrl + Shift + F</span>
+              </td>
+              <td>
+                <div class="shortcut-action">Chế độ Focus tập trung toàn màn hình (Focus Mode)</div>
+                <div class="shortcut-detail">Ẩn các thanh bên (Sidebar và Canvas) để tập trung hội thoại và đặt trọng tâm vào composer.</div>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span class="kbd-badge">Alt + S</span>
+              </td>
+              <td>
+                <div class="shortcut-action">Bật / Tắt Sidebar danh sách hội thoại</div>
+                <div class="shortcut-detail">Đóng/mở ngăn bên trái chứa danh sách hội thoại, server switcher và các cài đặt nhanh.</div>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span class="kbd-badge">Alt + C</span>
+              </td>
+              <td>
+                <div class="shortcut-action">Bật / Tắt Right Canvas (Intel Suite)</div>
+                <div class="shortcut-detail">Đóng/mở ngăn giao diện mở rộng bên phải phục vụ phân tích dữ liệu và trình bày nội dung.</div>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span class="kbd-badge">Ctrl + +</span> &nbsp;/&nbsp; <span class="kbd-badge">Ctrl + -</span> &nbsp;/&nbsp; <span class="kbd-badge">Ctrl + 0</span>
+              </td>
+              <td>
+                <div class="shortcut-action">Phóng to, thu nhỏ, đặt lại kích thước giao diện (Zoom Control)</div>
+                <div class="shortcut-detail">Điều chỉnh tỷ lệ zoom giao diện trong khoảng [0.7x – 2.0x] và tự động lưu cấu hình.</div>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span class="kbd-badge">Ctrl + Shift + R</span> &nbsp;/&nbsp; <span class="kbd-badge">F5</span>
+              </td>
+              <td>
+                <div class="shortcut-action">Làm mới sạch ứng dụng (Hard Refresh)</div>
+                <div class="shortcut-detail">Đặt lại toàn bộ bộ nhớ tạm, CSRF token, kết nối WebSocket và tải lại iframe Canvas.</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
 
-          <div><span class="kbd-badge">F1</span></div>
-          <div class="shortcut-desc">Open this Help &amp; Shortcuts reference</div>
+      <!-- Section 2: Agent Control Features -->
+      <section class="card" id="gateway-section">
+        <h2>Tính năng Agent điều khiển máy (Outbound Gateway Hub)</h2>
+        <div class="feature-grid">
+          <div class="feature-box">
+            <div class="feature-box-title">
+              <span>Remote Files</span>
+              <span class="scope-tag">files</span>
+            </div>
+            <p>Cho phép Agent đọc, ghi, sửa và patch tệp trong các thư mục được cấp phép (mặc định <code>~/Workspace</code>). Ngăn chặn truy cập ngoài phạm vi cho phép.</p>
+          </div>
 
-          <div><span class="kbd-badge">Ctrl + Q</span> / <span class="kbd-badge">⌘ + Q</span></div>
-          <div class="shortcut-desc">Quit application from tray or window</div>
+          <div class="feature-box">
+            <div class="feature-box-title">
+              <span>Terminal Execution</span>
+              <span class="scope-tag">code_execution</span>
+            </div>
+            <p>Cho phép Agent chạy các lệnh shell qua phiên PTY cục bộ được cô lập, hỗ trợ lệnh chạy dài và truyền kết quả trực tiếp về máy chủ.</p>
+          </div>
+
+          <div class="feature-box">
+            <div class="feature-box-title">
+              <span>Host Browser</span>
+              <span class="scope-tag">browser</span>
+            </div>
+            <p>Cho phép Agent tự động hóa Google Chrome hoặc Microsoft Edge qua cổng CDP (Chrome DevTools Protocol) 9222 để điều hướng và kiểm thử web.</p>
+          </div>
+
+          <div class="feature-box">
+            <div class="feature-box-title">
+              <span>Computer Use</span>
+              <span class="scope-tag">computer_use</span>
+            </div>
+            <p>Cho phép Agent chụp ảnh màn hình desktop và mô phỏng chuột, bàn phím trực tiếp trên hệ điều hành để tương tác với các ứng dụng máy tính.</p>
+          </div>
         </div>
       </section>
 
-      <section class="card">
-        <h2>Bridge &amp; Architecture Features</h2>
-        <div class="feature-item">
-          <strong>Accelerated Loopback Proxy</strong>
-          <p>Binds a loopback proxy server to route WebUI requests, maintain session persistence, and handle cross-origin bridging.</p>
+      <!-- Section 3: Safety Configuration & Environment Notes -->
+      <section class="card" id="environment-notes">
+        <h2>Cấu hình an toàn &amp; Lưu ý môi trường</h2>
+
+        <div class="note-box">
+          <div class="note-title">Phím tắt toàn cục trên Linux Wayland (Wayland Note)</div>
+          <div class="note-desc">
+            Phím tắt toàn cục (Global Hotkey như <code>Alt+Space</code>) hoạt động trực tiếp trên X11, Windows và macOS. Trên Wayland compositor (với chính sách bảo mật hạn chế global keyboard grab của ứng dụng bên thứ 3), vui lòng sử dụng biểu tượng khay hệ thống (System Tray) để bật/tắt cửa sổ, hoặc cấu hình phím tắt trong Window Manager gọi lệnh <code>aqvn-workspace</code>.
+          </div>
         </div>
-        <div class="feature-item">
-          <strong>Outbound Gateway Hub (_a0_connector)</strong>
-          <p>Provides persistent WebSocket connection for file streaming, sandboxed process execution, browser automation, and desktop computer use.</p>
+
+        <div class="note-box">
+          <div class="note-title">Thư mục an toàn (Allowed Paths &amp; Sandbox)</div>
+          <div class="note-desc">
+            Agent chỉ được phép thao tác tệp trong các đường dẫn đã khai báo rõ ràng trong mục <strong>Allowed Paths</strong> tại Cài đặt. Mọi truy cập vào các thư mục nhạy cảm bên ngoài (như <code>/etc</code>, <code>~/.ssh</code>, v.v.) đều bị từ chối triệt để ở tầng Rust backend.
+          </div>
         </div>
-        <div class="feature-item">
-          <strong>Sandboxed RFC &amp; SSH Bridges</strong>
-          <p>Local authenticated RPC and SSH tunnels with workspace path containment and configurable listen ports.</p>
+
+        <div class="note-box">
+          <div class="note-title">Nguyên tắc đặc quyền tối thiểu (Least Privilege Scopes)</div>
+          <div class="note-desc">
+            Trong mục Cài đặt (Settings), bạn có thể bật/tắt riêng lẻ từng quyền bảo mật của Outbound Gateway Hub hoặc tắt hoàn toàn công tắc tổng khi không cần Agent tương tác với máy cục bộ.
+          </div>
         </div>
       </section>
+
+      <!-- Footer Actions -->
+      <div class="actions-bar">
+        <a href="settings.html" class="primary-btn" id="open-settings-btn">
+          Mở Cài đặt (Open Settings) &rarr;
+        </a>
+        <button type="button" class="secondary-btn" onclick="window.close()">Đóng cửa sổ (Close)</button>
+      </div>
     </main>
+
+    <script>
+      // Close on Escape
+      window.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          window.close();
+        }
+      });
+    </script>
   </body>
 </html>

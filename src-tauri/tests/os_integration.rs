@@ -273,4 +273,14 @@ fn test_help_window_helper_exists() {
         cap.contains("\"help\""),
         "capabilities/default.json must include help window"
     );
+
+    let container_js = std::fs::read_to_string(manifest_dir.join("../ui/container.js")).unwrap();
+    assert!(
+        container_js.contains("open_help"),
+        "ui/container.js must invoke open_help"
+    );
+    assert!(
+        container_js.contains("F1"),
+        "ui/container.js must handle F1 keydown"
+    );
 }

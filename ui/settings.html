@@ -240,6 +240,20 @@
       .path-input-row button:hover {
         background: #1a3c61;
       }
+      #reset-hotkey-btn {
+        padding: 0 16px;
+        border: 1px solid #22d3ee55;
+        border-radius: 8px;
+        background: #132c46;
+        color: #22d3ee;
+        font: inherit;
+        font-size: 0.85rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      #reset-hotkey-btn:hover {
+        background: #1a3c61;
+      }
       .actions {
         display: flex;
         align-items: center;
@@ -457,6 +471,23 @@
               />
               <button type="button" id="add-allowed-path">Add Path</button>
             </div>
+          </div>
+        </section>
+
+        <section class="card" id="shortcuts-section">
+          <h2>Keyboard Shortcuts</h2>
+          <div class="form-group">
+            <label for="global-hotkey">Global Summon Shortcut</label>
+            <div style="display: flex; gap: 8px;">
+              <input id="global-hotkey" name="global_hotkey" placeholder="Alt+Space" spellcheck="false" style="flex: 1;" />
+              <button type="button" id="reset-hotkey-btn">Reset Default</button>
+            </div>
+            <div class="help-text">
+              Global hotkey to show/hide the window from anywhere (e.g., Alt+Space, Ctrl+Alt+A, Super+Space). On Linux X11 this uses XGrabKey; on Wayland use the system tray menu.
+            </div>
+          </div>
+          <div style="margin-top: 12px;">
+            <a href="help.html" class="nav" style="position: static; display: inline-block; padding: 6px 14px; font-size: 0.85rem;">View All Shortcuts &amp; Help (F1) &rarr;</a>
           </div>
         </section>
 

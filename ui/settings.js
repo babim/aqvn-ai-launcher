@@ -20,7 +20,8 @@
     scope_files: true,
     scope_exec: true,
     scope_browser: true,
-    scope_desktop: true
+    scope_desktop: true,
+    global_hotkey: 'Alt+Space'
   };
 
   let store = null;
@@ -45,6 +46,8 @@
   const allowedPathsList = document.getElementById('allowed-paths-list');
   const allowedPathInput = document.getElementById('allowed-path-input');
   const addAllowedPathBtn = document.getElementById('add-allowed-path');
+  const globalHotkeyInput = document.getElementById('global-hotkey');
+  const resetHotkeyBtn = document.getElementById('reset-hotkey-btn');
   const settingsForm = document.getElementById('settings-form');
   const saveBtn = document.getElementById('save-settings');
   const resetBtn = document.getElementById('reset-settings');
@@ -244,6 +247,12 @@
         scopeDesktopInput.checked =
           scopeDesktop !== undefined ? Boolean(scopeDesktop) : DEFAULTS.scope_desktop;
       }
+
+      const globalHotkey = await store.get('global_hotkey');
+      if (globalHotkeyInput) {
+        globalHotkeyInput.value =
+          globalHotkey !== undefined && globalHotkey ? globalHotkey : DEFAULTS.global_hotkey;
+      }
     } catch (err) {
       console.error('Failed to load settings from store:', err);
       // Fall back to defaults
@@ -262,6 +271,7 @@
       if (scopeExecInput) scopeExecInput.checked = DEFAULTS.scope_exec;
       if (scopeBrowserInput) scopeBrowserInput.checked = DEFAULTS.scope_browser;
       if (scopeDesktopInput) scopeDesktopInput.checked = DEFAULTS.scope_desktop;
+      if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
     }
   }
 
@@ -327,6 +337,12 @@
       await store.set('scope_exec', scopeExec);
       await store.set('scope_browser', scopeBrowser);
       await store.set('scope_desktop', scopeDesktop);
+
+      const globalHotkey = (
+        (globalHotkeyInput ? globalHotkeyInput.value : DEFAULTS.global_hotkey) || DEFAULTS.global_hotkey
+      ).trim();
+      await store.set('global_hotkey', globalHotkey || DEFAULTS.global_hotkey);
+
       await store.save();
 
       if (window.bridge && typeof window.bridge.saveServerProfiles === 'function') {
@@ -335,6 +351,7 @@
       try {
         localStorage.setItem('aqvn_server_url', serverUrl);
         localStorage.setItem('aqvn_server_profiles', JSON.stringify(serverProfiles));
+        localStorage.setItem('aqvn_global_hotkey', globalHotkey || DEFAULTS.global_hotkey);
       } catch (e) {}
 
       renderServerProfiles();
@@ -361,6 +378,7 @@
     if (scopeExecInput) scopeExecInput.checked = DEFAULTS.scope_exec;
     if (scopeBrowserInput) scopeBrowserInput.checked = DEFAULTS.scope_browser;
     if (scopeDesktopInput) scopeDesktopInput.checked = DEFAULTS.scope_desktop;
+    if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
     showStatus('Reset to defaults (click Save to persist).', 'success');
   }
 
@@ -387,6 +405,12 @@
       addPath();
     }
   });
+
+  if (resetHotkeyBtn && globalHotkeyInput) {
+    resetHotkeyBtn.addEventListener('click', () => {
+      globalHotkeyInput.value = DEFAULTS.global_hotkey;
+    });
+  }
 
   settingsForm.addEventListener('submit', saveSettings);
   saveBtn.addEventListener('click', saveSettings);

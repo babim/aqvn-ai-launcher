@@ -1698,4 +1698,45 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     assert.match(js, /scope_browser/, 'settings.js must reference scope_browser');
     assert.match(js, /scope_desktop/, 'settings.js must reference scope_desktop');
   });
+
+  test('VAL-HOTKEY-001: settings.html exposes shortcuts section, #global-hotkey and #reset-hotkey-btn', () => {
+    const htmlPath = new URL('../../ui/settings.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /id="shortcuts-section"/, 'settings.html must expose #shortcuts-section');
+    assert.match(html, /id="global-hotkey"/, 'settings.html must expose #global-hotkey');
+    assert.match(html, /id="reset-hotkey-btn"/, 'settings.html must expose #reset-hotkey-btn');
+    assert.match(html, /href="help\.html"/, 'settings.html must link to help.html');
+  });
+
+  test('VAL-HOTKEY-002: settings.js handles global_hotkey loading, saving, and reset', () => {
+    const jsPath = new URL('../../ui/settings.js', import.meta.url);
+    const js = fs.readFileSync(jsPath, 'utf8');
+
+    assert.match(js, /global_hotkey/, 'settings.js must reference global_hotkey');
+    assert.match(js, /reset-hotkey-btn/, 'settings.js must bind reset-hotkey-btn');
+  });
+
+  test('VAL-HOTKEY-003: container.js dispatches open_help on F1 keydown', () => {
+    const harness = createContainerHarness();
+    const { calls, docListeners } = harness;
+    let prevented = false;
+    const event = {
+      ctrlKey: false,
+      metaKey: false,
+      key: 'F1',
+      preventDefault: () => {
+        prevented = true;
+      }
+    };
+    const keydownListeners = docListeners['keydown'] || [];
+    assert.ok(keydownListeners.length > 0, 'keydown listener must be registered');
+    for (const fn of keydownListeners) {
+      fn(event);
+    }
+    assert.equal(prevented, true, 'F1 must call preventDefault()');
+    const openHelpCalls = calls.filter((c) => c.command === 'open_help');
+    assert.equal(openHelpCalls.length, 1, 'open_help IPC command must be dispatched');
+  });
 });
+

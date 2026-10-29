@@ -99,6 +99,12 @@ pub fn open_help(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Closes the current webview window.
+#[tauri::command]
+pub fn close_current_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
+}
+
 /// Busy/idle tray icon, driven by chat activity reported from the UI.
 #[tauri::command]
 pub fn set_tray_busy(app: AppHandle, busy: bool) -> Result<(), String> {

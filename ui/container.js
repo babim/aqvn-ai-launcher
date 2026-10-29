@@ -260,6 +260,65 @@
     attach();
   }
 
+  function installFocusModeStyles() {
+    if (typeof document === 'undefined') return;
+    var css =
+      'body.aqvn-focus-mode .sidebar-shell,\n' +
+      'body.aqvn-focus-mode #left-panel,\n' +
+      'body.aqvn-focus-mode .sidebar-slot,\n' +
+      'body.aqvn-focus-mode #sidebar-header-panel,\n' +
+      'body.aqvn-focus-mode #sidebar-overlay,\n' +
+      'body.aqvn-focus-mode #right-canvas,\n' +
+      'body.aqvn-focus-mode .right-canvas-rail,\n' +
+      'body.aqvn-focus-mode #sidebar,\n' +
+      'body.aqvn-focus-mode #canvas-pane,\n' +
+      'body.aqvn-focus-mode .splitter {\n' +
+      '  display: none !important;\n' +
+      '}\n\n' +
+      'body.aqvn-focus-mode #right-panel,\n' +
+      'body.aqvn-focus-mode .chat-container,\n' +
+      'body.aqvn-focus-mode #chat-pane {\n' +
+      '  flex: 1 1 auto !important;\n' +
+      '  width: 100% !important;\n' +
+      '  max-width: 960px !important;\n' +
+      '  margin: 0 auto !important;\n' +
+      '}';
+
+    function inject() {
+      var root = document.head || document.body || document.documentElement;
+      if (!root || typeof document.createElement !== 'function') return;
+      if (document.getElementById && document.getElementById('aqvn-focus-mode-style')) return;
+      var style = document.createElement('style');
+      style.id = 'aqvn-focus-mode-style';
+      style.textContent = css;
+      root.appendChild(style);
+    }
+
+    if (document.head || document.body || document.documentElement) {
+      inject();
+    } else if (document.addEventListener) {
+      document.addEventListener('DOMContentLoaded', inject);
+    }
+  }
+
+  function toggleFocusMode() {
+    if (typeof document === 'undefined' || !document.body) return false;
+    installFocusModeStyles();
+    var active = document.body.classList.toggle('aqvn-focus-mode');
+    var input =
+      (document.querySelector &&
+        document.querySelector(
+          '#chat-input, #message-input, textarea, input[type="text"]'
+        )) ||
+      null;
+    if (input && typeof input.focus === 'function') {
+      try {
+        input.focus();
+      } catch (e) {}
+    }
+    return active;
+  }
+
   function installKeyboardShortcuts(dom) {
     var target =
       dom ||
@@ -297,6 +356,14 @@
         } else {
           invokeIpc('open_help');
         }
+      } else if (
+        e.key === 'F11' ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f'))
+      ) {
+        if (typeof e.preventDefault === 'function') {
+          e.preventDefault();
+        }
+        toggleFocusMode();
       }
     });
   }
@@ -308,6 +375,8 @@
     handleWebSocketMessage: handleWebSocketMessage,
     checkDomState: checkDomState,
     installKeyboardShortcuts: installKeyboardShortcuts,
+    toggleFocusMode: toggleFocusMode,
+    installFocusModeStyles: installFocusModeStyles,
     getState: function () {
       return {
         busy: state.busy,
@@ -328,4 +397,5 @@
   installWebSocketInterceptor();
   installDomObserver();
   installKeyboardShortcuts();
+  installFocusModeStyles();
 })();

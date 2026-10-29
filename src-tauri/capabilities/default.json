@@ -5,6 +5,7 @@
   "windows": ["main", "settings", "help"],
   "permissions": [
     "core:default",
+    "core:window:allow-close",
     "shell:allow-open",
     "notification:allow-notify",
     "notification:allow-request-permission",

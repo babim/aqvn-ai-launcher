@@ -237,23 +237,28 @@
   <body>
     <main>
       <div class="top-nav">
-        <a class="nav-btn" href="settings.html" id="nav-to-settings">&larr; Open Settings</a>
-        <button type="button" class="nav-btn" id="close-btn" onclick="window.close()">Close &times;</button>
+        <a class="nav-btn" href="settings.html" id="nav-to-settings">&larr; <span data-i18n="nav_settings">Open Settings</span></a>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button type="button" class="nav-btn" id="lang-toggle-btn" style="cursor: pointer;">
+            🌐 <span id="current-lang-text">Tiếng Việt</span>
+          </button>
+          <button type="button" class="nav-btn" id="close-btn" onclick="closeHelpWindow()"><span data-i18n="close_btn">Close</span> &times;</button>
+        </div>
       </div>
 
       <div class="header-area">
-        <h1>AQVN Workspace — Help &amp; Shortcuts</h1>
-        <p class="subtitle">Bảng tra cứu phím tắt máy tính, hướng dẫn điều khiển Agent và lưu ý bảo mật.</p>
+        <h1 data-i18n="header_title">AQVN Workspace — Help &amp; Shortcuts</h1>
+        <p class="subtitle" data-i18n="header_subtitle">Bảng tra cứu phím tắt máy tính, hướng dẫn điều khiển Agent và lưu ý bảo mật.</p>
       </div>
 
       <!-- Section 1: Keyboard Shortcuts -->
       <section class="card" id="shortcuts-section">
-        <h2>Phím tắt hệ thống (Keyboard Shortcuts)</h2>
+        <h2 data-i18n="shortcuts_title">Phím tắt hệ thống (Keyboard Shortcuts)</h2>
         <table class="shortcut-table" aria-label="Bảng phím tắt ứng dụng">
           <thead>
             <tr>
-              <th style="width: 240px;">Phím tắt (Shortcut)</th>
-              <th>Thao tác &amp; Mô tả (Action &amp; Description)</th>
+              <th style="width: 240px;" data-i18n="col_shortcut">Phím tắt (Shortcut)</th>
+              <th data-i18n="col_action">Thao tác &amp; Mô tả (Action &amp; Description)</th>
             </tr>
           </thead>
           <tbody>
@@ -262,8 +267,8 @@
                 <span class="kbd-badge">Alt + Space</span>
               </td>
               <td>
-                <div class="shortcut-action">Ẩn / Hiện nhanh cửa sổ từ bất cứ đâu (Global Summon)</div>
-                <div class="shortcut-detail">Thu nhỏ hoặc gọi cửa sổ ứng dụng lên màn hình chính. Có thể tùy chỉnh trong Settings.</div>
+                <div class="shortcut-action" data-i18n="act_global_summon">Ẩn / Hiện nhanh cửa sổ từ bất cứ đâu (Global Summon)</div>
+                <div class="shortcut-detail" data-i18n="desc_global_summon">Thu nhỏ hoặc gọi cửa sổ ứng dụng lên màn hình chính. Có thể tùy chỉnh trong Settings.</div>
               </td>
             </tr>
             <tr>
@@ -271,8 +276,8 @@
                 <span class="kbd-badge">Ctrl + ,</span> &nbsp;/&nbsp; <span class="kbd-badge">⌘ + ,</span>
               </td>
               <td>
-                <div class="shortcut-action">Mở Cài đặt launcher (Settings)</div>
-                <div class="shortcut-detail">Cấu hình kết nối server, bảo mật Agent, phím tắt và danh mục thư mục được phép.</div>
+                <div class="shortcut-action" data-i18n="act_settings">Mở Cài đặt launcher (Settings)</div>
+                <div class="shortcut-detail" data-i18n="desc_settings">Cấu hình kết nối server, bảo mật Agent, phím tắt và danh mục thư mục được phép.</div>
               </td>
             </tr>
             <tr>
@@ -280,8 +285,8 @@
                 <span class="kbd-badge">F1</span>
               </td>
               <td>
-                <div class="shortcut-action">Mở Trợ giúp &amp; Phím tắt này (Help &amp; Shortcuts)</div>
-                <div class="shortcut-detail">Hiển thị nhanh trang tài liệu tham khảo và bảng phím tắt này bất cứ lúc nào.</div>
+                <div class="shortcut-action" data-i18n="act_help">Mở Trợ giúp &amp; Phím tắt này (Help &amp; Shortcuts)</div>
+                <div class="shortcut-detail" data-i18n="desc_help">Hiển thị nhanh trang tài liệu tham khảo và bảng phím tắt này bất cứ lúc nào.</div>
               </td>
             </tr>
             <tr>
@@ -289,8 +294,8 @@
                 <span class="kbd-badge">F11</span> &nbsp;/&nbsp; <span class="kbd-badge">Ctrl + Shift + F</span>
               </td>
               <td>
-                <div class="shortcut-action">Chế độ Focus tập trung toàn màn hình (Focus Mode)</div>
-                <div class="shortcut-detail">Ẩn các thanh bên (Sidebar và Canvas) để tập trung hội thoại và đặt trọng tâm vào composer.</div>
+                <div class="shortcut-action" data-i18n="act_focus">Chế độ Focus tập trung toàn màn hình (Focus Mode)</div>
+                <div class="shortcut-detail" data-i18n="desc_focus">Ẩn các thanh bên (Sidebar và Canvas) để tập trung hội thoại và đặt trọng tâm vào composer.</div>
               </td>
             </tr>
             <tr>
@@ -298,8 +303,8 @@
                 <span class="kbd-badge">Alt + S</span>
               </td>
               <td>
-                <div class="shortcut-action">Bật / Tắt Sidebar danh sách hội thoại</div>
-                <div class="shortcut-detail">Đóng/mở ngăn bên trái chứa danh sách hội thoại, server switcher và các cài đặt nhanh.</div>
+                <div class="shortcut-action" data-i18n="act_sidebar">Bật / Tắt Sidebar danh sách hội thoại</div>
+                <div class="shortcut-detail" data-i18n="desc_sidebar">Đóng/mở ngăn bên trái chứa danh sách hội thoại, server switcher và các cài đặt nhanh.</div>
               </td>
             </tr>
             <tr>
@@ -307,8 +312,8 @@
                 <span class="kbd-badge">Alt + C</span>
               </td>
               <td>
-                <div class="shortcut-action">Bật / Tắt Right Canvas (Intel Suite)</div>
-                <div class="shortcut-detail">Đóng/mở ngăn giao diện mở rộng bên phải phục vụ phân tích dữ liệu và trình bày nội dung.</div>
+                <div class="shortcut-action" data-i18n="act_canvas">Bật / Tắt Right Canvas (Intel Suite)</div>
+                <div class="shortcut-detail" data-i18n="desc_canvas">Đóng/mở ngăn giao diện mở rộng bên phải phục vụ phân tích dữ liệu và trình bày nội dung.</div>
               </td>
             </tr>
             <tr>
@@ -316,8 +321,8 @@
                 <span class="kbd-badge">Ctrl + +</span> &nbsp;/&nbsp; <span class="kbd-badge">Ctrl + -</span> &nbsp;/&nbsp; <span class="kbd-badge">Ctrl + 0</span>
               </td>
               <td>
-                <div class="shortcut-action">Phóng to, thu nhỏ, đặt lại kích thước giao diện (Zoom Control)</div>
-                <div class="shortcut-detail">Điều chỉnh tỷ lệ zoom giao diện trong khoảng [0.7x – 2.0x] và tự động lưu cấu hình.</div>
+                <div class="shortcut-action" data-i18n="act_zoom">Phóng to, thu nhỏ, đặt lại kích thước giao diện (Zoom Control)</div>
+                <div class="shortcut-detail" data-i18n="desc_zoom">Điều chỉnh tỷ lệ zoom giao diện trong khoảng [0.7x – 2.0x] và tự động lưu cấu hình.</div>
               </td>
             </tr>
             <tr>
@@ -325,8 +330,8 @@
                 <span class="kbd-badge">Ctrl + Shift + R</span> &nbsp;/&nbsp; <span class="kbd-badge">F5</span>
               </td>
               <td>
-                <div class="shortcut-action">Làm mới sạch ứng dụng (Hard Refresh)</div>
-                <div class="shortcut-detail">Đặt lại toàn bộ bộ nhớ tạm, CSRF token, kết nối WebSocket và tải lại iframe Canvas.</div>
+                <div class="shortcut-action" data-i18n="act_refresh">Làm mới sạch ứng dụng (Hard Refresh)</div>
+                <div class="shortcut-detail" data-i18n="desc_refresh">Đặt lại toàn bộ bộ nhớ tạm, CSRF token, kết nối WebSocket và tải lại iframe Canvas.</div>
               </td>
             </tr>
           </tbody>
@@ -335,63 +340,63 @@
 
       <!-- Section 2: Agent Control Features -->
       <section class="card" id="gateway-section">
-        <h2>Tính năng Agent điều khiển máy (Outbound Gateway Hub)</h2>
+        <h2 data-i18n="gateway_title">Tính năng Agent điều khiển máy (Outbound Gateway Hub)</h2>
         <div class="feature-grid">
           <div class="feature-box">
             <div class="feature-box-title">
-              <span>Remote Files</span>
+              <span data-i18n="remote_files_title">Remote Files</span>
               <span class="scope-tag">files</span>
             </div>
-            <p>Cho phép Agent đọc, ghi, sửa và patch tệp trong các thư mục được cấp phép (mặc định <code>~/Workspace</code>). Ngăn chặn truy cập ngoài phạm vi cho phép.</p>
+            <p data-i18n="remote_files_desc">Cho phép Agent đọc, ghi, sửa và patch tệp trong các thư mục được cấp phép (mặc định <code>~/Workspace</code>). Ngăn chặn truy cập ngoài phạm vi cho phép.</p>
           </div>
 
           <div class="feature-box">
             <div class="feature-box-title">
-              <span>Terminal Execution</span>
+              <span data-i18n="terminal_title">Terminal Execution</span>
               <span class="scope-tag">code_execution</span>
             </div>
-            <p>Cho phép Agent chạy các lệnh shell qua phiên PTY cục bộ được cô lập, hỗ trợ lệnh chạy dài và truyền kết quả trực tiếp về máy chủ.</p>
+            <p data-i18n="terminal_desc">Cho phép Agent chạy các lệnh shell qua phiên PTY cục bộ được cô lập, hỗ trợ lệnh chạy dài và truyền kết quả trực tiếp về máy chủ.</p>
           </div>
 
           <div class="feature-box">
             <div class="feature-box-title">
-              <span>Host Browser</span>
+              <span data-i18n="browser_title">Host Browser</span>
               <span class="scope-tag">browser</span>
             </div>
-            <p>Cho phép Agent tự động hóa Google Chrome hoặc Microsoft Edge qua cổng CDP (Chrome DevTools Protocol) 9222 để điều hướng và kiểm thử web.</p>
+            <p data-i18n="browser_desc">Cho phép Agent tự động hóa Google Chrome hoặc Microsoft Edge qua cổng CDP (Chrome DevTools Protocol) 9222 để điều hướng và kiểm thử web.</p>
           </div>
 
           <div class="feature-box">
             <div class="feature-box-title">
-              <span>Computer Use</span>
+              <span data-i18n="computer_use_title">Computer Use</span>
               <span class="scope-tag">computer_use</span>
             </div>
-            <p>Cho phép Agent chụp ảnh màn hình desktop và mô phỏng chuột, bàn phím trực tiếp trên hệ điều hành để tương tác với các ứng dụng máy tính.</p>
+            <p data-i18n="computer_use_desc">Cho phép Agent chụp ảnh màn hình desktop và mô phỏng chuột, bàn phím trực tiếp trên hệ điều hành để tương tác với các ứng dụng máy tính.</p>
           </div>
         </div>
       </section>
 
       <!-- Section 3: Safety Configuration & Environment Notes -->
       <section class="card" id="environment-notes">
-        <h2>Cấu hình an toàn &amp; Lưu ý môi trường</h2>
+        <h2 data-i18n="env_title">Cấu hình an toàn &amp; Lưu ý môi trường</h2>
 
         <div class="note-box">
-          <div class="note-title">Phím tắt toàn cục trên Linux Wayland (Wayland Note)</div>
-          <div class="note-desc">
+          <div class="note-title" data-i18n="wayland_title">Phím tắt toàn cục trên Linux Wayland (Wayland Note)</div>
+          <div class="note-desc" data-i18n="wayland_desc">
             Phím tắt toàn cục (Global Hotkey như <code>Alt+Space</code>) hoạt động trực tiếp trên X11, Windows và macOS. Trên Wayland compositor (với chính sách bảo mật hạn chế global keyboard grab của ứng dụng bên thứ 3), vui lòng sử dụng biểu tượng khay hệ thống (System Tray) để bật/tắt cửa sổ, hoặc cấu hình phím tắt trong Window Manager gọi lệnh <code>aqvn-workspace</code>.
           </div>
         </div>
 
         <div class="note-box">
-          <div class="note-title">Thư mục an toàn (Allowed Paths &amp; Sandbox)</div>
-          <div class="note-desc">
+          <div class="note-title" data-i18n="paths_title">Thư mục an toàn (Allowed Paths &amp; Sandbox)</div>
+          <div class="note-desc" data-i18n="paths_desc">
             Agent chỉ được phép thao tác tệp trong các đường dẫn đã khai báo rõ ràng trong mục <strong>Allowed Paths</strong> tại Cài đặt. Mọi truy cập vào các thư mục nhạy cảm bên ngoài (như <code>/etc</code>, <code>~/.ssh</code>, v.v.) đều bị từ chối triệt để ở tầng Rust backend.
           </div>
         </div>
 
         <div class="note-box">
-          <div class="note-title">Nguyên tắc đặc quyền tối thiểu (Least Privilege Scopes)</div>
-          <div class="note-desc">
+          <div class="note-title" data-i18n="privilege_title">Nguyên tắc đặc quyền tối thiểu (Least Privilege Scopes)</div>
+          <div class="note-desc" data-i18n="privilege_desc">
             Trong mục Cài đặt (Settings), bạn có thể bật/tắt riêng lẻ từng quyền bảo mật của Outbound Gateway Hub hoặc tắt hoàn toàn công tắc tổng khi không cần Agent tương tác với máy cục bộ.
           </div>
         </div>
@@ -399,20 +404,180 @@
 
       <!-- Footer Actions -->
       <div class="actions-bar">
-        <a href="settings.html" class="primary-btn" id="open-settings-btn">
+        <a href="settings.html" class="primary-btn" id="open-settings-btn" data-i18n="open_settings_btn">
           Mở Cài đặt (Open Settings) &rarr;
         </a>
-        <button type="button" class="secondary-btn" onclick="window.close()">Đóng cửa sổ (Close)</button>
+        <button type="button" class="secondary-btn" id="footer-close-btn" onclick="closeHelpWindow()" data-i18n="close_window_btn">Đóng cửa sổ (Close)</button>
       </div>
     </main>
 
     <script>
+      const HELP_I18N = {
+        vi: {
+          page_title: 'AQVN Workspace — Trợ giúp & Phím tắt',
+          nav_settings: 'Cài đặt (Settings)',
+          close_btn: 'Đóng',
+          header_title: 'AQVN Workspace — Trợ giúp & Phím tắt',
+          header_subtitle: 'Bảng tra cứu phím tắt máy tính, hướng dẫn điều khiển Agent và lưu ý bảo mật.',
+          shortcuts_title: 'Phím tắt hệ thống (Keyboard Shortcuts)',
+          col_shortcut: 'Phím tắt (Shortcut)',
+          col_action: 'Thao tác & Mô tả (Action & Description)',
+          act_global_summon: 'Ẩn / Hiện nhanh cửa sổ từ bất cứ đâu (Global Summon)',
+          desc_global_summon: 'Thu nhỏ hoặc gọi cửa sổ ứng dụng lên màn hình chính. Có thể tùy chỉnh trong Settings.',
+          act_settings: 'Mở Cài đặt launcher (Settings)',
+          desc_settings: 'Cấu hình kết nối server, bảo mật Agent, phím tắt và danh mục thư mục được phép.',
+          act_help: 'Mở Trợ giúp & Phím tắt này (Help & Shortcuts)',
+          desc_help: 'Hiển thị nhanh trang tài liệu tham khảo và bảng phím tắt này bất cứ lúc nào.',
+          act_focus: 'Chế độ Focus tập trung toàn màn hình (Focus Mode)',
+          desc_focus: 'Ẩn các thanh bên (Sidebar và Canvas) để tập trung hội thoại và đặt trọng tâm vào composer.',
+          act_sidebar: 'Bật / Tắt Sidebar danh sách hội thoại',
+          desc_sidebar: 'Đóng/mở ngăn bên trái chứa danh sách hội thoại, server switcher và các cài đặt nhanh.',
+          act_canvas: 'Bật / Tắt Right Canvas (Intel Suite)',
+          desc_canvas: 'Đóng/mở ngăn giao diện mở rộng bên phải phục vụ phân tích dữ liệu và trình bày nội dung.',
+          act_zoom: 'Phóng to, thu nhỏ, đặt lại kích thước giao diện (Zoom Control)',
+          desc_zoom: 'Điều chỉnh tỷ lệ zoom giao diện trong khoảng [0.7x – 2.0x] và tự động lưu cấu hình.',
+          act_refresh: 'Làm mới sạch ứng dụng (Hard Refresh)',
+          desc_refresh: 'Đặt lại toàn bộ bộ nhớ tạm, CSRF token, kết nối WebSocket và tải lại iframe Canvas.',
+          gateway_title: 'Tính năng Agent điều khiển máy (Outbound Gateway Hub)',
+          remote_files_title: 'Remote Files',
+          remote_files_desc: 'Cho phép Agent đọc, ghi, sửa và patch tệp trong các thư mục được cấp phép (mặc định ~/Workspace). Ngăn chặn truy cập ngoài phạm vi cho phép.',
+          terminal_title: 'Terminal Execution',
+          terminal_desc: 'Cho phép Agent chạy các lệnh shell qua phiên PTY cục bộ được cô lập, hỗ trợ lệnh chạy dài và truyền kết quả trực tiếp về máy chủ.',
+          browser_title: 'Host Browser',
+          browser_desc: 'Cho phép Agent tự động hóa Google Chrome hoặc Microsoft Edge qua cổng CDP (Chrome DevTools Protocol) 9222 để điều hướng và kiểm thử web.',
+          computer_use_title: 'Computer Use',
+          computer_use_desc: 'Cho phép Agent chụp ảnh màn hình desktop và mô phỏng chuột, bàn phím trực tiếp trên hệ điều hành để tương tác với các ứng dụng máy tính.',
+          env_title: 'Cấu hình an toàn & Lưu ý môi trường',
+          wayland_title: 'Phím tắt toàn cục trên Linux Wayland (Wayland Note)',
+          wayland_desc: 'Phím tắt toàn cục (Global Hotkey như Alt+Space) hoạt động trực tiếp trên X11, Windows và macOS. Trên Wayland compositor (với chính sách bảo mật hạn chế global keyboard grab của ứng dụng bên thứ 3), vui lòng sử dụng biểu tượng khay hệ thống (System Tray) để bật/tắt cửa sổ, hoặc cấu hình phím tắt trong Window Manager gọi lệnh aqvn-workspace.',
+          paths_title: 'Thư mục an toàn (Allowed Paths & Sandbox)',
+          paths_desc: 'Agent chỉ được phép thao tác tệp trong các đường dẫn đã khai báo rõ ràng trong mục Allowed Paths tại Cài đặt. Mọi truy cập vào các thư mục nhạy cảm bên ngoài (như /etc, ~/.ssh, v.v.) đều bị từ chối triệt để ở tầng Rust backend.',
+          privilege_title: 'Nguyên tắc đặc quyền tối thiểu (Least Privilege Scopes)',
+          privilege_desc: 'Trong mục Cài đặt (Settings), bạn có thể bật/tắt riêng lẻ từng quyền bảo mật của Outbound Gateway Hub hoặc tắt hoàn toàn công tắc tổng khi không cần Agent tương tác với máy cục bộ.',
+          open_settings_btn: 'Mở Cài đặt (Open Settings) →',
+          close_window_btn: 'Đóng cửa sổ (Close)'
+        },
+        en: {
+          page_title: 'AQVN Workspace — Help & Shortcuts',
+          nav_settings: 'Open Settings',
+          close_btn: 'Close',
+          header_title: 'AQVN Workspace — Help & Shortcuts',
+          header_subtitle: 'Keyboard shortcut reference, agent control guide, and desktop security notes.',
+          shortcuts_title: 'Keyboard Shortcuts',
+          col_shortcut: 'Shortcut',
+          col_action: 'Action & Description',
+          act_global_summon: 'Quick Show/Hide Window from anywhere (Global Summon)',
+          desc_global_summon: 'Minimize or summon the workspace window to front. Configurable in Settings.',
+          act_settings: 'Open Launcher Settings',
+          desc_settings: 'Configure server endpoint, agent security, shortcuts, and allowed directories.',
+          act_help: 'Open this Help & Shortcuts guide',
+          desc_help: 'Quickly display this documentation and shortcut reference anytime.',
+          act_focus: 'Focus Mode (Fullscreen chat)',
+          desc_focus: 'Hide sidebars (Sidebar and Canvas) to maximize chat area and focus composer input.',
+          act_sidebar: 'Toggle Conversations Sidebar',
+          desc_sidebar: 'Toggle left panel containing conversations, server switcher, and quick settings.',
+          act_canvas: 'Toggle Right Canvas (Intel Suite)',
+          desc_canvas: 'Toggle right expansion panel for data analysis, visual canvas, and documents.',
+          act_zoom: 'Zoom In, Zoom Out, Reset Zoom Level',
+          desc_zoom: 'Adjust UI zoom scale within [0.7x – 2.0x] and persist automatically.',
+          act_refresh: 'Hard Refresh Application',
+          desc_refresh: 'Reset in-memory cache, CSRF token, WebSocket connections, and reload Canvas iframe.',
+          gateway_title: 'Agent Control Features (Outbound Gateway Hub)',
+          remote_files_title: 'Remote Files',
+          remote_files_desc: 'Allows Agent to read, write, edit, and patch files in allowed workspace paths (default ~/Workspace). Enforces strict boundary checks.',
+          terminal_title: 'Terminal Execution',
+          terminal_desc: 'Allows Agent to run shell commands in isolated local PTY sessions, supporting long-running commands and real-time streaming output.',
+          browser_title: 'Host Browser',
+          browser_desc: 'Allows Agent to automate Google Chrome or Microsoft Edge via CDP port 9222 for web navigation and end-to-end testing.',
+          computer_use_title: 'Computer Use',
+          computer_use_desc: 'Allows Agent to capture screen and inject mouse and keyboard inputs to interact with desktop applications directly.',
+          env_title: 'Safety Configuration & Environment Notes',
+          wayland_title: 'Global Hotkey on Linux Wayland',
+          wayland_desc: 'Global hotkeys (like Alt+Space) work directly on X11, Windows, and macOS. On Wayland compositors, use the system tray icon to toggle the window, or bind a custom shortcut in your Window Manager calling aqvn-workspace.',
+          paths_title: 'Safe Directories (Allowed Paths & Sandbox)',
+          paths_desc: 'Agent is only allowed to access files inside paths explicitly declared in Allowed Paths under Settings. Any external path access (such as /etc or ~/.ssh) is strictly denied at the Rust backend layer.',
+          privilege_title: 'Least Privilege Principle (Security Scopes)',
+          privilege_desc: 'In Settings, you can independently toggle each security scope of the Outbound Gateway Hub or disable the master switch when local machine access is not required.',
+          open_settings_btn: 'Open Settings →',
+          close_window_btn: 'Close Window'
+        }
+      };
+
+      let activeLang = 'vi';
+
+      function applyLanguage(lang) {
+        activeLang = lang === 'en' ? 'en' : 'vi';
+        document.documentElement.lang = activeLang;
+        const dict = HELP_I18N[activeLang] || HELP_I18N.vi;
+        document.title = dict.page_title || 'AQVN Workspace — Help & Shortcuts';
+
+        document.querySelectorAll('[data-i18n]').forEach(function (el) {
+          const key = el.getAttribute('data-i18n');
+          if (dict[key]) {
+            el.textContent = dict[key];
+          }
+        });
+
+        const langText = document.getElementById('current-lang-text');
+        if (langText) {
+          langText.textContent = activeLang === 'vi' ? 'English' : 'Tiếng Việt';
+        }
+
+        try {
+          localStorage.setItem('aqvn_lang', activeLang);
+        } catch (e) {}
+      }
+
+      function initLanguage() {
+        let stored = 'vi';
+        try {
+          stored = localStorage.getItem('aqvn_lang') || 'vi';
+        } catch (e) {}
+        applyLanguage(stored);
+
+        const btn = document.getElementById('lang-toggle-btn');
+        if (btn) {
+          btn.addEventListener('click', function () {
+            applyLanguage(activeLang === 'vi' ? 'en' : 'vi');
+          });
+        }
+      }
+
+      function closeHelpWindow() {
+        if (
+          typeof window !== 'undefined' &&
+          window.__TAURI_INTERNALS__ &&
+          typeof window.__TAURI_INTERNALS__.invoke === 'function'
+        ) {
+          window.__TAURI_INTERNALS__.invoke('close_current_window').catch(function () {
+            window.close();
+          });
+        } else if (
+          typeof window !== 'undefined' &&
+          window.__TAURI__ &&
+          window.__TAURI__.core &&
+          typeof window.__TAURI__.core.invoke === 'function'
+        ) {
+          window.__TAURI__.core.invoke('close_current_window').catch(function () {
+            window.close();
+          });
+        } else {
+          window.close();
+        }
+      }
+
       // Close on Escape
       window.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
-          window.close();
+          closeHelpWindow();
         }
       });
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initLanguage);
+      } else {
+        initLanguage();
+      }
     </script>
   </body>
 </html>

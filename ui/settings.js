@@ -21,14 +21,21 @@
     scope_exec: true,
     scope_browser: true,
     scope_desktop: true,
-    global_hotkey: 'Alt+Space'
+    global_hotkey: 'Alt+Space',
+    close_to_tray: true,
+    app_language: 'vi'
   };
 
   let store = null;
   let allowedPaths = [...DEFAULTS.allowed_paths];
   let serverProfiles = [...DEFAULTS.server_profiles];
+  let currentLang = 'vi';
 
   // DOM Elements
+  const appLanguageSelect = document.getElementById('app-language');
+  const closeToTrayInput = document.getElementById('close-to-tray');
+  const langToggleBtn = document.getElementById('lang-toggle-btn');
+  const currentLangText = document.getElementById('current-lang-text');
   const serverUrlInput = document.getElementById('server-url');
   const serverProfilesList = document.getElementById('server-profiles-list');
   const newProfileInput = document.getElementById('new-profile-input');
@@ -52,6 +59,132 @@
   const saveBtn = document.getElementById('save-settings');
   const resetBtn = document.getElementById('reset-settings');
   const saveStatus = document.getElementById('save-status');
+
+  const SETTINGS_I18N = {
+    vi: {
+      page_title: 'AQVN Workspace — Cài đặt',
+      header_title: 'Cài đặt',
+      header_subtitle: 'Cấu hình ứng dụng AQVN Workspace, máy chủ kết nối và quyền điều khiển agent.',
+      back_to_chat: '← Quay lại chat',
+      general_title: 'Cấu hình chung',
+      language_label: 'Ngôn ngữ hiển thị (Display Language)',
+      language_help: 'Chọn ngôn ngữ hiển thị cho giao diện cài đặt và tài liệu.',
+      close_to_tray_label: 'Chạy ngầm ở khay hệ thống (Close to Tray)',
+      close_to_tray_help: 'Tiếp tục chạy ngầm trong khay hệ thống khi đóng cửa sổ thay vì tắt hoàn toàn ứng dụng.',
+      server_title: 'Cấu hình máy chủ',
+      server_url_label: 'Địa chỉ máy chủ (Server URL)',
+      server_url_help: 'Địa chỉ máy chủ làm việc từ xa (upstream workspace server).',
+      saved_profiles_label: 'Hồ sơ máy chủ đã lưu',
+      saved_profiles_help: 'Danh sách địa chỉ máy chủ. Nhấn "Chọn" để kích hoạt.',
+      add_profile_btn: 'Thêm hồ sơ',
+      gateway_title: 'Cổng ra Gateway Hub (_a0_connector)',
+      connector_toggle: 'Bật cổng kết nối ra ngoài (Outbound Gateway)',
+      connector_help: 'Công tắc tổng kết nối ra ngoài với máy chủ qua WebSocket. Tắt đi sẽ ngắt kết nối ngay lập tức.',
+      security_scopes_label: 'Phạm vi bảo mật (Security Scopes)',
+      security_scopes_help: 'Quyền bảo mật chi tiết khai báo trong bắt tay connector_hello.',
+      scope_files_title: 'Remote Files',
+      scope_files_desc: ' — đọc, ghi và sửa tệp trong thư mục cho phép',
+      scope_exec_title: 'Code Execution',
+      scope_exec_desc: ' — chạy lệnh shell trong phiên PTY cục bộ',
+      scope_browser_title: 'Host Browser',
+      scope_browser_desc: ' — tự động hóa Chrome/Edge qua CDP',
+      scope_desktop_title: 'Computer Use',
+      scope_desktop_desc: ' — chụp màn hình và điều khiển chuột/phím',
+      agent_control_title: 'Điều khiển Agent (RFC & SSH)',
+      rfc_toggle: 'Cho phép điều khiển Agent',
+      security_warning: 'Cảnh báo bảo mật: Bật tính năng này cho phép Agent từ xa truy cập tệp và chạy lệnh qua cầu nối RFC và SSH. Chỉ bật khi bạn tin cậy máy chủ và mạng.',
+      rfc_password_label: 'Mật khẩu RFC',
+      ssh_password_label: 'Mật khẩu SSH',
+      rfc_port_label: 'Cổng RFC',
+      ssh_port_label: 'Cổng SSH',
+      allowed_paths_label: 'Đường dẫn cho phép',
+      allowed_paths_help: 'Các thư mục trên máy mà agent được phép truy cập.',
+      add_path_btn: 'Thêm đường dẫn',
+      shortcuts_title: 'Phím tắt bàn phím',
+      global_hotkey_label: 'Phím tắt gọi nhanh toàn cục',
+      reset_hotkey_btn: 'Đặt lại mặc định',
+      global_hotkey_help: 'Phím tắt toàn cục để ẩn/hiện cửa sổ từ bất kỳ đâu (ví dụ: Alt+Space, Ctrl+Alt+A). Trên Linux X11 dùng XGrabKey; trên Wayland dùng biểu tượng khay hệ thống.',
+      view_help_link: 'Xem toàn bộ phím tắt & Hướng dẫn (F1) →',
+      save_settings_btn: 'Lưu cài đặt',
+      reset_defaults_btn: 'Đặt lại mặc định',
+      save_success: 'Đã lưu cấu hình thành công.',
+      save_error: 'Lưu cấu hình thất bại: ',
+      reset_status: 'Đã đặt lại về mặc định (nhấn Lưu để áp dụng).'
+    },
+    en: {
+      page_title: 'AQVN Workspace — Settings',
+      header_title: 'Settings',
+      header_subtitle: 'Configure AQVN Workspace client, upstream server, and agent control.',
+      back_to_chat: '← Back to chat',
+      general_title: 'General Configuration',
+      language_label: 'Display Language',
+      language_help: 'Select interface language for settings and help documentation.',
+      close_to_tray_label: 'Close to Tray (Keep running in background)',
+      close_to_tray_help: 'Keep the app running in the system tray when closing the window instead of exiting completely.',
+      server_title: 'Server Configuration',
+      server_url_label: 'Server URL',
+      server_url_help: 'Upstream workspace server endpoint.',
+      saved_profiles_label: 'Saved Server Profiles',
+      saved_profiles_help: 'Saved workspace instance endpoints. Click "Select" to make a profile active.',
+      add_profile_btn: 'Add Profile',
+      gateway_title: 'Outbound Gateway Hub (_a0_connector)',
+      connector_toggle: 'Enable Outbound Gateway',
+      connector_help: 'Master switch connecting outbound to the upstream workspace server via WebSocket. Toggling off immediately terminates the outbound connection.',
+      security_scopes_label: 'Security Scopes',
+      security_scopes_help: 'Granular permission scopes declared in connector_hello handshake.',
+      scope_files_title: 'Remote Files',
+      scope_files_desc: ' — read, write, and patch files in allowed workspace paths',
+      scope_exec_title: 'Code Execution',
+      scope_exec_desc: ' — run shell commands inside local PTY sessions',
+      scope_browser_title: 'Host Browser',
+      scope_browser_desc: ' — automate local Chrome/Edge via CDP',
+      scope_desktop_title: 'Computer Use',
+      scope_desktop_desc: ' — screen capture and mouse/keyboard injection',
+      agent_control_title: 'Agent Control (RFC & SSH)',
+      rfc_toggle: 'Allow agent control',
+      security_warning: 'Security Warning: Enabling agent control allows remote automated agents to access files in allowed paths and execute commands via RFC and SSH bridges. Keep this disabled unless you trust the remote agent and network environment.',
+      rfc_password_label: 'RFC Password',
+      ssh_password_label: 'SSH Password',
+      rfc_port_label: 'RFC Port',
+      ssh_port_label: 'SSH Port',
+      allowed_paths_label: 'Allowed Paths',
+      allowed_paths_help: 'Directories accessible to the agent.',
+      add_path_btn: 'Add Path',
+      shortcuts_title: 'Keyboard Shortcuts',
+      global_hotkey_label: 'Global Summon Shortcut',
+      reset_hotkey_btn: 'Reset Default',
+      global_hotkey_help: 'Global hotkey to show/hide the window from anywhere (e.g., Alt+Space, Ctrl+Alt+A, Super+Space). On Linux X11 this uses XGrabKey; on Wayland use the system tray menu.',
+      view_help_link: 'View All Shortcuts & Help (F1) →',
+      save_settings_btn: 'Save Settings',
+      reset_defaults_btn: 'Reset to Defaults',
+      save_success: 'Settings saved successfully.',
+      save_error: 'Failed to save settings: ',
+      reset_status: 'Reset to defaults (click Save to persist).'
+    }
+  };
+
+  function setLanguage(lang) {
+    currentLang = lang === 'en' ? 'en' : 'vi';
+    if (appLanguageSelect) {
+      appLanguageSelect.value = currentLang;
+    }
+    if (currentLangText) {
+      currentLangText.textContent = currentLang === 'vi' ? 'English' : 'Tiếng Việt';
+    }
+    const dict = SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi;
+    document.title = dict.page_title || 'AQVN Workspace — Settings';
+
+    document.querySelectorAll('[data-i18n]').forEach((el) => {
+      const key = el.getAttribute('data-i18n');
+      if (dict[key]) {
+        el.textContent = dict[key];
+      }
+    });
+
+    try {
+      localStorage.setItem('aqvn_lang', currentLang);
+    } catch (e) {}
+  }
 
   function renderServerProfiles() {
     if (!serverProfilesList) return;
@@ -253,6 +386,19 @@
         globalHotkeyInput.value =
           globalHotkey !== undefined && globalHotkey ? globalHotkey : DEFAULTS.global_hotkey;
       }
+
+      const closeToTray = await store.get('close_to_tray');
+      if (closeToTrayInput) {
+        closeToTrayInput.checked =
+          closeToTray !== undefined ? Boolean(closeToTray) : DEFAULTS.close_to_tray;
+      }
+
+      const appLanguage = await store.get('app_language');
+      let savedLocalLang = null;
+      try {
+        savedLocalLang = localStorage.getItem('aqvn_lang');
+      } catch (e) {}
+      setLanguage(appLanguage || savedLocalLang || DEFAULTS.app_language);
     } catch (err) {
       console.error('Failed to load settings from store:', err);
       // Fall back to defaults
@@ -272,6 +418,12 @@
       if (scopeBrowserInput) scopeBrowserInput.checked = DEFAULTS.scope_browser;
       if (scopeDesktopInput) scopeDesktopInput.checked = DEFAULTS.scope_desktop;
       if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
+      if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
+      let fallbackLang = DEFAULTS.app_language;
+      try {
+        fallbackLang = localStorage.getItem('aqvn_lang') || DEFAULTS.app_language;
+      } catch (e) {}
+      setLanguage(fallbackLang);
     }
   }
 
@@ -343,6 +495,12 @@
       ).trim();
       await store.set('global_hotkey', globalHotkey || DEFAULTS.global_hotkey);
 
+      const closeToTray = closeToTrayInput ? closeToTrayInput.checked : DEFAULTS.close_to_tray;
+      await store.set('close_to_tray', closeToTray);
+
+      const appLanguage = appLanguageSelect ? appLanguageSelect.value : currentLang;
+      await store.set('app_language', appLanguage);
+
       await store.save();
 
       if (window.bridge && typeof window.bridge.saveServerProfiles === 'function') {
@@ -352,13 +510,16 @@
         localStorage.setItem('aqvn_server_url', serverUrl);
         localStorage.setItem('aqvn_server_profiles', JSON.stringify(serverProfiles));
         localStorage.setItem('aqvn_global_hotkey', globalHotkey || DEFAULTS.global_hotkey);
+        localStorage.setItem('aqvn_lang', appLanguage);
       } catch (e) {}
 
       renderServerProfiles();
-      showStatus('Settings saved successfully. [backend: ' + window.bridge.backendDescription() + ']', 'success');
+      const saveMsg = (SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi).save_success + ' [backend: ' + window.bridge.backendDescription() + ']';
+      showStatus(saveMsg, 'success');
     } catch (err) {
       console.error('Failed to save settings:', err);
-      showStatus('Failed to save settings: ' + (err.message || String(err)), 'error');
+      const errMsg = (SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi).save_error + (err.message || String(err));
+      showStatus(errMsg, 'error');
     }
   }
 
@@ -379,7 +540,9 @@
     if (scopeBrowserInput) scopeBrowserInput.checked = DEFAULTS.scope_browser;
     if (scopeDesktopInput) scopeDesktopInput.checked = DEFAULTS.scope_desktop;
     if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
-    showStatus('Reset to defaults (click Save to persist).', 'success');
+    if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
+    setLanguage(DEFAULTS.app_language);
+    showStatus((SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi).reset_status, 'success');
   }
 
   // Event Listeners
@@ -422,6 +585,17 @@
       saveSettings();
     }
   });
+
+  if (appLanguageSelect) {
+    appLanguageSelect.addEventListener('change', (e) => {
+      setLanguage(e.target.value);
+    });
+  }
+  if (langToggleBtn) {
+    langToggleBtn.addEventListener('click', () => {
+      setLanguage(currentLang === 'vi' ? 'en' : 'vi');
+    });
+  }
 
   // Initial load
   if (document.readyState === 'loading') {

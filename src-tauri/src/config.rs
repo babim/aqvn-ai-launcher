@@ -26,7 +26,12 @@ pub const DEFAULT_SCOPE_BROWSER: bool = true;
 pub const DEFAULT_SCOPE_DESKTOP: bool = true;
 pub const DEFAULT_GLOBAL_HOTKEY: &str = "Alt+Space";
 pub const DEFAULT_CLOSE_TO_TRAY: bool = true;
+pub const DEFAULT_APP_LANGUAGE: &str = "vi";
 pub const STORE_FILENAME: &str = "settings.json";
+
+fn default_app_language() -> String {
+    DEFAULT_APP_LANGUAGE.to_string()
+}
 
 fn default_global_hotkey() -> String {
     DEFAULT_GLOBAL_HOTKEY.to_string()
@@ -61,6 +66,8 @@ pub struct AppConfig {
     pub global_hotkey: String,
     #[serde(default = "default_true")]
     pub close_to_tray: bool,
+    #[serde(default = "default_app_language")]
+    pub app_language: String,
 }
 
 impl Default for AppConfig {
@@ -87,6 +94,7 @@ impl Default for AppConfig {
             scope_desktop: DEFAULT_SCOPE_DESKTOP,
             global_hotkey: DEFAULT_GLOBAL_HOTKEY.to_string(),
             close_to_tray: DEFAULT_CLOSE_TO_TRAY,
+            app_language: DEFAULT_APP_LANGUAGE.to_string(),
         }
     }
 }
@@ -191,6 +199,11 @@ impl AppConfig {
                 config.close_to_tray = b;
             }
         }
+        if let Some(val) = store.get("app_language") {
+            if let Some(s) = val.as_str() {
+                config.app_language = s.to_string();
+            }
+        }
 
         Ok(config)
     }
@@ -219,6 +232,7 @@ impl AppConfig {
         store.set("scope_desktop", serde_json::json!(self.scope_desktop));
         store.set("global_hotkey", serde_json::json!(self.global_hotkey));
         store.set("close_to_tray", serde_json::json!(self.close_to_tray));
+        store.set("app_language", serde_json::json!(self.app_language));
 
         store
             .save()

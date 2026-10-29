@@ -1738,5 +1738,83 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     const openHelpCalls = calls.filter((c) => c.command === 'open_help');
     assert.equal(openHelpCalls.length, 1, 'open_help IPC command must be dispatched');
   });
+
+  test('container bridge toggleFocusMode toggles aqvn-focus-mode on body', () => {
+    const harness = createContainerHarness();
+    const { bridge, document } = harness;
+    assert.ok(typeof bridge.toggleFocusMode === 'function', 'toggleFocusMode must be exposed');
+
+    const first = bridge.toggleFocusMode();
+    assert.equal(first, true, 'first toggle turns focus mode on');
+    assert.ok(document.body.classList.contains('aqvn-focus-mode'), 'body must have aqvn-focus-mode');
+
+    const second = bridge.toggleFocusMode();
+    assert.equal(second, false, 'second toggle turns focus mode off');
+    assert.equal(document.body.classList.contains('aqvn-focus-mode'), false, 'aqvn-focus-mode removed');
+  });
+
+  test('container bridge toggles focus mode on F11 and Ctrl+Shift+F', () => {
+    const harness = createContainerHarness();
+    const { document, docListeners } = harness;
+    const keydownListeners = docListeners['keydown'] || [];
+
+    let f11Prevented = false;
+    const f11Event = {
+      ctrlKey: false,
+      shiftKey: false,
+      metaKey: false,
+      key: 'F11',
+      preventDefault: () => {
+        f11Prevented = true;
+      }
+    };
+    for (const fn of keydownListeners) {
+      fn(f11Event);
+    }
+    assert.equal(f11Prevented, true, 'F11 calls preventDefault');
+    assert.ok(document.body.classList.contains('aqvn-focus-mode'), 'F11 turns on aqvn-focus-mode');
+
+    let csfPrevented = false;
+    const csfEvent = {
+      ctrlKey: true,
+      shiftKey: true,
+      metaKey: false,
+      key: 'F',
+      preventDefault: () => {
+        csfPrevented = true;
+      }
+    };
+    for (const fn of keydownListeners) {
+      fn(csfEvent);
+    }
+    assert.equal(csfPrevented, true, 'Ctrl+Shift+F calls preventDefault');
+    assert.equal(document.body.classList.contains('aqvn-focus-mode'), false, 'Ctrl+Shift+F turns off aqvn-focus-mode');
+  });
+
+  test('settings.html and settings.js support language switcher and close to tray', () => {
+    const htmlPath = new URL('../../ui/settings.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /id="app-language"/, 'settings.html must expose #app-language select');
+    assert.match(html, /id="close-to-tray"/, 'settings.html must expose #close-to-tray checkbox');
+    assert.match(html, /id="lang-toggle-btn"/, 'settings.html must expose #lang-toggle-btn');
+
+    const jsPath = new URL('../../ui/settings.js', import.meta.url);
+    const js = fs.readFileSync(jsPath, 'utf8');
+
+    assert.match(js, /app_language/, 'settings.js must reference app_language');
+    assert.match(js, /close_to_tray/, 'settings.js must reference close_to_tray');
+    assert.match(js, /SETTINGS_I18N/, 'settings.js must define SETTINGS_I18N');
+  });
+
+  test('help.html supports close_current_window and language switcher', () => {
+    const htmlPath = new URL('../../ui/help.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /close_current_window/, 'help.html must invoke close_current_window');
+    assert.match(html, /id="lang-toggle-btn"/, 'help.html must expose #lang-toggle-btn');
+    assert.match(html, /HELP_I18N/, 'help.html must define HELP_I18N');
+    assert.match(html, /closeHelpWindow/, 'help.html must implement closeHelpWindow()');
+  });
 });
 

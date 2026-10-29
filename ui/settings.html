@@ -310,16 +310,55 @@
     </style>
   </head>
   <body>
-    <a class="nav" id="back-to-chat" href="index.html">Back to chat</a>
+    <a class="nav" id="back-to-chat" href="index.html" data-i18n="back_to_chat">Back to chat</a>
+    <div style="position: fixed; top: 16px; right: 16px; z-index: 10; display: flex; gap: 8px;">
+      <button type="button" class="nav" id="lang-toggle-btn" style="position: static; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+        🌐 <span id="current-lang-text">Tiếng Việt</span>
+      </button>
+    </div>
     <main>
-      <h1>Settings</h1>
-      <p class="subtitle">Configure AQVN Workspace client, upstream server, and agent control.</p>
+      <h1 data-i18n="header_title">Settings</h1>
+      <p class="subtitle" data-i18n="header_subtitle">Configure AQVN Workspace client, upstream server, and agent control.</p>
 
       <form id="settings-form">
-        <section class="card">
-          <h2>Server Configuration</h2>
+        <section class="card" id="general-section">
+          <h2 data-i18n="general_title">General Configuration</h2>
+
           <div class="form-group">
-            <label for="server-url">Server URL</label>
+            <label for="app-language" data-i18n="language_label">Language / Ngôn ngữ</label>
+            <div style="display: flex; gap: 12px; align-items: center; margin-top: 6px;">
+              <select
+                id="app-language"
+                name="app_language"
+                style="padding: 10px 14px; border: 1px solid #1e2f45; border-radius: 8px; background: #070d16; color: #e6edf7; font: inherit; font-size: 0.9rem; cursor: pointer; min-width: 160px;"
+              >
+                <option value="vi">Tiếng Việt</option>
+                <option value="en">English</option>
+              </select>
+              <div class="help-text" style="margin-top: 0;" data-i18n="language_help">
+                Select interface language / Chọn ngôn ngữ hiển thị giao diện.
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 18px;">
+            <div class="toggle-container">
+              <label class="toggle-switch">
+                <input type="checkbox" id="close-to-tray" name="close_to_tray" checked />
+                <span class="slider"></span>
+              </label>
+              <label for="close-to-tray" class="toggle-label" data-i18n="close_to_tray_label">Close to Tray / Chạy ngầm</label>
+            </div>
+            <div class="help-text" data-i18n="close_to_tray_help">
+              Keep the app running in the system tray when closing the window instead of exiting completely.
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 data-i18n="server_title">Server Configuration</h2>
+          <div class="form-group">
+            <label for="server-url" data-i18n="server_url_label">Server URL</label>
             <input
               type="url"
               id="server-url"
@@ -327,12 +366,12 @@
               placeholder="https://a0.matmagoc.com"
               required
             />
-            <div class="help-text">Upstream workspace server endpoint.</div>
+            <div class="help-text" data-i18n="server_url_help">Upstream workspace server endpoint.</div>
           </div>
 
           <div class="form-group">
-            <label>Saved Server Profiles</label>
-            <div class="help-text" style="margin-bottom: 8px;">
+            <label data-i18n="saved_profiles_label">Saved Server Profiles</label>
+            <div class="help-text" style="margin-bottom: 8px;" data-i18n="saved_profiles_help">
               Saved workspace instance endpoints. Click "Select" to make a profile active.
             </div>
             <ul class="path-list" id="server-profiles-list" aria-label="Saved Server Profiles"></ul>
@@ -343,64 +382,64 @@
                 name="new_profile_input"
                 placeholder="e.g. https://custom-instance.example.com"
               />
-              <button type="button" id="add-profile-btn">Add Profile</button>
+              <button type="button" id="add-profile-btn" data-i18n="add_profile_btn">Add Profile</button>
             </div>
           </div>
         </section>
 
         <section class="card" id="gateway-section">
-          <h2>Outbound Gateway Hub (_a0_connector)</h2>
+          <h2 data-i18n="gateway_title">Outbound Gateway Hub (_a0_connector)</h2>
           <div class="form-group">
             <div class="toggle-container">
               <label class="toggle-switch">
                 <input type="checkbox" id="connector-enabled" name="connector_enabled" checked />
                 <span class="slider"></span>
               </label>
-              <label for="connector-enabled" class="toggle-label">Enable Outbound Gateway</label>
+              <label for="connector-enabled" class="toggle-label" data-i18n="connector_toggle">Enable Outbound Gateway</label>
             </div>
-            <div class="help-text">
+            <div class="help-text" data-i18n="connector_help">
               Master switch connecting outbound to the upstream workspace server via WebSocket. Toggling off immediately terminates the outbound connection.
             </div>
           </div>
 
           <div class="form-group" id="gateway-scopes-group">
-            <label style="margin-bottom: 8px;">Security Scopes</label>
-            <div class="help-text" style="margin-bottom: 12px;">
+            <label style="margin-bottom: 8px;" data-i18n="security_scopes_label">Security Scopes</label>
+            <div class="help-text" style="margin-bottom: 12px;" data-i18n="security_scopes_help">
               Granular permission scopes declared in connector_hello handshake.
             </div>
             <div style="display: flex; flex-direction: column; gap: 10px;">
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
                 <input type="checkbox" id="scope-files" name="scope_files" checked />
-                <span><strong>Remote Files</strong> (<code>files</code>) — read, write, and patch files in allowed workspace paths</span>
+                <span><strong data-i18n="scope_files_title">Remote Files</strong> (<code>files</code>)<span data-i18n="scope_files_desc"> — read, write, and patch files in allowed workspace paths</span></span>
               </label>
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
                 <input type="checkbox" id="scope-exec" name="scope_exec" checked />
-                <span><strong>Code Execution</strong> (<code>code_execution</code>) — run shell commands inside local PTY sessions</span>
+                <span><strong data-i18n="scope_exec_title">Code Execution</strong> (<code>code_execution</code>)<span data-i18n="scope_exec_desc"> — run shell commands inside local PTY sessions</span></span>
               </label>
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
                 <input type="checkbox" id="scope-browser" name="scope_browser" checked />
-                <span><strong>Host Browser</strong> (<code>browser</code>) — automate local Chrome/Edge via CDP</span>
+                <span><strong data-i18n="scope_browser_title">Host Browser</strong> (<code>browser</code>)<span data-i18n="scope_browser_desc"> — automate local Chrome/Edge via CDP</span></span>
               </label>
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
                 <input type="checkbox" id="scope-desktop" name="scope_desktop" checked />
-                <span><strong>Computer Use</strong> (<code>computer_use</code>) — screen capture and mouse/keyboard injection</span>
+                <span><strong data-i18n="scope_desktop_title">Computer Use</strong> (<code>computer_use</code>)<span data-i18n="scope_desktop_desc"> — screen capture and mouse/keyboard injection</span></span>
               </label>
             </div>
           </div>
         </section>
 
         <section class="card">
-          <h2>Agent Control (RFC &amp; SSH)</h2>
+          <h2 data-i18n="agent_control_title">Agent Control (RFC &amp; SSH)</h2>
           <div class="form-group">
             <div class="toggle-container">
               <label class="toggle-switch">
                 <input type="checkbox" id="rfc-enabled" name="rfc_enabled" />
                 <span class="slider"></span>
               </label>
-              <label for="rfc-enabled" class="toggle-label">Allow agent control</label>
+              <label for="rfc-enabled" class="toggle-label" data-i18n="rfc_toggle">Allow agent control</label>
             </div>
-            <div class="security-warning" id="security-warning" role="alert">
-              <strong>Security Warning:</strong> Enabling agent control allows remote automated
+            <div class="security-warning" id="security-warning" role="alert" data-i18n="security_warning">
+              Security Warning: Enabling agent control allows remote automated
               agents to access files in allowed paths and execute commands via RFC and SSH bridges.
               Keep this disabled unless you trust the remote agent and network environment.
             </div>
@@ -408,7 +447,7 @@
 
           <div class="grid-2">
             <div class="form-group">
-              <label for="rfc-password">RFC Password</label>
+              <label for="rfc-password" data-i18n="rfc_password_label">RFC Password</label>
               <input
                 type="password"
                 id="rfc-password"
@@ -418,7 +457,7 @@
               />
             </div>
             <div class="form-group">
-              <label for="ssh-password">SSH Password</label>
+              <label for="ssh-password" data-i18n="ssh_password_label">SSH Password</label>
               <input
                 type="password"
                 id="ssh-password"
@@ -431,7 +470,7 @@
 
           <div class="grid-2">
             <div class="form-group">
-              <label for="rfc-port">RFC Port</label>
+              <label for="rfc-port" data-i18n="rfc_port_label">RFC Port</label>
               <input
                 type="number"
                 id="rfc-port"
@@ -443,7 +482,7 @@
               />
             </div>
             <div class="form-group">
-              <label for="ssh-port">SSH Port</label>
+              <label for="ssh-port" data-i18n="ssh_port_label">SSH Port</label>
               <input
                 type="number"
                 id="ssh-port"
@@ -457,8 +496,8 @@
           </div>
 
           <div class="form-group">
-            <label>Allowed Paths</label>
-            <div class="help-text" style="margin-bottom: 8px;">
+            <label data-i18n="allowed_paths_label">Allowed Paths</label>
+            <div class="help-text" style="margin-bottom: 8px;" data-i18n="allowed_paths_help">
               Directories accessible to the agent.
             </div>
             <ul class="path-list" id="allowed-paths-list" aria-label="Allowed Paths"></ul>
@@ -469,31 +508,31 @@
                 name="allowed_paths_input"
                 placeholder="e.g. ~/Workspace or /path/to/dir"
               />
-              <button type="button" id="add-allowed-path">Add Path</button>
+              <button type="button" id="add-allowed-path" data-i18n="add_path_btn">Add Path</button>
             </div>
           </div>
         </section>
 
         <section class="card" id="shortcuts-section">
-          <h2>Keyboard Shortcuts</h2>
+          <h2 data-i18n="shortcuts_title">Keyboard Shortcuts</h2>
           <div class="form-group">
-            <label for="global-hotkey">Global Summon Shortcut</label>
+            <label for="global-hotkey" data-i18n="global_hotkey_label">Global Summon Shortcut</label>
             <div style="display: flex; gap: 8px;">
               <input id="global-hotkey" name="global_hotkey" placeholder="Alt+Space" spellcheck="false" style="flex: 1;" />
-              <button type="button" id="reset-hotkey-btn">Reset Default</button>
+              <button type="button" id="reset-hotkey-btn" data-i18n="reset_hotkey_btn">Reset Default</button>
             </div>
-            <div class="help-text">
+            <div class="help-text" data-i18n="global_hotkey_help">
               Global hotkey to show/hide the window from anywhere (e.g., Alt+Space, Ctrl+Alt+A, Super+Space). On Linux X11 this uses XGrabKey; on Wayland use the system tray menu.
             </div>
           </div>
           <div style="margin-top: 12px;">
-            <a href="help.html" class="nav" style="position: static; display: inline-block; padding: 6px 14px; font-size: 0.85rem;">View All Shortcuts &amp; Help (F1) &rarr;</a>
+            <a href="help.html" class="nav" style="position: static; display: inline-block; padding: 6px 14px; font-size: 0.85rem;" data-i18n="view_help_link">View All Shortcuts &amp; Help (F1) &rarr;</a>
           </div>
         </section>
 
         <div class="actions">
-          <button type="submit" id="save-settings" class="primary-btn">Save Settings</button>
-          <button type="button" id="reset-settings" class="secondary-btn">Reset to Defaults</button>
+          <button type="submit" id="save-settings" class="primary-btn" data-i18n="save_settings_btn">Save Settings</button>
+          <button type="button" id="reset-settings" class="secondary-btn" data-i18n="reset_defaults_btn">Reset to Defaults</button>
         </div>
 
         <div id="save-status" class="status-message" aria-live="polite"></div>

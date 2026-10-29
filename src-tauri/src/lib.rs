@@ -156,7 +156,8 @@ pub fn run() {
             app::set_tray_busy,
             app::notify::notify_task_complete,
             app::open_settings,
-            app::open_help
+            app::open_help,
+            app::close_current_window
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AQVN Workspace");

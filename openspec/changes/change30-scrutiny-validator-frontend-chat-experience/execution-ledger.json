@@ -1,0 +1,146 @@
+{
+  "change_name": "change30-scrutiny-validator-frontend-chat-experience",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "cache_read_tokens": 46146707,
+      "change_ref": "change30-scrutiny-validator-frontend-chat-experience",
+      "input_tokens": 3069536,
+      "lane": "executor",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 305710,
+      "recorded_epoch": "2026-10-28T13:55:49.665Z",
+      "sessions_attributed": 7,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 49521953
+    },
+    {
+      "cache_read_tokens": 27486171,
+      "change_ref": "change30-scrutiny-validator-frontend-chat-experience",
+      "input_tokens": 2908303,
+      "lane": "verifier",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 345267,
+      "recorded_epoch": "2026-10-28T13:55:49.665Z",
+      "sessions_attributed": 3,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 30739741
+    },
+    {
+      "cache_read_tokens": 0,
+      "change_ref": "change30-scrutiny-validator-frontend-chat-experience",
+      "input_tokens": 0,
+      "lane": "scout",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 0,
+      "recorded_epoch": "2026-10-28T13:55:49.665Z",
+      "sessions_attributed": 0,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=scrutiny-validator-frontend-chat-experience; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "--feature-id",
+      "scrutiny-validator-frontend-chat-experience"
+    ],
+    "generated_at": "2026-10-28T13:55:49.665Z",
+    "producer": "opsx-mission-bind.mjs",
+    "source": "mission d398e923-10d9-46b0-af7c-32a71e95a347 feature scrutiny-validator-frontend-chat-experience"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "M30-T1: Validators pass (test, typecheck, lint)",
+      "mission_lineage": {
+        "feature_id": "scrutiny-validator-frontend-chat-experience",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C30-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "M30-T2: Review subagents spawned for each feature",
+      "mission_lineage": {
+        "feature_id": "scrutiny-validator-frontend-chat-experience",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C30-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "M30-T3: Findings synthesized into scrutiny report",
+      "mission_lineage": {
+        "feature_id": "scrutiny-validator-frontend-chat-experience",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C30-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-28T13:55:49.665Z"
+}

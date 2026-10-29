@@ -4,9 +4,9 @@
 
 ## Execution tasks
 
-- [ ] C42-001: Handles connector_exec_op with runtime=terminal
-- [ ] C42-002: Executes shell commands inside stateful PTY session
-- [ ] C42-003: Streams output back to agent via connector_exec_op_result
+- [x] C42-001: Handles connector_exec_op with runtime=terminal
+- [x] C42-002: Executes shell commands inside stateful PTY session
+- [x] C42-003: Streams output back to agent via connector_exec_op_result
 
 ## Task inventory
 

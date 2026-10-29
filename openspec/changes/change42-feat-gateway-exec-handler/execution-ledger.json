@@ -72,14 +72,13 @@
   },
   "posture": "implementation-heavy",
   "provenance": {
-    "action": "no-op",
     "command": [
       "node",
       "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
       "--change",
       "change42-feat-gateway-exec-handler"
     ],
-    "generated_at": "2026-10-28T21:57:43.166Z",
+    "generated_at": "2026-10-29T00:11:10.308Z",
     "producer": "opsx-mission-sync-state.mjs",
     "source": "change change42-feat-gateway-exec-handler"
   },
@@ -101,7 +100,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "completed",
+      "status": "done",
       "task_id": "C42-001",
       "touched_files": [
         "src-tauri/src/connector/handlers/exec.rs",
@@ -128,7 +127,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "completed",
+      "status": "done",
       "task_id": "C42-002",
       "touched_files": [
         "src-tauri/src/connector/handlers/exec.rs",
@@ -155,7 +154,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "completed",
+      "status": "done",
       "task_id": "C42-003",
       "touched_files": [
         "src-tauri/src/connector/handlers/exec.rs",
@@ -167,5 +166,5 @@
       "verifier_verdict_refs": []
     }
   ],
-  "updated_at": "2026-10-28T18:32:11.915Z"
+  "updated_at": "2026-10-29T00:11:10.308Z"
 }

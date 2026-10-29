@@ -1,0 +1,451 @@
+{
+  "affected_surfaces": [
+    {
+      "coverage_status": "covered",
+      "owner_skill": "aqvn-opsx-doit",
+      "path": "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "reason": "Bridge surface for feature release-packaging-and-whitelabel.",
+      "required_task_ids": [
+        "C27-001",
+        "C27-002",
+        "C27-003",
+        "C27-004",
+        "C27-005"
+      ],
+      "surface_id": "surf:27-release-packaging-and-whitelabel",
+      "type": "script"
+    }
+  ],
+  "bounded_assumptions": [],
+  "confidence": "high",
+  "config_source": "mission-bind",
+  "conflict_policy": {
+    "config_vs_evidence": "mission-bind scaffold; feature release-packaging-and-whitelabel"
+  },
+  "coverage_map": [
+    {
+      "change_name": "change27-release-packaging-and-whitelabel",
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_class": "declared-but-unproven",
+      "sync_class": "in-sync",
+      "trust_class": "low"
+    }
+  ],
+  "decision": {
+    "blocked": false,
+    "result_posture": "append-required",
+    "roadmap_mode": "append-roadmap"
+  },
+  "decision_table": [
+    {
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_score": 1,
+      "note": "mission bridge scaffold for release-packaging-and-whitelabel",
+      "sync_score": 1,
+      "trust_score": 1
+    }
+  ],
+  "dependency_graph": {
+    "acyclic": true,
+    "critical_path": [
+      "C27-001",
+      "C27-002",
+      "C27-003",
+      "C27-004",
+      "C27-005"
+    ],
+    "edges": [
+      {
+        "from": "C27-001",
+        "reason": "sequential scaffold",
+        "to": "C27-002"
+      },
+      {
+        "from": "C27-002",
+        "reason": "sequential scaffold",
+        "to": "C27-003"
+      },
+      {
+        "from": "C27-003",
+        "reason": "sequential scaffold",
+        "to": "C27-004"
+      },
+      {
+        "from": "C27-004",
+        "reason": "sequential scaffold",
+        "to": "C27-005"
+      }
+    ]
+  },
+  "execution_posture_hints": [
+    {
+      "change_name": "change27-release-packaging-and-whitelabel",
+      "confidence": "high",
+      "implementation_lane_shape": "bounded-single-lane",
+      "posture": "implementation-heavy",
+      "reason": "bridge script with self-test"
+    }
+  ],
+  "execution_surface_hints": [
+    {
+      "change_name": "change27-release-packaging-and-whitelabel",
+      "confidence": "high",
+      "reason": "bridge script fits native-subagents surface",
+      "surface": "native-subagents"
+    }
+  ],
+  "final_preflight": {
+    "checks": [
+      {
+        "evidence_refs": [
+          "openspec/changes/change27-release-packaging-and-whitelabel/tasks.md"
+        ],
+        "name": "active_changes",
+        "notes": "scaffold-bound change not yet implemented",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change27-release-packaging-and-whitelabel/specs/"
+        ],
+        "name": "specs",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change27-release-packaging-and-whitelabel/tasks.md"
+        ],
+        "name": "semantic_gate",
+        "notes": "scaffold sections emitted; atoms unexecuted",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change27-release-packaging-and-whitelabel/roadmap-audit.json"
+        ],
+        "name": "schema_gate",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "handoff_packet",
+        "notes": "handoff completeness declared, not yet exercised",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "terminal_closeout",
+        "notes": "closeout happens at archive time",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change27-release-packaging-and-whitelabel/execution-ledger.json"
+        ],
+        "name": "audit_sync",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change27-release-packaging-and-whitelabel/roadmap-audit.json#numbering_policy"
+        ],
+        "name": "numbering_justification",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "overlap_matrix",
+        "notes": "new bridge scaffold; no archived change refreshed",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [],
+        "name": "residual_taxonomy",
+        "notes": "typed residual: not-yet-executed scaffold",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "second_pass_evidence",
+        "notes": "second pass runs in the doit drain, not at bind",
+        "status": "not-applicable"
+      }
+    ],
+    "residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "status": "typed-residual"
+  },
+  "granularity_gate": {
+    "complexity_expansion_complete": true,
+    "dependency_graph_acyclic": true,
+    "missing_surface_ids": "none",
+    "no_umbrella_only_coverage": true,
+    "notes": "mission bridge scaffold for release-packaging-and-whitelabel; 5 task atoms",
+    "one_task_per_affected_skill": true,
+    "single_shared_file_no_fake_parallel": "single-shared-file-no-fake-parallel: serial scaffold",
+    "status": "pass"
+  },
+  "handoff_completeness": {
+    "closeout_bundle": "emitted at archive time by the standard closeout flow",
+    "confidence_lifecycle": "declared-but-unproven until the verifier atom passes",
+    "evidence_claim_map": "opsx-mission-bind.mjs binds feature release-packaging-and-whitelabel to change change27-release-packaging-and-whitelabel.",
+    "must_not_merge_before": [
+      "not-yet-executed: proposals-only scaffold for release-packaging-and-whitelabel; implementation deferred to the doit drain"
+    ],
+    "route_verdict": "native-subagents lane; owner aqvn-opsx-doit",
+    "safe_to_run_in_parallel_with": [
+      "other mission-bridge features with disjoint write_scope"
+    ],
+    "severity_waivers": "none",
+    "task_dag": "C27-001 -> C27-002 -> C27-003 -> C27-004 -> C27-005",
+    "workstream_lanes": [
+      "impl/script atoms"
+    ]
+  },
+  "historical_overlap_matrix": [
+    {
+      "check": "historical_overlap",
+      "evidence_refs": [
+        "openspec/changes/change27-release-packaging-and-whitelabel/proposal.md"
+      ],
+      "rationale": "Auto-scaffolded by opsx-mission-bind.mjs for mission feature release-packaging-and-whitelabel.",
+      "verdict": "none"
+    },
+    {
+      "check": "why_not_refresh_old_archive",
+      "evidence_refs": [
+        "openspec/changes/change27-release-packaging-and-whitelabel/proposal.md"
+      ],
+      "rationale": "New bridge scaffold; no archived change is refreshed.",
+      "verdict": "follow-on-not-refresh"
+    },
+    {
+      "check": "why_follow_on_valid",
+      "evidence_refs": [
+        "openspec/changes/change27-release-packaging-and-whitelabel/proposal.md"
+      ],
+      "rationale": "Binds Factory mission feature release-packaging-and-whitelabel to an openspec change.",
+      "verdict": "valid"
+    },
+    {
+      "check": "why_not_delivery_or_local_residual",
+      "evidence_refs": [
+        "openspec/changes/change27-release-packaging-and-whitelabel/proposal.md"
+      ],
+      "rationale": "A bridge scaffold, not a local env or delivery residual.",
+      "verdict": "not-delivery-not-local"
+    }
+  ],
+  "next_task_hint": {
+    "execution_surface_hint": "native-subagents",
+    "reason": "first atom on the critical path",
+    "selected_change": "change27-release-packaging-and-whitelabel",
+    "task_id": "C27-001"
+  },
+  "numbering_policy": {
+    "default_rule": "global-max-plus-one over the archive baseline (highest_existing_ordinal 26); selected ordinal 27",
+    "highest_existing_ordinal": 26,
+    "lineage_authorized": true,
+    "lineage_authorized_by": "opsx-mission-bind.mjs (mission d398e923-10d9-46b0-af7c-32a71e95a347)",
+    "mode": "global-max-plus-one",
+    "selected_change": "change27-release-packaging-and-whitelabel",
+    "selected_ordinal": 27
+  },
+  "open_questions": [],
+  "orchestration_core_refs": {
+    "closeout_bundle_ref": "openspec/changes/change27-release-packaging-and-whitelabel/roadmap-audit.json#terminal_closeout",
+    "confidence_lifecycle_ref": "openspec/changes/change27-release-packaging-and-whitelabel/roadmap-audit.json#second_pass_evidence",
+    "evidence_claim_map_ref": "openspec/changes/change27-release-packaging-and-whitelabel/roadmap-audit.json#surface_to_task_coverage",
+    "migration_note": "mission bridge scaffold for feature release-packaging-and-whitelabel",
+    "packet_ref": "openspec/changes/change27-release-packaging-and-whitelabel/proposal.md",
+    "required_for_handoff": false,
+    "route_verdict_ref": "openspec/changes/change27-release-packaging-and-whitelabel/roadmap-audit.json#handoff_completeness",
+    "severity_waiver_policy_ref": "openspec/changes/change27-release-packaging-and-whitelabel/roadmap-audit.json#residuals",
+    "task_dag_ref": "openspec/changes/change27-release-packaging-and-whitelabel/roadmap-audit.json#dependency_graph",
+    "workstream_lane_refs": [
+      "openspec/changes/change27-release-packaging-and-whitelabel/execution-ledger.json#lanes"
+    ]
+  },
+  "parallelization_hints": {
+    "batchable_lanes": [],
+    "change_name": "change27-release-packaging-and-whitelabel",
+    "critical_path": [
+      "C27-001",
+      "C27-002",
+      "C27-003",
+      "C27-004",
+      "C27-005"
+    ],
+    "no_fake_parallel_note": "Serial scaffold",
+    "sequential_gates": [
+      "C27-001",
+      "C27-002",
+      "C27-003",
+      "C27-004",
+      "C27-005"
+    ]
+  },
+  "repo_mode": "aqvn-native",
+  "residuals": [],
+  "schema_version": "aqvn_opsx_roadmap_audit/v2",
+  "second_pass_evidence": {
+    "blocking_residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "evidence_refs": [],
+    "independence": "verifier runs in a separate lane from the implementing atoms",
+    "reviewer_lane": "independent-subagent (the final verification atom)",
+    "status": "typed-residual"
+  },
+  "semantic_validations": [
+    {
+      "name": "change27-release-packaging-and-whitelabel_valid",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_problem_map_fit",
+      "note": "mission bridge scaffold for release-packaging-and-whitelabel",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_claim_ceiling_check",
+      "note": "proposals-only scaffold; claims stay bounded until the doit drain",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_route_drift_check",
+      "note": "bound 1:1 to the mission feature; no alternate route",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_agent_consistency_check",
+      "note": "single owner_skill aqvn-opsx-doit across all atoms",
+      "status": "planned"
+    }
+  ],
+  "surface_to_task_coverage": [
+    {
+      "coverage_status": "covered",
+      "surface_id": "surf:27-release-packaging-and-whitelabel",
+      "task_ids": [
+        "C27-001",
+        "C27-002",
+        "C27-003",
+        "C27-004",
+        "C27-005"
+      ]
+    }
+  ],
+  "task_inventory": [
+    {
+      "affected_surface_ids": [
+        "surf:27-release-packaging-and-whitelabel"
+      ],
+      "complexity": 1,
+      "dependencies": [],
+      "details": "Cargo.toml and tauri.conf.json specify version = '0.1.6'",
+      "execution_surface_hint": "native-subagents",
+      "id": "C27-001",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-REL-001. Seeded RED: behavior unmet. GREEN: behavior met and VAL-REL-001 pass.",
+      "title": "Cargo.toml and tauri.conf.json specify version = '0.1.6'",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:27-release-packaging-and-whitelabel"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C27-001"
+      ],
+      "details": "CHANGELOG.md documents [0.1.6] release features",
+      "execution_surface_hint": "native-subagents",
+      "id": "C27-002",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-REL-002. Seeded RED: behavior unmet. GREEN: behavior met and VAL-REL-002 pass.",
+      "title": "CHANGELOG.md documents [0.1.6] release features",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:27-release-packaging-and-whitelabel"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C27-002"
+      ],
+      "details": "Zero occurrences of 'Agent Zero' or 'agent-zero' across the repository",
+      "execution_surface_hint": "native-subagents",
+      "id": "C27-003",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-REL-003. Seeded RED: behavior unmet. GREEN: behavior met and VAL-REL-003 pass.",
+      "title": "Zero occurrences of 'Agent Zero' or 'agent-zero' across the repository",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:27-release-packaging-and-whitelabel"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C27-003"
+      ],
+      "details": "cd src-tauri && cargo test passes 100% (125+ tests)",
+      "execution_surface_hint": "native-subagents",
+      "id": "C27-004",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-REL-001. Seeded RED: behavior unmet. GREEN: behavior met and VAL-REL-001 pass.",
+      "title": "cd src-tauri && cargo test passes 100% (125+ tests)",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:27-release-packaging-and-whitelabel"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C27-004"
+      ],
+      "details": "cargo clippy --all-targets -- -D warnings and cargo fmt --check pass cleanly",
+      "execution_surface_hint": "native-subagents",
+      "id": "C27-005",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "Mapped VAL-*: VAL-REL-002. Seeded RED: behavior unmet. GREEN: behavior met and VAL-REL-002 pass.",
+      "title": "cargo clippy --all-targets -- -D warnings and cargo fmt --check pass cleanly",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    }
+  ],
+  "terminal_closeout": {
+    "evidence_refs": [],
+    "no_active_change_gate": "not-applicable",
+    "reserved_change": false,
+    "status": "not-needed"
+  }
+}

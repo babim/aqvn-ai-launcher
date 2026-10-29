@@ -72,14 +72,13 @@
   },
   "posture": "implementation-heavy",
   "provenance": {
-    "action": "no-op",
     "command": [
       "node",
       "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
       "--change",
       "change44-feat-gateway-desktop-handler"
     ],
-    "generated_at": "2026-10-28T22:51:23.974Z",
+    "generated_at": "2026-10-29T00:11:10.508Z",
     "producer": "opsx-mission-sync-state.mjs",
     "source": "change change44-feat-gateway-desktop-handler"
   },
@@ -101,7 +100,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "done",
       "task_id": "C44-001",
       "touched_files": [],
       "verifier_verdict_refs": []
@@ -122,7 +121,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "done",
       "task_id": "C44-002",
       "touched_files": [],
       "verifier_verdict_refs": []
@@ -143,11 +142,11 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "done",
       "task_id": "C44-003",
       "touched_files": [],
       "verifier_verdict_refs": []
     }
   ],
-  "updated_at": "2026-10-28T18:32:12.210Z"
+  "updated_at": "2026-10-29T00:11:10.508Z"
 }

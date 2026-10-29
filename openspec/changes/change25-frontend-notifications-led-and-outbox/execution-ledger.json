@@ -1,0 +1,158 @@
+{
+  "change_name": "change25-frontend-notifications-led-and-outbox",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change25-frontend-notifications-led-and-outbox/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "change_ref": "change25-frontend-notifications-led-and-outbox",
+      "lane": "executor",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-28T09:43:55.578Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change25-frontend-notifications-led-and-outbox",
+      "lane": "verifier",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-28T09:43:55.578Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change25-frontend-notifications-led-and-outbox",
+      "lane": "scout",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-28T09:43:55.578Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=frontend-notifications-led-and-outbox; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change25-frontend-notifications-led-and-outbox"
+    ],
+    "generated_at": "2026-10-28T16:46:19.867Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change25-frontend-notifications-led-and-outbox"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "applyProgress triggers invokeIpc('notify_task_complete') when wasActive && !state.active and document.hidden is true",
+      "mission_lineage": {
+        "feature_id": "frontend-notifications-led-and-outbox",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C25-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "#connection-pill shows 🟢 online, 🟡 polling, and 🔴 offline",
+      "mission_lineage": {
+        "feature_id": "frontend-notifications-led-and-outbox",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-002"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C25-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Sending a message while offline queues it into localStorage['aqvn_outbox']",
+      "mission_lineage": {
+        "feature_id": "frontend-notifications-led-and-outbox",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-003"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C25-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Socket connect event automatically flushes and sends queued outbox messages",
+      "mission_lineage": {
+        "feature_id": "frontend-notifications-led-and-outbox",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C25-004",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-28T16:46:19.867Z"
+}

@@ -1,0 +1,389 @@
+{
+  "affected_surfaces": [
+    {
+      "coverage_status": "covered",
+      "owner_skill": "aqvn-opsx-doit",
+      "path": "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "reason": "Bridge surface for feature scrutiny-validator-frontend-chat-experience.",
+      "required_task_ids": [
+        "C30-001",
+        "C30-002",
+        "C30-003"
+      ],
+      "surface_id": "surf:30-scrutiny-validator-frontend-chat-experience",
+      "type": "script"
+    }
+  ],
+  "bounded_assumptions": [],
+  "confidence": "high",
+  "config_source": "mission-bind",
+  "conflict_policy": {
+    "config_vs_evidence": "mission-bind scaffold; feature scrutiny-validator-frontend-chat-experience"
+  },
+  "coverage_map": [
+    {
+      "change_name": "change30-scrutiny-validator-frontend-chat-experience",
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_class": "declared-but-unproven",
+      "sync_class": "in-sync",
+      "trust_class": "low"
+    }
+  ],
+  "decision": {
+    "blocked": false,
+    "result_posture": "append-required",
+    "roadmap_mode": "append-roadmap"
+  },
+  "decision_table": [
+    {
+      "chosen_action": "append-dependent-follow-on",
+      "coverage_score": 1,
+      "note": "mission bridge scaffold for scrutiny-validator-frontend-chat-experience",
+      "sync_score": 1,
+      "trust_score": 1
+    }
+  ],
+  "dependency_graph": {
+    "acyclic": true,
+    "critical_path": [
+      "C30-001",
+      "C30-002",
+      "C30-003"
+    ],
+    "edges": [
+      {
+        "from": "C30-001",
+        "reason": "sequential scaffold",
+        "to": "C30-002"
+      },
+      {
+        "from": "C30-002",
+        "reason": "sequential scaffold",
+        "to": "C30-003"
+      }
+    ]
+  },
+  "execution_posture_hints": [
+    {
+      "change_name": "change30-scrutiny-validator-frontend-chat-experience",
+      "confidence": "high",
+      "implementation_lane_shape": "bounded-single-lane",
+      "posture": "implementation-heavy",
+      "reason": "bridge script with self-test"
+    }
+  ],
+  "execution_surface_hints": [
+    {
+      "change_name": "change30-scrutiny-validator-frontend-chat-experience",
+      "confidence": "high",
+      "reason": "bridge script fits native-subagents surface",
+      "surface": "native-subagents"
+    }
+  ],
+  "final_preflight": {
+    "checks": [
+      {
+        "evidence_refs": [
+          "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/tasks.md"
+        ],
+        "name": "active_changes",
+        "notes": "scaffold-bound change not yet implemented",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/specs/"
+        ],
+        "name": "specs",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/tasks.md"
+        ],
+        "name": "semantic_gate",
+        "notes": "scaffold sections emitted; atoms unexecuted",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/roadmap-audit.json"
+        ],
+        "name": "schema_gate",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "handoff_packet",
+        "notes": "handoff completeness declared, not yet exercised",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "terminal_closeout",
+        "notes": "closeout happens at archive time",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/execution-ledger.json"
+        ],
+        "name": "audit_sync",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [
+          "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/roadmap-audit.json#numbering_policy"
+        ],
+        "name": "numbering_justification",
+        "status": "pass"
+      },
+      {
+        "evidence_refs": [],
+        "name": "overlap_matrix",
+        "notes": "new bridge scaffold; no archived change refreshed",
+        "status": "not-applicable"
+      },
+      {
+        "evidence_refs": [],
+        "name": "residual_taxonomy",
+        "notes": "typed residual: not-yet-executed scaffold",
+        "status": "typed-residual"
+      },
+      {
+        "evidence_refs": [],
+        "name": "second_pass_evidence",
+        "notes": "second pass runs in the doit drain, not at bind",
+        "status": "not-applicable"
+      }
+    ],
+    "residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "status": "typed-residual"
+  },
+  "granularity_gate": {
+    "complexity_expansion_complete": true,
+    "dependency_graph_acyclic": true,
+    "missing_surface_ids": "none",
+    "no_umbrella_only_coverage": true,
+    "notes": "mission bridge scaffold for scrutiny-validator-frontend-chat-experience; 3 task atoms",
+    "one_task_per_affected_skill": true,
+    "single_shared_file_no_fake_parallel": "single-shared-file-no-fake-parallel: serial scaffold",
+    "status": "pass"
+  },
+  "handoff_completeness": {
+    "closeout_bundle": "emitted at archive time by the standard closeout flow",
+    "confidence_lifecycle": "declared-but-unproven until the verifier atom passes",
+    "evidence_claim_map": "opsx-mission-bind.mjs binds feature scrutiny-validator-frontend-chat-experience to change change30-scrutiny-validator-frontend-chat-experience.",
+    "must_not_merge_before": [
+      "not-yet-executed: proposals-only scaffold for scrutiny-validator-frontend-chat-experience; implementation deferred to the doit drain"
+    ],
+    "route_verdict": "native-subagents lane; owner aqvn-opsx-doit",
+    "safe_to_run_in_parallel_with": [
+      "other mission-bridge features with disjoint write_scope"
+    ],
+    "severity_waivers": "none",
+    "task_dag": "C30-001 -> C30-002 -> C30-003",
+    "workstream_lanes": [
+      "impl/script atoms"
+    ]
+  },
+  "historical_overlap_matrix": [
+    {
+      "check": "historical_overlap",
+      "evidence_refs": [
+        "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/proposal.md"
+      ],
+      "rationale": "Auto-scaffolded by opsx-mission-bind.mjs for mission feature scrutiny-validator-frontend-chat-experience.",
+      "verdict": "none"
+    },
+    {
+      "check": "why_not_refresh_old_archive",
+      "evidence_refs": [
+        "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/proposal.md"
+      ],
+      "rationale": "New bridge scaffold; no archived change is refreshed.",
+      "verdict": "follow-on-not-refresh"
+    },
+    {
+      "check": "why_follow_on_valid",
+      "evidence_refs": [
+        "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/proposal.md"
+      ],
+      "rationale": "Binds Factory mission feature scrutiny-validator-frontend-chat-experience to an openspec change.",
+      "verdict": "valid"
+    },
+    {
+      "check": "why_not_delivery_or_local_residual",
+      "evidence_refs": [
+        "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/proposal.md"
+      ],
+      "rationale": "A bridge scaffold, not a local env or delivery residual.",
+      "verdict": "not-delivery-not-local"
+    }
+  ],
+  "next_task_hint": {
+    "execution_surface_hint": "native-subagents",
+    "reason": "first atom on the critical path",
+    "selected_change": "change30-scrutiny-validator-frontend-chat-experience",
+    "task_id": "C30-001"
+  },
+  "numbering_policy": {
+    "default_rule": "global-max-plus-one over the archive baseline (highest_existing_ordinal 29); selected ordinal 30",
+    "highest_existing_ordinal": 29,
+    "lineage_authorized": true,
+    "lineage_authorized_by": "opsx-mission-bind.mjs (mission d398e923-10d9-46b0-af7c-32a71e95a347)",
+    "mode": "global-max-plus-one",
+    "selected_change": "change30-scrutiny-validator-frontend-chat-experience",
+    "selected_ordinal": 30
+  },
+  "open_questions": [],
+  "orchestration_core_refs": {
+    "closeout_bundle_ref": "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/roadmap-audit.json#terminal_closeout",
+    "confidence_lifecycle_ref": "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/roadmap-audit.json#second_pass_evidence",
+    "evidence_claim_map_ref": "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/roadmap-audit.json#surface_to_task_coverage",
+    "migration_note": "mission bridge scaffold for feature scrutiny-validator-frontend-chat-experience",
+    "packet_ref": "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/proposal.md",
+    "required_for_handoff": false,
+    "route_verdict_ref": "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/roadmap-audit.json#handoff_completeness",
+    "severity_waiver_policy_ref": "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/roadmap-audit.json#residuals",
+    "task_dag_ref": "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/roadmap-audit.json#dependency_graph",
+    "workstream_lane_refs": [
+      "openspec/changes/change30-scrutiny-validator-frontend-chat-experience/execution-ledger.json#lanes"
+    ]
+  },
+  "parallelization_hints": {
+    "batchable_lanes": [],
+    "change_name": "change30-scrutiny-validator-frontend-chat-experience",
+    "critical_path": [
+      "C30-001",
+      "C30-002",
+      "C30-003"
+    ],
+    "no_fake_parallel_note": "Serial scaffold",
+    "sequential_gates": [
+      "C30-001",
+      "C30-002",
+      "C30-003"
+    ]
+  },
+  "repo_mode": "aqvn-native",
+  "residuals": [],
+  "schema_version": "aqvn_opsx_roadmap_audit/v2",
+  "second_pass_evidence": {
+    "blocking_residuals": [
+      "not-yet-executed: proposals-only scaffold; implementation deferred to the doit drain"
+    ],
+    "evidence_refs": [],
+    "independence": "verifier runs in a separate lane from the implementing atoms",
+    "reviewer_lane": "independent-subagent (the final verification atom)",
+    "status": "typed-residual"
+  },
+  "semantic_validations": [
+    {
+      "name": "change30-scrutiny-validator-frontend-chat-experience_valid",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_problem_map_fit",
+      "note": "mission bridge scaffold for scrutiny-validator-frontend-chat-experience",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_claim_ceiling_check",
+      "note": "proposals-only scaffold; claims stay bounded until the doit drain",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_route_drift_check",
+      "note": "bound 1:1 to the mission feature; no alternate route",
+      "status": "planned"
+    },
+    {
+      "name": "wfgy_agent_consistency_check",
+      "note": "single owner_skill aqvn-opsx-doit across all atoms",
+      "status": "planned"
+    }
+  ],
+  "surface_to_task_coverage": [
+    {
+      "coverage_status": "covered",
+      "surface_id": "surf:30-scrutiny-validator-frontend-chat-experience",
+      "task_ids": [
+        "C30-001",
+        "C30-002",
+        "C30-003"
+      ]
+    }
+  ],
+  "task_inventory": [
+    {
+      "affected_surface_ids": [
+        "surf:30-scrutiny-validator-frontend-chat-experience"
+      ],
+      "complexity": 1,
+      "dependencies": [],
+      "details": "Validators pass (test, typecheck, lint)",
+      "execution_surface_hint": "native-subagents",
+      "id": "C30-001",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "No VAL-* mapped (fulfills[] empty). Behavior: \"Validators pass (test, typecheck, lint)\". Seeded RED: behavior unmet. GREEN: behavior met.",
+      "title": "M30-T1: Validators pass (test, typecheck, lint)",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:30-scrutiny-validator-frontend-chat-experience"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C30-001"
+      ],
+      "details": "Review subagents spawned for each feature",
+      "execution_surface_hint": "native-subagents",
+      "id": "C30-002",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "No VAL-* mapped (fulfills[] empty). Behavior: \"Review subagents spawned for each feature\". Seeded RED: behavior unmet. GREEN: behavior met.",
+      "title": "M30-T2: Review subagents spawned for each feature",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    },
+    {
+      "affected_surface_ids": [
+        "surf:30-scrutiny-validator-frontend-chat-experience"
+      ],
+      "complexity": 1,
+      "dependencies": [
+        "C30-002"
+      ],
+      "details": "Findings synthesized into scrutiny report",
+      "execution_surface_hint": "native-subagents",
+      "id": "C30-003",
+      "owner_skill": "aqvn-opsx-doit",
+      "priority": "P2",
+      "status": "planned",
+      "task_type": "script",
+      "test_strategy": "No VAL-* mapped (fulfills[] empty). Behavior: \"Findings synthesized into scrutiny report\". Seeded RED: behavior unmet. GREEN: behavior met.",
+      "title": "M30-T3: Findings synthesized into scrutiny report",
+      "write_scope": [
+        "(proposals-only-scaffold)"
+      ]
+    }
+  ],
+  "terminal_closeout": {
+    "evidence_refs": [],
+    "no_active_change_gate": "not-applicable",
+    "reserved_change": false,
+    "status": "not-needed"
+  }
+}

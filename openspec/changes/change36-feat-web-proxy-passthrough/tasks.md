@@ -4,10 +4,10 @@
 
 ## Execution tasks
 
-- [ ] C36-001: Requests to /, /login.css, /vendor/*, /css/*, /js/* are forwarded to upstream
-- [ ] C36-002: Content-Type, status codes, and headers are preserved
-- [ ] C36-003: Session cookies from CookieJar are replayed and upstream Set-Cookie headers are absorbed
-- [ ] C36-004: Integration tests in src-tauri/tests/proxy_server.rs pass cleanly
+- [x] C36-001: Requests to /, /login.css, /vendor/*, /css/*, /js/* are forwarded to upstream
+- [x] C36-002: Content-Type, status codes, and headers are preserved
+- [x] C36-003: Session cookies from CookieJar are replayed and upstream Set-Cookie headers are absorbed
+- [x] C36-004: Integration tests in src-tauri/tests/proxy_server.rs pass cleanly
 
 ## Task inventory
 

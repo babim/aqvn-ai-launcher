@@ -1,0 +1,152 @@
+{
+  "change_name": "change40-feat-gateway-outbound-client",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change40-feat-gateway-outbound-client/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "cache_read_tokens": 60227579,
+      "change_ref": "change40-feat-gateway-outbound-client",
+      "input_tokens": 4506159,
+      "lane": "executor",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 379202,
+      "recorded_epoch": "2026-10-28T18:32:11.563Z",
+      "sessions_attributed": 10,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 65112940
+    },
+    {
+      "cache_read_tokens": 35866757,
+      "change_ref": "change40-feat-gateway-outbound-client",
+      "input_tokens": 4097127,
+      "lane": "verifier",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 409190,
+      "recorded_epoch": "2026-10-28T18:32:11.563Z",
+      "sessions_attributed": 5,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 40373074
+    },
+    {
+      "cache_read_tokens": 0,
+      "change_ref": "change40-feat-gateway-outbound-client",
+      "input_tokens": 0,
+      "lane": "scout",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 0,
+      "recorded_epoch": "2026-10-28T18:32:11.563Z",
+      "sessions_attributed": 0,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=feat-gateway-outbound-client; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change40-feat-gateway-outbound-client"
+    ],
+    "generated_at": "2026-10-29T00:11:10.109Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change40-feat-gateway-outbound-client"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "Outbound connection established to /ws without requiring open inbound ports",
+      "mission_lineage": {
+        "feature_id": "feat-gateway-outbound-client",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-GATEWAY-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C40-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Sends connector_hello declaring scopes: files, code_execution, browser, computer_use",
+      "mission_lineage": {
+        "feature_id": "feat-gateway-outbound-client",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-GATEWAY-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C40-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Maintains heartbeat pings and auto-reconnects on disconnection",
+      "mission_lineage": {
+        "feature_id": "feat-gateway-outbound-client",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-GATEWAY-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C40-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-29T00:11:10.109Z"
+}

@@ -72,14 +72,13 @@
   },
   "posture": "implementation-heavy",
   "provenance": {
-    "action": "no-op",
     "command": [
       "node",
       "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
       "--change",
       "change36-feat-web-proxy-passthrough"
     ],
-    "generated_at": "2026-10-28T18:48:07.299Z",
+    "generated_at": "2026-10-29T00:11:10.012Z",
     "producer": "opsx-mission-sync-state.mjs",
     "source": "change change36-feat-web-proxy-passthrough"
   },
@@ -101,7 +100,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "done",
       "task_id": "C36-001",
       "touched_files": [],
       "verifier_verdict_refs": []
@@ -122,7 +121,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "done",
       "task_id": "C36-002",
       "touched_files": [],
       "verifier_verdict_refs": []
@@ -143,7 +142,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "done",
       "task_id": "C36-003",
       "touched_files": [],
       "verifier_verdict_refs": []
@@ -164,11 +163,11 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "planned",
+      "status": "done",
       "task_id": "C36-004",
       "touched_files": [],
       "verifier_verdict_refs": []
     }
   ],
-  "updated_at": "2026-10-28T18:32:10.937Z"
+  "updated_at": "2026-10-29T00:11:10.012Z"
 }

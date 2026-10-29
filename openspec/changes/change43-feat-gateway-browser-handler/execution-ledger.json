@@ -72,14 +72,13 @@
   },
   "posture": "implementation-heavy",
   "provenance": {
-    "action": "no-op",
     "command": [
       "node",
       "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
       "--change",
       "change43-feat-gateway-browser-handler"
     ],
-    "generated_at": "2026-10-28T22:27:30.800Z",
+    "generated_at": "2026-10-29T00:11:10.423Z",
     "producer": "opsx-mission-sync-state.mjs",
     "source": "change change43-feat-gateway-browser-handler"
   },
@@ -101,7 +100,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "completed",
+      "status": "done",
       "task_id": "C43-001",
       "touched_files": [
         "src-tauri/src/connector/handlers/browser.rs",
@@ -125,7 +124,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "completed",
+      "status": "done",
       "task_id": "C43-002",
       "touched_files": [
         "src-tauri/src/connector/handlers/browser.rs",
@@ -149,7 +148,7 @@
         "verifier": "aqvn-opsx-doit"
       },
       "produced_artifacts": [],
-      "status": "completed",
+      "status": "done",
       "task_id": "C43-003",
       "touched_files": [
         "src-tauri/src/connector/handlers/browser.rs",
@@ -158,5 +157,5 @@
       "verifier_verdict_refs": []
     }
   ],
-  "updated_at": "2026-10-28T18:32:12.083Z"
+  "updated_at": "2026-10-29T00:11:10.423Z"
 }

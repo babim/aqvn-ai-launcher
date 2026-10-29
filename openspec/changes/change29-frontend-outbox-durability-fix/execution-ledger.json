@@ -1,0 +1,215 @@
+{
+  "change_name": "change29-frontend-outbox-durability-fix",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change29-frontend-outbox-durability-fix/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "cache_read_tokens": 46146707,
+      "change_ref": "change29-frontend-outbox-durability-fix",
+      "input_tokens": 3069536,
+      "lane": "executor",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 305710,
+      "recorded_epoch": "2026-10-28T13:55:49.531Z",
+      "sessions_attributed": 7,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 49521953
+    },
+    {
+      "cache_read_tokens": 27486171,
+      "change_ref": "change29-frontend-outbox-durability-fix",
+      "input_tokens": 2908303,
+      "lane": "verifier",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 345267,
+      "recorded_epoch": "2026-10-28T13:55:49.531Z",
+      "sessions_attributed": 3,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 30739741
+    },
+    {
+      "cache_read_tokens": 0,
+      "change_ref": "change29-frontend-outbox-durability-fix",
+      "input_tokens": 0,
+      "lane": "scout",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 0,
+      "recorded_epoch": "2026-10-28T13:55:49.531Z",
+      "sessions_attributed": 0,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=frontend-outbox-durability-fix; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change29-frontend-outbox-durability-fix"
+    ],
+    "generated_at": "2026-10-28T16:46:20.224Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change29-frontend-outbox-durability-fix"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "Two overlapping flushOutbox calls send exactly one message_async per queued entry",
+      "mission_lineage": {
+        "feature_id": "frontend-outbox-durability-fix",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-003"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C29-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "A queued entry is claimed before sending so a reconnect cannot re-send it",
+      "mission_lineage": {
+        "feature_id": "frontend-outbox-durability-fix",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-003"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C29-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "The outbox is capped by entry count and/or total bytes",
+      "mission_lineage": {
+        "feature_id": "frontend-outbox-durability-fix",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-003"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C29-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "When localStorage.setItem throws, a user-visible error is surfaced and the row is not left claiming delivery",
+      "mission_lineage": {
+        "feature_id": "frontend-outbox-durability-fix",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-003"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C29-004",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "node tools/tests/test_chat_handlers.mjs passes with the new assertions",
+      "mission_lineage": {
+        "feature_id": "frontend-outbox-durability-fix",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-003"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C29-005",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "cargo test, clippy -D warnings and cargo fmt --check remain clean",
+      "mission_lineage": {
+        "feature_id": "frontend-outbox-durability-fix",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-CONN-003"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C29-006",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-28T16:46:20.224Z"
+}

@@ -1,0 +1,158 @@
+{
+  "change_name": "change24-frontend-focus-mode-and-hotkeys",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change24-frontend-focus-mode-and-hotkeys/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "change_ref": "change24-frontend-focus-mode-and-hotkeys",
+      "lane": "executor",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-28T09:43:55.398Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change24-frontend-focus-mode-and-hotkeys",
+      "lane": "verifier",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-28T09:43:55.398Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change24-frontend-focus-mode-and-hotkeys",
+      "lane": "scout",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-28T09:43:55.398Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=frontend-focus-mode-and-hotkeys; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change24-frontend-focus-mode-and-hotkeys"
+    ],
+    "generated_at": "2026-10-28T16:46:19.775Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change24-frontend-focus-mode-and-hotkeys"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "F11 and Ctrl+Shift+F toggle .focus-mode class on body",
+      "mission_lineage": {
+        "feature_id": "frontend-focus-mode-and-hotkeys",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-FOCUS-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C24-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": ".focus-mode hides #sidebar, #canvas-pane, and splitters",
+      "mission_lineage": {
+        "feature_id": "frontend-focus-mode-and-hotkeys",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-FOCUS-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C24-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": ".focus-mode centers #chat-pane with max-width: 840px",
+      "mission_lineage": {
+        "feature_id": "frontend-focus-mode-and-hotkeys",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-FOCUS-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C24-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Input #message-input is focused immediately upon entering focus mode",
+      "mission_lineage": {
+        "feature_id": "frontend-focus-mode-and-hotkeys",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-FOCUS-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C24-004",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-28T16:46:19.775Z"
+}

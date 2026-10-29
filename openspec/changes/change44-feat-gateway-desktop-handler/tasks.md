@@ -4,9 +4,9 @@
 
 ## Execution tasks
 
-- [ ] C44-001: Captures host screen or active window on capture op
-- [ ] C44-002: Injects mouse movement, clicks, and keystrokes on click/type/key ops
-- [ ] C44-003: Replies with connector_computer_use_op_result
+- [x] C44-001: Captures host screen or active window on capture op
+- [x] C44-002: Injects mouse movement, clicks, and keystrokes on click/type/key ops
+- [x] C44-003: Replies with connector_computer_use_op_result
 
 ## Task inventory
 

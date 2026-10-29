@@ -1,0 +1,137 @@
+{
+  "change_name": "change26-frontend-zoom-and-hard-refresh",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change26-frontend-zoom-and-hard-refresh/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "change_ref": "change26-frontend-zoom-and-hard-refresh",
+      "lane": "executor",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-28T09:43:55.720Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change26-frontend-zoom-and-hard-refresh",
+      "lane": "verifier",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-28T09:43:55.720Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    },
+    {
+      "change_ref": "change26-frontend-zoom-and-hard-refresh",
+      "lane": "scout",
+      "model_id": "unavailable-pending-runtime-capture",
+      "recorded_epoch": "2026-10-28T09:43:55.720Z",
+      "source": "unavailable",
+      "task_type": "standard-implementation",
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=frontend-zoom-and-hard-refresh; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-sync-state.mjs",
+      "--change",
+      "change26-frontend-zoom-and-hard-refresh"
+    ],
+    "generated_at": "2026-10-28T16:46:19.970Z",
+    "producer": "opsx-mission-sync-state.mjs",
+    "source": "change change26-frontend-zoom-and-hard-refresh"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "Ctrl + increases zoom, Ctrl - decreases zoom, Ctrl 0 resets zoom to 1.0",
+      "mission_lineage": {
+        "feature_id": "frontend-zoom-and-hard-refresh",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-ZOOM-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C26-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Zoom setting is stored in localStorage['aqvn_zoom'] and applied on init",
+      "mission_lineage": {
+        "feature_id": "frontend-zoom-and-hard-refresh",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-ZOOM-002"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C26-002",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    },
+    {
+      "evidence_refs": [],
+      "label": "Hard refresh clears message RAM state, re-fetches CSRF, reconnects Socket.IO, and reloads canvas iframe",
+      "mission_lineage": {
+        "feature_id": "frontend-zoom-and-hard-refresh",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": [
+          "VAL-ZOOM-001"
+        ]
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "done",
+      "task_id": "C26-003",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-28T16:46:19.970Z"
+}

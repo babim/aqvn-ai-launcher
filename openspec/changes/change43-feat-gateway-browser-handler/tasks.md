@@ -4,9 +4,9 @@
 
 ## Execution tasks
 
-- [ ] C43-001: Connects to local Chrome CDP at http://127.0.0.1:9222
-- [ ] C43-002: Dispatches open, navigate, click, type, screenshot, and evaluate actions
-- [ ] C43-003: Handles open_remote_debugging by launching browser with remote debugging
+- [x] C43-001: Connects to local Chrome CDP at http://127.0.0.1:9222
+- [x] C43-002: Dispatches open, navigate, click, type, screenshot, and evaluate actions
+- [x] C43-003: Handles open_remote_debugging by launching browser with remote debugging
 
 ## Task inventory
 

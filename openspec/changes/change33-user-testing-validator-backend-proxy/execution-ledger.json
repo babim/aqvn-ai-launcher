@@ -1,0 +1,108 @@
+{
+  "change_name": "change33-user-testing-validator-backend-proxy",
+  "direct_fallback_lifecycle": {
+    "blocker_evidence": null,
+    "claim_ceiling_after_fallback": "not-applicable",
+    "direct_exception": null,
+    "fresh_verifier_required": false,
+    "prior_lane": null,
+    "remaining_scope": [],
+    "superseded_or_closed_at": null,
+    "trigger": "not-applicable"
+  },
+  "dirty_tree_baseline": {
+    "created_or_modified_in_run": [
+      "openspec/changes/change33-user-testing-validator-backend-proxy/"
+    ],
+    "preexisting_in_scope": [],
+    "preexisting_out_of_scope": []
+  },
+  "execution_surface": "native-subagents",
+  "implementation_lane_shape": "bounded-single-lane",
+  "lanes": [
+    {
+      "cache_read_tokens": 46146707,
+      "change_ref": "change33-user-testing-validator-backend-proxy",
+      "input_tokens": 3069536,
+      "lane": "executor",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 305710,
+      "recorded_epoch": "2026-10-28T13:55:50.382Z",
+      "sessions_attributed": 7,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 49521953
+    },
+    {
+      "cache_read_tokens": 27486171,
+      "change_ref": "change33-user-testing-validator-backend-proxy",
+      "input_tokens": 2908303,
+      "lane": "verifier",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 345267,
+      "recorded_epoch": "2026-10-28T13:55:50.382Z",
+      "sessions_attributed": 3,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 30739741
+    },
+    {
+      "cache_read_tokens": 0,
+      "change_ref": "change33-user-testing-validator-backend-proxy",
+      "input_tokens": 0,
+      "lane": "scout",
+      "model_id": "runtime-attributed-from-sessions",
+      "output_tokens": 0,
+      "recorded_epoch": "2026-10-28T13:55:50.382Z",
+      "sessions_attributed": 0,
+      "source": "runtime",
+      "task_type": "standard-implementation",
+      "thinking_tokens": 0,
+      "tier": "inherited",
+      "tokens": 0
+    }
+  ],
+  "limited_trust": {
+    "reason": "auto-scaffolded by opsx-mission-bind.mjs; mission_lineage.feature_id=user-testing-validator-backend-proxy; validation_contract_ref=validation-contract.md",
+    "status": "missions-bridge-bind"
+  },
+  "posture": "implementation-heavy",
+  "provenance": {
+    "command": [
+      "node",
+      "~/.aqvn-codetools/openspec-scripts/opsx-mission-bind.mjs",
+      "--feature-id",
+      "user-testing-validator-backend-proxy"
+    ],
+    "generated_at": "2026-10-28T13:55:50.382Z",
+    "producer": "opsx-mission-bind.mjs",
+    "source": "mission d398e923-10d9-46b0-af7c-32a71e95a347 feature user-testing-validator-backend-proxy"
+  },
+  "schema_version": "aqvn_execution_ledger/v1.1",
+  "tasks": [
+    {
+      "evidence_refs": [],
+      "label": "M33-T1: Auto-skipped via G8 policy for all-programmatic milestone",
+      "mission_lineage": {
+        "feature_id": "user-testing-validator-backend-proxy",
+        "mission_id": "d398e923-10d9-46b0-af7c-32a71e95a347",
+        "val_ids": []
+      },
+      "ownership": {
+        "implementer": "aqvn-opsx-doit",
+        "lead": "aqvn-opsx-doit",
+        "verifier": "aqvn-opsx-doit"
+      },
+      "produced_artifacts": [],
+      "status": "planned",
+      "task_id": "C33-001",
+      "touched_files": [],
+      "verifier_verdict_refs": []
+    }
+  ],
+  "updated_at": "2026-10-28T13:55:50.382Z"
+}

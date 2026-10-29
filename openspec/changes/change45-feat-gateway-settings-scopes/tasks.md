@@ -4,9 +4,9 @@
 
 ## Execution tasks
 
-- [ ] C45-001: Settings UI exposes checkboxes for each scope and master connector switch
-- [ ] C45-002: Toggling master off immediately terminates the outbound connection
-- [ ] C45-003: connector_hello scopes match active configuration
+- [x] C45-001: Settings UI exposes checkboxes for each scope and master connector switch
+- [x] C45-002: Toggling master off immediately terminates the outbound connection
+- [x] C45-003: connector_hello scopes match active configuration
 
 ## Task inventory
 

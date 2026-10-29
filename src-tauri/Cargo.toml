@@ -1,6 +1,6 @@
 [package]
 name = "aqvn-workspace"
-version = "0.1.6"
+version = "0.1.7"
 description = "AQVN Workspace native client and RFC host bridge"
 edition = "2021"
 

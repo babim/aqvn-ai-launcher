@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-10-30
+
+### Added
+- **Upstream HTML Bridge Injection**:
+  - Automatically injects `/container.js` bridge script into upstream HTML responses before `</head>` or `</body>` tags, ensuring container shortcuts, notifications, and event bridges work seamlessly even when navigating remote pages.
+  - Hardened loopback proxy handling for HTML content injection with proper Content-Length recalculation.
+- **Enhanced Web Container Zoom & Viewport Controls**:
+  - Keyboard zoom shortcuts (`Ctrl` + `+`/`=`, `Ctrl` + `-`, `Ctrl` + `0`, and numpad keys `NumpadAdd`, `NumpadSubtract`).
+  - Persistent zoom state across sessions and iframes saved in `localStorage.aqvn_zoom`.
+  - Hard refresh shortcut (`Ctrl+Shift+R` and `F5`) resetting RAM state, CSRF, and cache.
+- **Standalone Portable Distribution**:
+  - Standalone portable binaries for Linux (`.tar.gz`) and Windows (`.portable.exe`, `.zip`) alongside existing `.deb`, `.rpm`, `.msi`, and NSIS `.exe` installers.
+  - Size-gated release packaging under 10MB.
+
+### Fixed
+- **Android CI Workflow**:
+  - Fixed NDK 27.x setup and environment path resolution using runner-native Android SDK in GitHub Actions.
+
 ## [0.1.6] - 2026-10-29
 
 ### Added

@@ -182,3 +182,51 @@ fn init_script_injects_notification_and_tray_bridge() {
     assert!(script.contains("set_tray_busy"));
     assert!(script.contains("__AQVN_CONTAINER__"));
 }
+
+#[test]
+fn test_settings_window_helper_exists() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let app_mod = std::fs::read_to_string(manifest_dir.join("src/app/mod.rs")).unwrap();
+    assert!(
+        app_mod.contains("pub fn open_settings_window"),
+        "app/mod.rs must define open_settings_window"
+    );
+    assert!(
+        app_mod.contains("pub fn open_settings("),
+        "app/mod.rs must define open_settings IPC command"
+    );
+    assert!(
+        app_mod.contains("settings.html"),
+        "open_settings_window must load settings.html"
+    );
+    assert!(
+        app_mod.contains("AQVN Workspace — Settings"),
+        "open_settings_window must set window title"
+    );
+
+    let tray_rs = std::fs::read_to_string(manifest_dir.join("src/app/tray.rs")).unwrap();
+    assert!(
+        tray_rs.contains("Launcher Settings..."),
+        "tray.rs must contain Launcher Settings... menu item"
+    );
+    assert!(
+        tray_rs.contains("open_settings_window"),
+        "tray.rs must route settings menu item to open_settings_window"
+    );
+
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib_rs.contains("app::open_settings"),
+        "lib.rs must register app::open_settings command"
+    );
+
+    let container_js = std::fs::read_to_string(manifest_dir.join("../ui/container.js")).unwrap();
+    assert!(
+        container_js.contains("open_settings"),
+        "ui/container.js must invoke open_settings"
+    );
+    assert!(
+        container_js.contains("ctrlKey") || container_js.contains("metaKey"),
+        "ui/container.js must check ctrlKey or metaKey"
+    );
+}

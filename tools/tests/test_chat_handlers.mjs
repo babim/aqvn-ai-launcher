@@ -1510,6 +1510,9 @@ function createContainerHarness(options = {}) {
     document: documentMock,
     window: {
       location: { origin: 'http://localhost:3000' },
+      addEventListener: (type, fn) => {
+        (docListeners[type] = docListeners[type] || []).push(fn);
+      },
       __TAURI_INTERNALS__: {
         invoke: (command, args) => {
           calls.push({ command, args });
@@ -1526,6 +1529,7 @@ function createContainerHarness(options = {}) {
     context,
     calls,
     document: documentMock,
+    docListeners,
     elements,
     createElement: createElementMock,
     bridge: context.window.__AQVN_CONTAINER__
@@ -1647,6 +1651,28 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
       /CONTAINER_BRIDGE_SCRIPT|ui\/container\.js/,
       'src-tauri/src/proxy/server.rs must reference container bridge script'
     );
+  });
+
+  test('test_web_notification_bridge dispatches open_settings on Ctrl+, / Cmd+, keydown', () => {
+    const harness = createContainerHarness();
+    const { calls, docListeners } = harness;
+    let prevented = false;
+    const event = {
+      ctrlKey: true,
+      metaKey: false,
+      key: ',',
+      preventDefault: () => {
+        prevented = true;
+      }
+    };
+    const keydownListeners = docListeners['keydown'] || [];
+    assert.ok(keydownListeners.length > 0, 'keydown listener must be registered');
+    for (const fn of keydownListeners) {
+      fn(event);
+    }
+    assert.equal(prevented, true, 'Ctrl+, must call preventDefault()');
+    const openSettingsCalls = calls.filter((c) => c.command === 'open_settings');
+    assert.equal(openSettingsCalls.length, 1, 'open_settings IPC command must be dispatched');
   });
 });
 

@@ -132,7 +132,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app::set_tray_busy,
-            app::notify::notify_task_complete
+            app::notify::notify_task_complete,
+            app::open_settings
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AQVN Workspace");

@@ -260,6 +260,33 @@
     attach();
   }
 
+  function installKeyboardShortcuts() {
+    var target =
+      typeof window !== 'undefined' && typeof window.addEventListener === 'function'
+        ? window
+        : typeof document !== 'undefined' && typeof document.addEventListener === 'function'
+          ? document
+          : null;
+    if (!target) return;
+
+    target.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+        if (typeof e.preventDefault === 'function') {
+          e.preventDefault();
+        }
+        if (
+          typeof window !== 'undefined' &&
+          window.__TAURI_INTERNALS__ &&
+          typeof window.__TAURI_INTERNALS__.invoke === 'function'
+        ) {
+          window.__TAURI_INTERNALS__.invoke('open_settings');
+        } else {
+          invokeIpc('open_settings');
+        }
+      }
+    });
+  }
+
   var bridgeApi = {
     setTaskState: setTaskState,
     notifyTaskComplete: notifyTaskComplete,
@@ -285,4 +312,5 @@
 
   installWebSocketInterceptor();
   installDomObserver();
+  installKeyboardShortcuts();
 })();

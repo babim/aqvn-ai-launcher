@@ -43,8 +43,9 @@ pub fn tooltip(busy: bool) -> &'static str {
 /// Registers the tray icon with its menu. Must run on the main thread.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let toggle = MenuItemBuilder::with_id("toggle", "Show / Hide window").build(app)?;
+    let settings = MenuItemBuilder::with_id("settings", "Launcher Settings...").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit AQVN Workspace").build(app)?;
-    let menu = Menu::with_items(app, &[&toggle, &quit])?;
+    let menu = Menu::with_items(app, &[&toggle, &settings, &quit])?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(image(false))
@@ -53,6 +54,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "toggle" => super::toggle_main_window(app),
+            "settings" => super::open_settings_window(app),
             "quit" => {
                 // Process exit closes the proxy and the RFC/SSH listeners.
                 eprintln!("aqvn: quitting from tray menu");
@@ -62,7 +64,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
-    eprintln!("aqvn: tray registered (menu: Show / Hide window, Quit)");
+    eprintln!("aqvn: tray registered (menu: Show / Hide window, Launcher Settings..., Quit)");
     Ok(())
 }
 

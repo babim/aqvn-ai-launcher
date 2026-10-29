@@ -33,6 +33,39 @@ pub fn toggle_main_window(app: &AppHandle) {
     }
 }
 
+/// Opens or focuses the Launcher Settings window.
+pub fn open_settings_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("settings") {
+        if let Err(err) = window.show() {
+            eprintln!("aqvn: settings window show failed: {err}");
+        }
+        if let Err(err) = window.set_focus() {
+            eprintln!("aqvn: settings window focus failed: {err}");
+        }
+    } else {
+        match tauri::WebviewWindowBuilder::new(
+            app,
+            "settings",
+            tauri::WebviewUrl::App("settings.html".into()),
+        )
+        .title("AQVN Workspace — Settings")
+        .inner_size(800.0, 720.0)
+        .resizable(true)
+        .build()
+        {
+            Ok(_) => eprintln!("aqvn: settings window created"),
+            Err(err) => eprintln!("aqvn: failed to open settings window: {err}"),
+        }
+    }
+}
+
+/// Tauri IPC command to open the Launcher Settings window.
+#[tauri::command]
+pub fn open_settings(app: AppHandle) -> Result<(), String> {
+    open_settings_window(&app);
+    Ok(())
+}
+
 /// Busy/idle tray icon, driven by chat activity reported from the UI.
 #[tauri::command]
 pub fn set_tray_busy(app: AppHandle, busy: bool) -> Result<(), String> {

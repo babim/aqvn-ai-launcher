@@ -1,8 +1,8 @@
 //! Tests for configuration and store settings (VAL-SCAF-010/011/012).
 
 use aqvn_workspace_lib::config::{
-    AppConfig, ConfigWatcher, DEFAULT_ALLOWED_PATHS, DEFAULT_RFC_ENABLED, DEFAULT_RFC_PORT,
-    DEFAULT_SERVER_URL, DEFAULT_SSH_PORT, STORE_FILENAME,
+    AppConfig, ConfigWatcher, DEFAULT_ALLOWED_PATHS, DEFAULT_GLOBAL_HOTKEY, DEFAULT_RFC_ENABLED,
+    DEFAULT_RFC_PORT, DEFAULT_SERVER_URL, DEFAULT_SSH_PORT, STORE_FILENAME,
 };
 use tauri::Manager;
 
@@ -30,6 +30,8 @@ fn default_config_matches_contract_requirements() {
     assert!(conf.scope_exec);
     assert!(conf.scope_browser);
     assert!(conf.scope_desktop);
+    assert_eq!(conf.global_hotkey, DEFAULT_GLOBAL_HOTKEY);
+    assert_eq!(DEFAULT_GLOBAL_HOTKEY, "Alt+Space");
 }
 
 #[test]
@@ -68,6 +70,7 @@ fn config_json_serde_roundtrip() {
         scope_exec: true,
         scope_browser: false,
         scope_desktop: true,
+        global_hotkey: "Alt+Space".to_string(),
     };
 
     let json = serde_json::to_string(&conf).expect("serialize config");

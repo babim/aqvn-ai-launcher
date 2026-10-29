@@ -230,3 +230,47 @@ fn test_settings_window_helper_exists() {
         "ui/container.js must check ctrlKey or metaKey"
     );
 }
+
+#[test]
+fn test_help_window_helper_exists() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let app_mod = std::fs::read_to_string(manifest_dir.join("src/app/mod.rs")).unwrap();
+    assert!(
+        app_mod.contains("pub fn open_help_window"),
+        "app/mod.rs must define open_help_window"
+    );
+    assert!(
+        app_mod.contains("pub fn open_help("),
+        "app/mod.rs must define open_help IPC command"
+    );
+    assert!(
+        app_mod.contains("help.html"),
+        "open_help_window must load help.html"
+    );
+    assert!(
+        app_mod.contains("AQVN Workspace — Help & Shortcuts"),
+        "open_help_window must set window title"
+    );
+
+    let tray_rs = std::fs::read_to_string(manifest_dir.join("src/app/tray.rs")).unwrap();
+    assert!(
+        tray_rs.contains("Help & Shortcuts (F1)..."),
+        "tray.rs must contain Help & Shortcuts (F1)... menu item"
+    );
+    assert!(
+        tray_rs.contains("open_help_window"),
+        "tray.rs must route help menu item to open_help_window"
+    );
+
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib_rs.contains("app::open_help"),
+        "lib.rs must register app::open_help command"
+    );
+
+    let cap = std::fs::read_to_string(manifest_dir.join("capabilities/default.json")).unwrap();
+    assert!(
+        cap.contains("\"help\""),
+        "capabilities/default.json must include help window"
+    );
+}

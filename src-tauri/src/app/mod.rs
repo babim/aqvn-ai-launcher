@@ -66,6 +66,39 @@ pub fn open_settings(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Opens or focuses the Help & Shortcuts window.
+pub fn open_help_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("help") {
+        if let Err(err) = window.show() {
+            eprintln!("aqvn: help window show failed: {err}");
+        }
+        if let Err(err) = window.set_focus() {
+            eprintln!("aqvn: help window focus failed: {err}");
+        }
+    } else {
+        match tauri::WebviewWindowBuilder::new(
+            app,
+            "help",
+            tauri::WebviewUrl::App("help.html".into()),
+        )
+        .title("AQVN Workspace — Help & Shortcuts")
+        .inner_size(840.0, 700.0)
+        .resizable(true)
+        .build()
+        {
+            Ok(_) => eprintln!("aqvn: help window created"),
+            Err(err) => eprintln!("aqvn: failed to open help window: {err}"),
+        }
+    }
+}
+
+/// Tauri IPC command to open the Help & Shortcuts window.
+#[tauri::command]
+pub fn open_help(app: AppHandle) -> Result<(), String> {
+    open_help_window(&app);
+    Ok(())
+}
+
 /// Busy/idle tray icon, driven by chat activity reported from the UI.
 #[tauri::command]
 pub fn set_tray_busy(app: AppHandle, busy: bool) -> Result<(), String> {

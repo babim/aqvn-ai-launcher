@@ -83,10 +83,11 @@ pub fn run() {
             // The settings UI writes through the store plugin; poll the settings file so
             // those writes reach the watcher without an app restart.
             let poll_handle = app.handle().clone();
-            let poll_watcher = watcher;
+            let poll_watcher = watcher.clone();
+            let poll_initial = initial_config.clone();
             let store_file = config::store_path(&poll_handle).ok();
             tauri::async_runtime::spawn(async move {
-                let mut last = initial_config;
+                let mut last = poll_initial;
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     let next = store_file
@@ -125,7 +126,8 @@ pub fn run() {
             #[cfg(not(target_os = "android"))]
             {
                 app::tray::init(app.handle())?;
-                app::hotkey::register(app.handle());
+                app::hotkey::register(app.handle(), &initial_config.global_hotkey);
+                app::hotkey::watch(app.handle().clone(), watcher.clone());
             }
 
             Ok(())
@@ -133,7 +135,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app::set_tray_busy,
             app::notify::notify_task_complete,
-            app::open_settings
+            app::open_settings,
+            app::open_help
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AQVN Workspace");

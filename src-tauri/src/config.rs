@@ -24,7 +24,12 @@ pub const DEFAULT_SCOPE_FILES: bool = true;
 pub const DEFAULT_SCOPE_EXEC: bool = true;
 pub const DEFAULT_SCOPE_BROWSER: bool = true;
 pub const DEFAULT_SCOPE_DESKTOP: bool = true;
+pub const DEFAULT_GLOBAL_HOTKEY: &str = "Alt+Space";
 pub const STORE_FILENAME: &str = "settings.json";
+
+fn default_global_hotkey() -> String {
+    DEFAULT_GLOBAL_HOTKEY.to_string()
+}
 
 const fn default_true() -> bool {
     true
@@ -51,6 +56,8 @@ pub struct AppConfig {
     pub scope_browser: bool,
     #[serde(default = "default_true", alias = "scope_computer_use")]
     pub scope_desktop: bool,
+    #[serde(default = "default_global_hotkey")]
+    pub global_hotkey: String,
 }
 
 impl Default for AppConfig {
@@ -75,6 +82,7 @@ impl Default for AppConfig {
             scope_exec: DEFAULT_SCOPE_EXEC,
             scope_browser: DEFAULT_SCOPE_BROWSER,
             scope_desktop: DEFAULT_SCOPE_DESKTOP,
+            global_hotkey: DEFAULT_GLOBAL_HOTKEY.to_string(),
         }
     }
 }
@@ -169,6 +177,11 @@ impl AppConfig {
                 config.scope_desktop = b;
             }
         }
+        if let Some(val) = store.get("global_hotkey") {
+            if let Some(s) = val.as_str() {
+                config.global_hotkey = s.to_string();
+            }
+        }
 
         Ok(config)
     }
@@ -195,6 +208,7 @@ impl AppConfig {
         store.set("scope_exec", serde_json::json!(self.scope_exec));
         store.set("scope_browser", serde_json::json!(self.scope_browser));
         store.set("scope_desktop", serde_json::json!(self.scope_desktop));
+        store.set("global_hotkey", serde_json::json!(self.global_hotkey));
 
         store
             .save()

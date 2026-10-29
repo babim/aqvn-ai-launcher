@@ -5,36 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.6] - 2026-10-28
+## [0.1.6] - 2026-10-29
 
 ### Added
-- **Backend Proxy Passthrough**:
-  - Raw route forwarding for `/plugins/*`, `/extensions/*`, and `/public/*` on the loopback proxy without CSRF gating.
-  - Full preservation of upstream HTTP status, headers (Content-Type, Cache-Control), query strings, and binary body bytes.
-  - Transparent cookie jar session replay and upstream `Set-Cookie` synchronization on raw plugin and asset requests.
-- **Frontend 3-Column Layout & Splitters**:
-  - Three-column desktop layout featuring collapsible `#sidebar` and collapsible Intel Suite `#canvas-pane`.
-  - Keyboard shortcuts `Alt+S` (sidebar toggle) and `Alt+C` (canvas toggle) with persistent collapse state in `localStorage`.
-  - Dual draggable splitters (`#splitter-left` and `#splitter-right`) with minimum/maximum constraint clamping.
-- **Markdown Rendering & Code Highlighting**:
-  - Offline vendored `marked.min.js` and `highlight.min.js` assets in `ui/vendor/`.
-  - Structured Markdown rendering with preserved paragraph breaks and single newlines.
-  - Syntax highlighting across multiple programming languages with language badge labels and 1-click clipboard copy buttons.
-  - Cyan `$ EXECUTE` terminal styling with dark `#0d1117` background for command and tool outputs.
-  - Collapsible `<details class="thought-step">` containers for model reasoning inspection.
-- **Distraction-Free Focus Mode**:
-  - Quick toggle via `F11` and `Ctrl+Shift+F`.
-  - Full-width centered chat view (840px max width) hiding peripheral sidebars and canvas panes while auto-focusing the message composer.
-- **Desktop Notifications & Offline Outbox**:
-  - OS-native background task completion notifications dispatched when the window is hidden.
-  - 3-state connection LED pill indicator: 🟢 Online (WebSocket), 🟡 Polling (HTTP fallback), and 🔴 Offline.
-  - Durable offline outbox in `localStorage` with claim-before-send protection, size and byte quotas, and automatic flush upon WebSocket reconnect.
-- **UI Zoom & Hard Refresh**:
-  - Keyboard zoom shortcuts `Ctrl +`, `Ctrl -`, and `Ctrl 0` within [0.7, 2.0] zoom range with persisted settings in `localStorage`.
-  - Hard refresh shortcut (`Ctrl+Shift+R` / `F5`) and topbar button to reset RAM state, refresh CSRF, reconnect sockets, and reload the canvas iframe.
-- **Release Packaging & Whitelabel**:
-  - 100% whitelabel compliance across code, UI, configuration, and documentation.
-  - Version bump to 0.1.6 across Cargo, Tauri configuration, and changelog.
+- **Accelerated Full-Web Container**:
+  - Directly embeds the 100% full-featured upstream Web UI (Sidebar, Chat, DAG Work Map, Intel Suite Canvas, Plugins, Settings, Prompts) inside the native Tauri container.
+  - Local asset pre-caching layer (`src-tauri/src/proxy/cache.rs`) caching fonts, CSS, and JS libraries to SSD/RAM, achieving sub-100ms FCP.
+  - Injected container bridge script (`ui/container.js`) detecting task completions and dispatching native desktop notifications when the app is hidden or minimized.
+  - Native navigation policy keeping container and frame routes in-window while external links open in system default browser.
+- **Outbound Host Gateway Hub (`_a0_connector`)**:
+  - Zero-config outbound WebSocket client connecting directly to workspace server over `/ws`, traversing NAT and firewalls without open inbound ports.
+  - Protocol handshake `connector_hello` supporting 4 core capabilities:
+    * Sandboxed remote files (`connector_file_op`) with Transfer Protocol v1 (SHA-256 chunking).
+    * Remote PTY terminal execution (`connector_exec_op`) via `portable-pty`.
+    * Host browser automation (`connector_browser_op`) via Chrome DevTools Protocol (CDP port 9222).
+    * Desktop computer use (`connector_computer_use_op`) with screen capture and native mouse/keyboard injection.
+  - Granular security scopes (files, execution, browser, desktop) and master toggle in Settings with hot-reload supervision.
+- **Persistent Session Cookie Jar**:
+  - Disk serialization for `CookieJar` under `$XDG_CONFIG_HOME/net.aqvn.workspace/cookies/`.
+  - Preserves 30-day "Remember me" session cookies across app restarts without re-authentication.
+- **Stable Loopback Proxy Port (55088)**:
+  - Binds deterministic port range `55088..=55099` on loopback, ensuring a permanent origin and preserving browser `localStorage` (themes, dark mode, server state) across app restarts.
+- **Official Brand Tray Icon**:
+  - Uses the official 32x32 cybernetic brand icon for the system tray glyph with an active amber status badge dot during processing.
+- **Background Execution (Close-to-Tray)**:
+  - Minimizes to system tray upon clicking window close (`X`) with a user-configurable toggle in Settings.
+- **Help Guide & Shortcut Configuration**:
+  - Dedicated Help & Shortcuts guide (`ui/help.html`) accessible via `F1`, System Tray menu (`Help & Shortcuts (F1)...`), or Settings.
+  - Customizable Global Summon hotkey with hot-reload in Settings.
+  - Native window close IPC command (`close_current_window`) and Escape key support for auxiliary windows.
+  - Bilingual interface (Tiếng Việt / English) with dynamic live switching in Settings and Help.
+- **Backend Proxy Passthrough & Form Login**:
+  - Raw route forwarding for `/`, `/login.css`, `/vendor/*`, `/css/*`, `/js/*`, `/plugins/*`, `/extensions/*`, `/public/*`, `/ui/*`, `/sw.js`, and fallback routes.
+  - Support for both JSON and `application/x-www-form-urlencoded` POST login requests with 303 redirect handling.
+- **Frontend 3-Column Layout & Offline Outbox**:
+  - Dual draggable splitters, Markdown rendering with syntax highlighting, 1-click code copying, and terminal `#0d1117` styling.
+  - Durable offline outbox in `localStorage` with claim-before-send protection and automatic drain on reconnect.
+- **CI & Build Enhancements**:
+  - Fixed Android CI workflow NDK 27.x setup using runner-native SDK.
+  - Maintained 100% whitelabel compliance across code, UI, configuration, and documentation.
 
 ## [0.1.5] - 2026-10-28
 

@@ -7,6 +7,8 @@
 
 use crate::proxy::jar::CookieJar;
 use axum::http::{header, Method};
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::Mutex;
 
@@ -14,6 +16,63 @@ const MAX_REDIRECTS: usize = 8;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CSRF_PATH: &str = "/api/csrf_token";
 const LOGIN_PATH: &str = "/login";
+
+/// Resolves the default cookie directory on the host.
+pub fn cookie_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("AQVN_CONFIG_DIR") {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.trim().is_empty() {
+            return PathBuf::from(xdg)
+                .join("net.aqvn.workspace")
+                .join("cookies");
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.trim().is_empty() {
+            return PathBuf::from(home)
+                .join(".config")
+                .join("net.aqvn.workspace")
+                .join("cookies");
+        }
+    }
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        if !profile.trim().is_empty() {
+            return PathBuf::from(profile)
+                .join(".config")
+                .join("net.aqvn.workspace")
+                .join("cookies");
+        }
+    }
+    std::env::temp_dir()
+        .join("net.aqvn.workspace")
+        .join("cookies")
+}
+
+/// Resolves the cookie storage file path for a target origin.
+pub fn cookie_file_path(target_origin: &str) -> PathBuf {
+    let origin = if let Ok(parsed) = url::Url::parse(target_origin) {
+        if let Some(host) = parsed.host_str() {
+            let authority = match parsed.port() {
+                Some(port) => format!("{host}:{port}"),
+                None => host.to_string(),
+            };
+            format!("{}://{authority}", parsed.scheme())
+        } else {
+            target_origin.to_string()
+        }
+    } else {
+        target_origin.to_string()
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(origin.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    let filename = format!("cookies_{}.json", &hash[..16]);
+    cookie_dir().join(filename)
+}
 
 /// Parsed target server: scheme, authority, and optional base path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +193,7 @@ pub struct Upstream {
     client: reqwest::Client,
     target: Target,
     jar: Mutex<CookieJar>,
+    cookie_path: Option<PathBuf>,
 }
 
 impl Upstream {
@@ -146,11 +206,33 @@ impl Upstream {
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|err| format!("failed to build upstream HTTP client: {err}"))?;
+        let cookie_path = cookie_file_path(target.origin());
+        let jar = if cookie_path.exists() {
+            CookieJar::load_from_file(&cookie_path).unwrap_or_default()
+        } else {
+            CookieJar::new()
+        };
         Ok(Self {
             client,
             target,
-            jar: Mutex::new(CookieJar::new()),
+            jar: Mutex::new(jar),
+            cookie_path: Some(cookie_path),
         })
+    }
+
+    pub fn cookie_path(&self) -> Option<&Path> {
+        self.cookie_path.as_deref()
+    }
+
+    fn persist_jar(&self, jar: &CookieJar) {
+        if let Some(path) = &self.cookie_path {
+            if let Err(err) = jar.save_to_file(path) {
+                eprintln!(
+                    "Bridge proxy: failed to persist cookies to {}: {err}",
+                    path.display()
+                );
+            }
+        }
     }
 
     pub fn target(&self) -> &Target {
@@ -219,6 +301,9 @@ impl Upstream {
                     || status == axum::http::StatusCode::UNAUTHORIZED
                     || status == axum::http::StatusCode::FORBIDDEN)
             {
+                if !names.is_empty() {
+                    self.persist_jar(jar);
+                }
                 println!(
                     "Bridge proxy: CSRF bootstrap deferred (HTTP {}); login required",
                     status.as_u16()
@@ -244,6 +329,7 @@ impl Upstream {
 
         let previous = jar.runtime_id().map(str::to_string);
         jar.apply_bootstrap(runtime_id, token);
+        self.persist_jar(jar);
         match previous {
             Some(old) if old != runtime_id => println!(
                 "Bridge proxy: runtime_id rotated {old} -> {runtime_id}; cookie jar re-bootstrapped"
@@ -289,6 +375,7 @@ impl Upstream {
 
         let mut jar = self.jar.lock().await;
         self.bootstrap_locked(&mut jar, true).await?;
+        self.persist_jar(&jar);
         Ok(())
     }
 
@@ -474,7 +561,10 @@ impl Upstream {
             let status = response.status().as_u16();
             let headers = response.headers().clone();
             let set_cookies = set_cookie_values(&headers);
-            jar.store_all(set_cookies.iter().map(String::as_str));
+            let names = jar.store_all(set_cookies.iter().map(String::as_str));
+            if !names.is_empty() {
+                self.persist_jar(jar);
+            }
 
             if matches!(status, 301 | 302 | 303 | 307 | 308) {
                 if let Some(location) = headers
@@ -627,5 +717,15 @@ mod tests {
             form_encode(&[("username", "admin"), ("password", "p@ss word&x")]),
             "username=admin&password=p%40ss+word%26x"
         );
+    }
+
+    #[test]
+    fn resolves_cookie_file_path() {
+        let p1 = cookie_file_path("http://127.0.0.1:8080");
+        let p2 = cookie_file_path("http://127.0.0.1:8080/some/path");
+        let p3 = cookie_file_path("http://127.0.0.1:9090");
+        assert_eq!(p1, p2);
+        assert_ne!(p1, p3);
+        assert!(p1.to_string_lossy().ends_with(".json"));
     }
 }

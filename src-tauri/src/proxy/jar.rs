@@ -10,16 +10,21 @@
 //! generation are dead, so a new bootstrap drops them before storing the
 //! replacement pair.
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 const SESSION_PREFIX: &str = "session_";
 const CSRF_PREFIX: &str = "csrf_token_";
 
 /// Cookie jar scoped to one upstream chat server.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CookieJar {
+    #[serde(default)]
     cookies: BTreeMap<String, String>,
+    #[serde(default)]
     runtime_id: Option<String>,
+    #[serde(default)]
     csrf_value: Option<String>,
 }
 
@@ -132,6 +137,35 @@ impl CookieJar {
         self.runtime_id = None;
         self.csrf_value = None;
     }
+
+    /// Loads a persisted cookie jar from disk JSON.
+    pub fn load_from_file(path: &Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    /// Saves the cookie jar to disk JSON. Parent directories are created if missing.
+    pub fn save_to_file(&self, path: &Path) -> Result<(), std::io::Error> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let temp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+        if std::fs::write(&temp_path, &json)
+            .and_then(|_| std::fs::rename(&temp_path, path))
+            .is_err()
+        {
+            std::fs::write(path, &json)?;
+            let _ = std::fs::remove_file(&temp_path);
+        }
+        Ok(())
+    }
+
+    /// Removes the persisted cookie jar file from disk if it exists.
+    pub fn remove_file(path: &Path) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 fn runtime_scoped_id(name: &str) -> Option<&str> {
@@ -229,5 +263,60 @@ mod tests {
         assert_eq!(jar.runtime_id(), None);
         assert_eq!(jar.csrf_token(), None);
         assert!(!jar.is_bootstrapped());
+    }
+
+    #[test]
+    fn save_and_load_from_file() {
+        let mut jar = CookieJar::new();
+        jar.store("session_abcd1234=opaque; Path=/");
+        jar.apply_bootstrap("abcd1234", "token-1");
+
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aqvn-test-jar-{}-{}",
+            std::process::id(),
+            unique_id
+        ));
+        let file_path = temp_dir.join("cookies.json");
+
+        assert!(jar.save_to_file(&file_path).is_ok());
+        assert!(file_path.exists());
+
+        let loaded = CookieJar::load_from_file(&file_path).expect("load saved jar");
+        assert_eq!(loaded.get("session_abcd1234"), Some("opaque"));
+        assert_eq!(loaded.runtime_id(), Some("abcd1234"));
+        assert_eq!(loaded.csrf_token(), Some("token-1"));
+        assert_eq!(loaded.cookie_header(), jar.cookie_header());
+        assert!(loaded.is_bootstrapped());
+
+        CookieJar::remove_file(&file_path);
+        assert!(!file_path.exists());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn load_from_nonexistent_or_invalid_file() {
+        let nonexistent = Path::new("/tmp/nonexistent_aqvn_cookies_path_12345.json");
+        assert!(CookieJar::load_from_file(nonexistent).is_none());
+
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aqvn-test-jar-invalid-{}-{}",
+            std::process::id(),
+            unique_id
+        ));
+        let file_path = temp_dir.join("invalid.json");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let _ = std::fs::write(&file_path, "not-valid-json-content");
+        assert!(CookieJar::load_from_file(&file_path).is_none());
+
+        CookieJar::remove_file(&file_path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

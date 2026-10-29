@@ -1347,3 +1347,40 @@ async fn test_forward_raw_webui_and_fallback_routes() {
         "/components/nav.js HIT must not call upstream"
     );
 }
+
+#[tokio::test]
+async fn session_cookie_persists_across_upstream_instances() {
+    let (stub, stub_guard) = start_stub().await;
+    let cookie_file = upstream::cookie_file_path(&stub_guard.base);
+    let _ = std::fs::remove_file(&cookie_file);
+
+    let proxy1 = start_proxy(&stub_guard.base).await;
+    let body = login(&proxy1.base).await;
+    assert_eq!(body["ok"], true);
+
+    assert!(cookie_file.exists(), "cookie file must be written to disk");
+
+    drop(proxy1);
+
+    let proxy2 = start_proxy(&stub_guard.base).await;
+
+    *stub.last_cookie.lock().await = None;
+
+    let response = client()
+        .get(format!("{}/ui/index", proxy2.base))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("proxy2 request");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let received_cookie = stub.last_cookie.lock().await.clone().unwrap_or_default();
+    let (runtime_id, _) = stub.credentials().await;
+    let expected_session = format!("session_{runtime_id}=");
+    assert!(
+        received_cookie.contains(&expected_session),
+        "proxy 2 must send persisted session cookie; got: {received_cookie}"
+    );
+
+    let _ = std::fs::remove_file(&cookie_file);
+}

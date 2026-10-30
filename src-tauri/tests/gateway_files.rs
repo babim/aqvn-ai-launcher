@@ -412,3 +412,88 @@ async fn test_gateway_websocket_roundtrip() {
     set_test_sandbox(None);
     let _ = std::fs::remove_dir_all(&sandbox_dir);
 }
+
+#[tokio::test]
+async fn test_default_sandbox_workspace_confinement() {
+    // Ensure default sandbox is active
+    set_test_sandbox(None);
+    let sandbox = files::current_sandbox();
+
+    assert!(
+        sandbox.roots().iter().any(|r| r.ends_with("Workspace")),
+        "default sandbox root must resolve to ~/Workspace, got: {:?}",
+        sandbox.roots()
+    );
+
+    // 1. Strict rejection of traversal outside ~/Workspace
+    let traversal_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-default-trav",
+        "action": "read",
+        "path": "../../etc/shadow"
+    });
+    let reply_str = files::handle_file_op(&traversal_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], false);
+    assert_eq!(reply["status"], "error");
+    assert!(
+        reply["error"]
+            .as_str()
+            .unwrap()
+            .contains("outside the allowed sandbox"),
+        "path traversal must be rejected by default sandbox"
+    );
+
+    // 2. Strict rejection of absolute paths outside ~/Workspace
+    let abs_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-default-abs",
+        "action": "write",
+        "path": "/etc/malicious_workspace_test.txt",
+        "content": "deny"
+    });
+    let reply_str = files::handle_file_op(&abs_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], false);
+    assert_eq!(reply["status"], "error");
+    assert!(
+        reply["error"]
+            .as_str()
+            .unwrap()
+            .contains("outside the allowed sandbox"),
+        "absolute paths outside sandbox must be rejected"
+    );
+
+    // 3. Normal file write and read inside ~/Workspace is jailed and cleanable
+    let test_filename = format!(".aqvn_test_sandbox_{}.txt", std::process::id());
+    let write_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-default-write",
+        "action": "write",
+        "path": test_filename,
+        "content": "sandboxed inside Workspace\n"
+    });
+    let reply_str = files::handle_file_op(&write_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], true);
+
+    let read_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-default-read",
+        "action": "read",
+        "path": test_filename
+    });
+    let reply_str = files::handle_file_op(&read_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["content"], "sandboxed inside Workspace\n");
+
+    // Clean up test file
+    let remove_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-default-remove",
+        "action": "files_remove",
+        "path": test_filename
+    });
+    let _ = files::handle_file_op(&remove_op).await;
+}

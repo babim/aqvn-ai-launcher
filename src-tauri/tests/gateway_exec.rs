@@ -103,6 +103,28 @@ async fn test_gateway_pty_execution() {
     assert_ne!(reply4["exit_code"], 0);
     assert_eq!(reply4["done"], true);
 
+    // 4b. Explicit non-zero exit code propagation (e.g. exit 42 and stderr capture)
+    let op4b = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-exec-4b",
+        "runtime": "terminal",
+        "command": "sh -c 'echo \"PTY Stderr Test\" >&2; exit 42'",
+        "session_id": session_id,
+    });
+    let reply4b_str = exec::handle_exec_op(&op4b).await;
+    let reply4b: Value = serde_json::from_str(&reply4b_str).expect("parse reply4b");
+    assert_eq!(reply4b["success"], false);
+    assert_eq!(reply4b["exit_code"], 42);
+    assert_eq!(reply4b["done"], true);
+    assert!(
+        reply4b["output"]
+            .as_str()
+            .unwrap()
+            .contains("PTY Stderr Test"),
+        "PTY must capture output written to stderr, got: {:?}",
+        reply4b["output"]
+    );
+
     // 5. Unsupported runtime rejection
     let op5 = json!({
         "type": MSG_TYPE_EXEC_OP,

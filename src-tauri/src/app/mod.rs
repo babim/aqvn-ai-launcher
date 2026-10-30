@@ -1,12 +1,15 @@
 //! OS integration: tray icon, global hotkey, notifications, and
 //! external-link policy. Tray and hotkey are compiled out of mobile builds.
 
+pub mod context_menu;
 #[cfg(not(target_os = "android"))]
 pub mod hotkey;
 pub mod links;
 pub mod notify;
 #[cfg(not(target_os = "android"))]
 pub mod tray;
+
+pub use context_menu::show_context_menu;
 
 use tauri::{AppHandle, Manager};
 

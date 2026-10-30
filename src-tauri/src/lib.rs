@@ -23,6 +23,11 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     {
         builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+        builder = builder.on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            let window = app.get_webview_window("main");
+            let _ = app::context_menu::handle_menu_id(app, window.as_ref(), id);
+        });
     }
 
     #[cfg(not(target_os = "android"))]
@@ -157,7 +162,8 @@ pub fn run() {
             app::notify::notify_task_complete,
             app::open_settings,
             app::open_help,
-            app::close_current_window
+            app::close_current_window,
+            app::context_menu::show_context_menu
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AQVN Workspace");

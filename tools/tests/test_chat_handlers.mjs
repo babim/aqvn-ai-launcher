@@ -1778,6 +1778,26 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     // Ctrl+Shift+R
     assert.equal(fireKey('R', true, true), true);
   });
+
+  test('test_web_notification_bridge dispatches show_context_menu on contextmenu when no text selected', () => {
+    const harness = createContainerHarness();
+    const { calls, docListeners } = harness;
+    const contextMenuListeners = docListeners['contextmenu'] || [];
+    assert.ok(contextMenuListeners.length > 0, 'contextmenu listener must be registered');
+
+    let prevented = false;
+    const event = {
+      preventDefault: () => {
+        prevented = true;
+      }
+    };
+    for (const fn of contextMenuListeners) {
+      fn(event);
+    }
+    assert.equal(prevented, true, 'contextmenu without selection must call preventDefault()');
+    const ctxCalls = calls.filter((c) => c.command === 'show_context_menu');
+    assert.equal(ctxCalls.length, 1, 'show_context_menu IPC command must be dispatched');
+  });
 });
 
 describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master toggle', () => {

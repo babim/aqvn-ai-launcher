@@ -493,6 +493,47 @@
     }
   }
 
+  function isTextSelected() {
+    if (typeof window === 'undefined') return false;
+    try {
+      var selection = window.getSelection ? window.getSelection() : null;
+      if (selection && selection.toString && selection.toString().trim().length > 0) {
+        return true;
+      }
+      var activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        if (
+          typeof activeEl.selectionStart === 'number' &&
+          typeof activeEl.selectionEnd === 'number' &&
+          activeEl.selectionStart !== activeEl.selectionEnd
+        ) {
+          return true;
+        }
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function installContextMenu(dom) {
+    function contextMenuHandler(e) {
+      if (isTextSelected()) {
+        return;
+      }
+      if (e && typeof e.preventDefault === 'function') {
+        e.preventDefault();
+      }
+      invokeIpc('show_context_menu');
+    }
+
+    if (dom && typeof dom.addEventListener === 'function') {
+      dom.addEventListener('contextmenu', contextMenuHandler, true);
+    } else {
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('contextmenu', contextMenuHandler, true);
+      }
+    }
+  }
+
   var bridgeApi = {
     setTaskState: setTaskState,
     notifyTaskComplete: notifyTaskComplete,
@@ -500,6 +541,8 @@
     handleWebSocketMessage: handleWebSocketMessage,
     checkDomState: checkDomState,
     installKeyboardShortcuts: installKeyboardShortcuts,
+    installContextMenu: installContextMenu,
+    isTextSelected: isTextSelected,
     toggleFocusMode: toggleFocusMode,
     installFocusModeStyles: installFocusModeStyles,
     applyZoom: applyZoom,
@@ -528,6 +571,7 @@
   installWebSocketInterceptor();
   installDomObserver();
   installKeyboardShortcuts();
+  installContextMenu();
   installFocusModeStyles();
   restoreZoom();
 })();

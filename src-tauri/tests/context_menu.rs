@@ -363,3 +363,14 @@ fn test_end_to_end_zoom_scale_synchronization() {
     assert_eq!(get_zoom_percent(), 100);
     assert_eq!(format_zoom_label(get_zoom_percent()), "Zoom (100%)");
 }
+
+#[test]
+fn test_native_zoom_hotkeys_configured() {
+    // VAL-HOTKEY-001: Native zoom hotkeys configuration
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib_rs.contains("zoom_hotkeys_enabled(true)"),
+        "src-tauri/src/lib.rs must invoke .zoom_hotkeys_enabled(true) on WebviewWindowBuilder"
+    );
+}

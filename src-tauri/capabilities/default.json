@@ -3,9 +3,16 @@
   "identifier": "default",
   "description": "Core permissions for the AQVN Workspace main window",
   "windows": ["main", "settings", "help"],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  },
   "permissions": [
     "core:default",
     "core:window:allow-close",
+    "core:webview:allow-set-webview-zoom",
     "shell:allow-open",
     "notification:allow-notify",
     "notification:allow-request-permission",

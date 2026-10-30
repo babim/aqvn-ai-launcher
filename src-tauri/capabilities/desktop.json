@@ -4,6 +4,12 @@
   "description": "Desktop-only permissions for the AQVN Workspace main window",
   "windows": ["main"],
   "platforms": ["linux", "windows", "macOS"],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  },
   "permissions": [
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",

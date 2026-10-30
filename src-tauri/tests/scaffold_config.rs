@@ -63,6 +63,24 @@ fn capabilities_are_explicit() {
 }
 
 #[test]
+fn capabilities_allow_remote_loopback_origins() {
+    for cap_file in ["capabilities/default.json", "capabilities/desktop.json"] {
+        let cap = read_json(&manifest_dir().join(cap_file));
+        let urls = cap["remote"]["urls"]
+            .as_array()
+            .unwrap_or_else(|| panic!("missing remote.urls in {cap_file}"));
+        assert!(
+            urls.iter().any(|u| u == "http://127.0.0.1:*"),
+            "{cap_file} missing http://127.0.0.1:* pattern in remote.urls"
+        );
+        assert!(
+            urls.iter().any(|u| u == "http://localhost:*"),
+            "{cap_file} missing http://localhost:* pattern in remote.urls"
+        );
+    }
+}
+
+#[test]
 fn release_profile_is_size_optimized() {
     let cargo = std::fs::read_to_string(manifest_dir().join("Cargo.toml")).expect("Cargo.toml");
     for needle in [

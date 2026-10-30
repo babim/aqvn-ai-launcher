@@ -17,9 +17,18 @@ pub fn get_zoom_scale() -> f64 {
 
 pub fn set_zoom_scale(scale: f64) -> f64 {
     let clamped = scale.clamp(ZOOM_MIN, ZOOM_MAX);
-    let percent = (clamped * 100.0).round() as u32;
+    let stepped = (clamped * 10.0).round() / 10.0;
+    let percent = (stepped * 100.0).round() as u32;
     CURRENT_ZOOM_PERCENT.store(percent, Ordering::SeqCst);
     (percent as f64) / 100.0
+}
+
+pub fn get_zoom_percent() -> u32 {
+    CURRENT_ZOOM_PERCENT.load(Ordering::SeqCst)
+}
+
+pub fn format_zoom_label(percent: u32) -> String {
+    format!("{LABEL_ZOOM_LEVEL} ({percent}%)")
 }
 
 pub fn zoom_in_scale() -> f64 {
@@ -37,6 +46,7 @@ pub fn reset_zoom_scale() -> f64 {
 }
 
 pub const ID_SETTINGS: &str = "settings";
+pub const ID_ZOOM_LEVEL: &str = "zoom_level";
 pub const ID_ZOOM_IN: &str = "zoom_in";
 pub const ID_ZOOM_OUT: &str = "zoom_out";
 pub const ID_RESET_ZOOM: &str = "reset_zoom";
@@ -46,6 +56,7 @@ pub const ID_HELP: &str = "help";
 pub const ID_ABOUT: &str = "about";
 
 pub const LABEL_SETTINGS: &str = "Settings";
+pub const LABEL_ZOOM_LEVEL: &str = "Zoom";
 pub const LABEL_ZOOM_IN: &str = "Zoom In";
 pub const LABEL_ZOOM_OUT: &str = "Zoom Out";
 pub const LABEL_RESET_ZOOM: &str = "Reset Zoom";
@@ -60,6 +71,10 @@ pub fn build_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
+    let zoom_level_label = format_zoom_label(get_zoom_percent());
+    let zoom_level = MenuItemBuilder::with_id(ID_ZOOM_LEVEL, zoom_level_label)
+        .enabled(false)
+        .build(app)?;
     let zoom_in = MenuItemBuilder::with_id(ID_ZOOM_IN, LABEL_ZOOM_IN)
         .accelerator("CmdOrCtrl+=")
         .build(app)?;
@@ -88,6 +103,7 @@ pub fn build_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &settings,
             &sep1,
+            &zoom_level,
             &zoom_in,
             &zoom_out,
             &reset_zoom,

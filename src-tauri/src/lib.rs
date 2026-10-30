@@ -23,6 +23,7 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     {
         builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+        builder = builder.menu(app::context_menu::build_context_menu);
         builder = builder.on_menu_event(|app, event| {
             let id = event.id().as_ref();
             let window = app.get_webview_window("main");

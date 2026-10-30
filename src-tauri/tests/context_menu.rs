@@ -374,3 +374,78 @@ fn test_native_zoom_hotkeys_configured() {
         "src-tauri/src/lib.rs must invoke .zoom_hotkeys_enabled(true) on WebviewWindowBuilder"
     );
 }
+
+#[test]
+fn test_native_window_accelerators_and_menu_event_dispatch() {
+    // VAL-HOTKEY-002: Native window accelerator and menu action dispatching
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    let ctx_rs = std::fs::read_to_string(manifest_dir.join("src/app/context_menu.rs")).unwrap();
+
+    // Verify on_menu_event is registered in lib.rs
+    assert!(
+        lib_rs.contains("on_menu_event"),
+        "src-tauri/src/lib.rs must register on_menu_event handler"
+    );
+    assert!(
+        lib_rs.contains("handle_menu_id"),
+        "on_menu_event in src-tauri/src/lib.rs must route events to handle_menu_id"
+    );
+    assert!(
+        lib_rs.contains(".menu(|app|") || lib_rs.contains("builder.menu("),
+        "src-tauri/src/lib.rs must wire window/app menu for native accelerators"
+    );
+
+    // Verify accelerator shortcuts for F1, F5, CmdOrCtrl+,, and CmdOrCtrl+Shift+R
+    assert!(
+        ctx_rs.contains("accelerator(\"F1\")"),
+        "context_menu.rs must bind accelerator F1 to Help"
+    );
+    assert!(
+        ctx_rs.contains("accelerator(\"F5\")"),
+        "context_menu.rs must bind accelerator F5 to Reload"
+    );
+    assert!(
+        ctx_rs.contains("accelerator(\"CmdOrCtrl+,\")"),
+        "context_menu.rs must bind accelerator CmdOrCtrl+, to Settings"
+    );
+    assert!(
+        ctx_rs.contains("accelerator(\"CmdOrCtrl+Shift+R\")"),
+        "context_menu.rs must bind accelerator CmdOrCtrl+Shift+R to Hard Refresh"
+    );
+
+    // Verify mapping of accelerator IDs to ContextMenuAction
+    assert_eq!(
+        ContextMenuAction::from_id("help"),
+        Some(ContextMenuAction::Help)
+    );
+    assert_eq!(
+        ContextMenuAction::from_id("reload"),
+        Some(ContextMenuAction::Reload)
+    );
+    assert_eq!(
+        ContextMenuAction::from_id("settings"),
+        Some(ContextMenuAction::Settings)
+    );
+    assert_eq!(
+        ContextMenuAction::from_id("hard_refresh"),
+        Some(ContextMenuAction::HardRefresh)
+    );
+    assert_eq!(
+        ContextMenuAction::from_id("about"),
+        Some(ContextMenuAction::About)
+    );
+    assert_eq!(
+        ContextMenuAction::from_id("zoom_in"),
+        Some(ContextMenuAction::ZoomIn)
+    );
+    assert_eq!(
+        ContextMenuAction::from_id("zoom_out"),
+        Some(ContextMenuAction::ZoomOut)
+    );
+    assert_eq!(
+        ContextMenuAction::from_id("reset_zoom"),
+        Some(ContextMenuAction::ResetZoom)
+    );
+    assert_eq!(ContextMenuAction::from_id("nonexistent"), None);
+}

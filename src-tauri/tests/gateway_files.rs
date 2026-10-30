@@ -12,7 +12,7 @@ use aqvn_workspace_lib::connector::protocol::{
     MSG_TYPE_FILE_OP, MSG_TYPE_FILE_OP_RESULT, MSG_TYPE_HELLO, MSG_TYPE_HELLO_ACK,
     TRANSFER_PROTOCOL_V1,
 };
-use aqvn_workspace_lib::rfc::sandbox::Sandbox;
+use aqvn_workspace_lib::rfc::sandbox::{Sandbox, DEFAULT_SANDBOX};
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::routing::get;
 use axum::Router;
@@ -415,9 +415,7 @@ async fn test_gateway_websocket_roundtrip() {
 
 #[tokio::test]
 async fn test_default_sandbox_workspace_confinement() {
-    // Ensure default sandbox is active
-    set_test_sandbox(None);
-    let sandbox = files::current_sandbox();
+    let sandbox = Sandbox::from_allowed_paths(&[DEFAULT_SANDBOX.to_string()]);
 
     assert!(
         sandbox.roots().iter().any(|r| r.ends_with("Workspace")),
@@ -432,7 +430,7 @@ async fn test_default_sandbox_workspace_confinement() {
         "action": "read",
         "path": "../../etc/shadow"
     });
-    let reply_str = files::handle_file_op(&traversal_op).await;
+    let reply_str = files::handle_file_op_with_sandbox(&traversal_op, &sandbox).await;
     let reply: Value = serde_json::from_str(&reply_str).unwrap();
     assert_eq!(reply["success"], false);
     assert_eq!(reply["status"], "error");
@@ -452,7 +450,7 @@ async fn test_default_sandbox_workspace_confinement() {
         "path": "/etc/malicious_workspace_test.txt",
         "content": "deny"
     });
-    let reply_str = files::handle_file_op(&abs_op).await;
+    let reply_str = files::handle_file_op_with_sandbox(&abs_op, &sandbox).await;
     let reply: Value = serde_json::from_str(&reply_str).unwrap();
     assert_eq!(reply["success"], false);
     assert_eq!(reply["status"], "error");
@@ -473,7 +471,7 @@ async fn test_default_sandbox_workspace_confinement() {
         "path": test_filename,
         "content": "sandboxed inside Workspace\n"
     });
-    let reply_str = files::handle_file_op(&write_op).await;
+    let reply_str = files::handle_file_op_with_sandbox(&write_op, &sandbox).await;
     let reply: Value = serde_json::from_str(&reply_str).unwrap();
     assert_eq!(reply["success"], true);
 
@@ -483,7 +481,7 @@ async fn test_default_sandbox_workspace_confinement() {
         "action": "read",
         "path": test_filename
     });
-    let reply_str = files::handle_file_op(&read_op).await;
+    let reply_str = files::handle_file_op_with_sandbox(&read_op, &sandbox).await;
     let reply: Value = serde_json::from_str(&reply_str).unwrap();
     assert_eq!(reply["success"], true);
     assert_eq!(reply["content"], "sandboxed inside Workspace\n");
@@ -495,5 +493,5 @@ async fn test_default_sandbox_workspace_confinement() {
         "action": "files_remove",
         "path": test_filename
     });
-    let _ = files::handle_file_op(&remove_op).await;
+    let _ = files::handle_file_op_with_sandbox(&remove_op, &sandbox).await;
 }

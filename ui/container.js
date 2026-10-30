@@ -11,22 +11,38 @@
   'use strict';
 
   function invokeIpc(command, args) {
-    if (
-      typeof window !== 'undefined' &&
-      window.__TAURI_INTERNALS__ &&
-      typeof window.__TAURI_INTERNALS__.invoke === 'function'
-    ) {
-      return window.__TAURI_INTERNALS__.invoke(command, args || {}).catch(function () {
-        /* Ignore IPC errors in fallback or restricted environments */
-      });
-    }
-    if (
-      typeof window !== 'undefined' &&
-      window.__TAURI__ &&
-      window.__TAURI__.core &&
-      typeof window.__TAURI__.core.invoke === 'function'
-    ) {
-      return window.__TAURI__.core.invoke(command, args || {}).catch(function () {});
+    try {
+      if (
+        typeof window !== 'undefined' &&
+        window.__TAURI_INTERNALS__ &&
+        typeof window.__TAURI_INTERNALS__.invoke === 'function'
+      ) {
+        return Promise.resolve(window.__TAURI_INTERNALS__.invoke(command, args || {})).catch(
+          function (err) {
+            if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+              console.warn('[AQVN Container] IPC error (' + command + '):', err);
+            }
+          }
+        );
+      }
+      if (
+        typeof window !== 'undefined' &&
+        window.__TAURI__ &&
+        window.__TAURI__.core &&
+        typeof window.__TAURI__.core.invoke === 'function'
+      ) {
+        return Promise.resolve(window.__TAURI__.core.invoke(command, args || {})).catch(
+          function (err) {
+            if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+              console.warn('[AQVN Container] IPC error (' + command + '):', err);
+            }
+          }
+        );
+      }
+    } catch (err) {
+      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn('[AQVN Container] IPC invocation failed (' + command + '):', err);
+      }
     }
     return Promise.resolve();
   }
@@ -400,98 +416,239 @@
     }
   }
 
-  function installKeyboardShortcuts(dom) {
-    function keyHandler(e) {
-      if (!e) return;
-      var rawKey = String(e.key || '');
-      var key = rawKey.toLowerCase();
-      var code = String(e.code || '');
-      var isCtrl = Boolean(e.ctrlKey || e.metaKey);
+  function isShortcutEvent(e) {
+    if (!e) return false;
+    var rawKey = String(e.key || '');
+    var key = rawKey.toLowerCase();
+    var code = String(e.code || '');
+    var isCtrl = Boolean(e.ctrlKey || e.metaKey);
 
-      if (!isCtrl && !e.altKey) {
-        if (key === 'f1' || code === 'F1') {
-          if (typeof e.preventDefault === 'function') e.preventDefault();
-          invokeIpc('open_help');
-          return;
-        }
-        if (key === 'f5' || code === 'F5') {
-          if (typeof e.preventDefault === 'function') e.preventDefault();
-          hardRefresh();
-          return;
-        }
-        if (key === 'f11' || code === 'F11') {
-          if (typeof e.preventDefault === 'function') e.preventDefault();
-          toggleFocusMode();
-          return;
-        }
+    if (!isCtrl && !e.altKey) {
+      if (
+        key === 'f1' ||
+        code === 'F1' ||
+        key === 'f5' ||
+        code === 'F5' ||
+        key === 'f11' ||
+        code === 'F11'
+      ) {
+        return true;
       }
+    } else if (isCtrl && !e.altKey) {
+      if (
+        rawKey === ',' ||
+        code === 'Comma' ||
+        (e.shiftKey && (key === 'f' || code === 'KeyF' || key === 'r' || code === 'KeyR')) ||
+        rawKey === '=' ||
+        rawKey === '+' ||
+        key === 'add' ||
+        code === 'Equal' ||
+        code === 'NumpadAdd' ||
+        rawKey === '-' ||
+        rawKey === '_' ||
+        key === 'subtract' ||
+        code === 'Minus' ||
+        code === 'NumpadSubtract' ||
+        code === 'Numpad0' ||
+        code === 'Digit0' ||
+        (!e.shiftKey && (rawKey === '0' || key === '0'))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
 
-      if (isCtrl && !e.altKey) {
-        if (rawKey === ',' || code === 'Comma') {
-          if (typeof e.preventDefault === 'function') e.preventDefault();
-          invokeIpc('open_settings');
-          return;
-        }
-        if (e.shiftKey && (key === 'f' || code === 'KeyF')) {
-          if (typeof e.preventDefault === 'function') e.preventDefault();
-          toggleFocusMode();
-          return;
-        }
-        if (e.shiftKey && (key === 'r' || code === 'KeyR')) {
-          if (typeof e.preventDefault === 'function') e.preventDefault();
-          hardRefresh();
-          return;
-        }
-        // Zoom in: Ctrl+=, Ctrl++, or NumpadAdd (can have shiftKey or not)
-        if (
-          rawKey === '=' ||
-          rawKey === '+' ||
-          key === 'add' ||
-          code === 'Equal' ||
-          code === 'NumpadAdd'
-        ) {
-          if (typeof e.preventDefault === 'function') e.preventDefault();
-          zoomIn();
-          return;
-        }
-        // Zoom out: Ctrl+-, Ctrl+_, or NumpadSubtract
-        if (
-          rawKey === '-' ||
-          rawKey === '_' ||
-          key === 'subtract' ||
-          code === 'Minus' ||
-          code === 'NumpadSubtract'
-        ) {
-          if (typeof e.preventDefault === 'function') e.preventDefault();
-          zoomOut();
-          return;
-        }
-        // Reset zoom: Ctrl+0, Numpad0, or Digit0
-        if (!e.shiftKey && (rawKey === '0' || code === 'Digit0' || code === 'Numpad0')) {
-          if (typeof e.preventDefault === 'function') e.preventDefault();
-          resetZoom();
-          return;
-        }
+  function keyHandler(e) {
+    if (!e) return;
+    var rawKey = String(e.key || '');
+    var key = rawKey.toLowerCase();
+    var code = String(e.code || '');
+    var isCtrl = Boolean(e.ctrlKey || e.metaKey);
+
+    if (!isCtrl && !e.altKey) {
+      if (key === 'f1' || code === 'F1') {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        invokeIpc('open_help');
+        return;
+      }
+      if (key === 'f5' || code === 'F5') {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        hardRefresh();
+        return;
+      }
+      if (key === 'f11' || code === 'F11') {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        toggleFocusMode();
+        return;
       }
     }
 
-    function wheelHandler(e) {
-      if (e.ctrlKey || e.metaKey) {
+    if (isCtrl && !e.altKey) {
+      if (rawKey === ',' || code === 'Comma') {
         if (typeof e.preventDefault === 'function') e.preventDefault();
-        if (e.deltaY < 0) {
-          zoomIn();
-        } else if (e.deltaY > 0) {
-          zoomOut();
+        invokeIpc('open_settings');
+        return;
+      }
+      if (e.shiftKey && (key === 'f' || code === 'KeyF')) {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        toggleFocusMode();
+        return;
+      }
+      if (e.shiftKey && (key === 'r' || code === 'KeyR')) {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        hardRefresh();
+        return;
+      }
+      // Zoom in: Ctrl+=, Ctrl++, or NumpadAdd (can have shiftKey or not)
+      if (
+        rawKey === '=' ||
+        rawKey === '+' ||
+        key === 'add' ||
+        code === 'Equal' ||
+        code === 'NumpadAdd'
+      ) {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        zoomIn();
+        return;
+      }
+      // Zoom out: Ctrl+-, Ctrl+_, or NumpadSubtract
+      if (
+        rawKey === '-' ||
+        rawKey === '_' ||
+        key === 'subtract' ||
+        code === 'Minus' ||
+        code === 'NumpadSubtract'
+      ) {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        zoomOut();
+        return;
+      }
+      // Reset zoom: Ctrl+0, Numpad0, or Digit0
+      if (
+        code === 'Numpad0' ||
+        code === 'Digit0' ||
+        (!e.shiftKey && (rawKey === '0' || key === '0'))
+      ) {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        resetZoom();
+        return;
+      }
+    }
+  }
+
+  function wheelHandler(e) {
+    if (e.ctrlKey || e.metaKey) {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      if (e.deltaY < 0) {
+        zoomIn();
+      } else if (e.deltaY > 0) {
+        zoomOut();
+      }
+    }
+  }
+
+  function hookIframe(iframe) {
+    if (!iframe || iframe.__aqvn_relay_attached) return;
+    iframe.__aqvn_relay_attached = true;
+
+    function attach() {
+      try {
+        var win = iframe.contentWindow;
+        var doc = iframe.contentDocument || (win && win.document);
+        var target = doc || win;
+        if (target && typeof target.addEventListener === 'function') {
+          target.addEventListener(
+            'keydown',
+            function (e) {
+              if (!isShortcutEvent(e)) return;
+              if (typeof e.preventDefault === 'function') e.preventDefault();
+              var payload = {
+                type: 'aqvn:keydown',
+                key: e.key,
+                code: e.code,
+                ctrlKey: e.ctrlKey,
+                metaKey: e.metaKey,
+                shiftKey: e.shiftKey,
+                altKey: e.altKey
+              };
+              if (typeof window !== 'undefined' && typeof window.postMessage === 'function') {
+                window.postMessage(payload, '*');
+              } else {
+                keyHandler(payload);
+              }
+            },
+            true
+          );
         }
+      } catch (err) {}
+    }
+
+    attach();
+    if (typeof iframe.addEventListener === 'function') {
+      iframe.addEventListener('load', attach);
+    }
+  }
+
+  function observeIframes(root) {
+    if (!root) return;
+    if (typeof root.querySelectorAll === 'function') {
+      try {
+        var frames = root.querySelectorAll('iframe');
+        for (var i = 0; i < frames.length; i++) {
+          hookIframe(frames[i]);
+        }
+      } catch (err) {}
+    }
+    if (typeof MutationObserver !== 'undefined' && root.body) {
+      try {
+        var observer = new MutationObserver(function (mutations) {
+          for (var m = 0; m < mutations.length; m++) {
+            var added = mutations[m].addedNodes;
+            if (!added) continue;
+            for (var n = 0; n < added.length; n++) {
+              var node = added[n];
+              if (!node) continue;
+              if (node.tagName === 'IFRAME') {
+                hookIframe(node);
+              } else if (typeof node.querySelectorAll === 'function') {
+                var nested = node.querySelectorAll('iframe');
+                for (var k = 0; k < nested.length; k++) {
+                  hookIframe(nested[k]);
+                }
+              }
+            }
+          }
+        });
+        observer.observe(root.body, { childList: true, subtree: true });
+      } catch (err) {}
+    }
+  }
+
+  function installKeyboardShortcuts(dom) {
+    function messageHandler(e) {
+      if (!e || !e.data) return;
+      var data = e.data;
+      if (
+        data.type === 'aqvn:keydown' ||
+        data.type === 'aqvn:shortcut' ||
+        data.type === 'aqvn:key-relay'
+      ) {
+        keyHandler(data);
       }
     }
 
     if (dom && typeof dom.addEventListener === 'function') {
       dom.addEventListener('keydown', keyHandler, true);
+      observeIframes(dom);
     } else {
       if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
         window.addEventListener('keydown', keyHandler, true);
         window.addEventListener('wheel', wheelHandler, { passive: false, capture: true });
+        window.addEventListener('message', messageHandler);
+      }
+      if (typeof document !== 'undefined') {
+        observeIframes(document);
       }
     }
   }
@@ -546,6 +703,9 @@
     notifyTaskComplete: notifyTaskComplete,
     updateTrayBusy: updateTrayBusy,
     openAbout: openAbout,
+    invokeIpc: invokeIpc,
+    hookIframe: hookIframe,
+    installIframeRelay: observeIframes,
     handleWebSocketMessage: handleWebSocketMessage,
     checkDomState: checkDomState,
     installKeyboardShortcuts: installKeyboardShortcuts,

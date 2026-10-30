@@ -1508,8 +1508,17 @@ function createContainerHarness(options = {}) {
 
   const attributes = {};
   let reloaded = false;
+  const warnings = [];
+  const customConsole = {
+    ...console,
+    warn: (msg, ...args) => {
+      warnings.push([msg, ...args]);
+      if (options.onWarn) options.onWarn(msg, ...args);
+    }
+  };
+
   const context = {
-    console,
+    console: customConsole,
     document: documentMock,
     location: {
       origin: 'http://localhost:3000',
@@ -1536,8 +1545,14 @@ function createContainerHarness(options = {}) {
       addEventListener: (type, fn) => {
         (docListeners[type] = docListeners[type] || []).push(fn);
       },
+      postMessage: (data) => {
+        (docListeners['message'] || []).forEach((fn) => fn({ data }));
+      },
       __TAURI_INTERNALS__: {
         invoke: (command, args) => {
+          if (options.ipcReject) {
+            return Promise.reject(new Error('Simulated IPC error for ' + command));
+          }
           calls.push({ command, args });
           return Promise.resolve();
         }
@@ -1551,6 +1566,7 @@ function createContainerHarness(options = {}) {
   return {
     context,
     calls,
+    warnings,
     document: documentMock,
     docListeners,
     elements,
@@ -2061,6 +2077,145 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     assert.match(html, /id="lang-toggle-btn"/, 'help.html must expose #lang-toggle-btn');
     assert.match(html, /HELP_I18N/, 'help.html must define HELP_I18N');
     assert.match(html, /closeHelpWindow/, 'help.html must implement closeHelpWindow()');
+  });
+});
+
+describe('VAL-HOTKEY-003 & VAL-HOTKEY-004: Container bridge shortcuts and IPC error visibility', () => {
+  test('VAL-HOTKEY-004: invokeIpc logs warning when IPC fails', async () => {
+    const warnings = [];
+    const harness = createContainerHarness({
+      ipcReject: true,
+      onWarn: (msg, ...args) => warnings.push([msg, ...args])
+    });
+    const { bridge } = harness;
+    assert.equal(typeof bridge.invokeIpc, 'function', 'invokeIpc must be exposed on bridge');
+    await bridge.invokeIpc('test_command', { foo: 'bar' });
+    assert.ok(warnings.length > 0, 'console.warn must be called when IPC fails');
+    assert.match(String(warnings[0][0]), /IPC error/);
+  });
+
+  test('VAL-HOTKEY-003: installKeyboardShortcuts handles Equal, Minus, Digit0, NumpadAdd, NumpadSubtract, Numpad0, F1, F5, Comma', () => {
+    const harness = createContainerHarness();
+    const { calls, docListeners } = harness;
+    const keydownListeners = docListeners['keydown'] || [];
+
+    function fireKey(key, ctrlKey, shiftKey, code) {
+      let prevented = false;
+      const event = {
+        key,
+        code,
+        ctrlKey,
+        metaKey: false,
+        shiftKey,
+        altKey: false,
+        preventDefault: () => {
+          prevented = true;
+        }
+      };
+      for (const fn of keydownListeners) {
+        fn(event);
+      }
+      return prevented;
+    }
+
+    // F1 -> open_help
+    assert.equal(fireKey('F1', false, false, 'F1'), true, 'F1 must be handled');
+    assert.ok(calls.some((c) => c.command === 'open_help'), 'F1 invokes open_help');
+
+    // F5 -> hardRefresh
+    assert.equal(fireKey('F5', false, false, 'F5'), true, 'F5 must be handled');
+    assert.equal(harness.getReloaded(), true, 'F5 triggers reload');
+
+    // Comma -> open_settings
+    assert.equal(fireKey(',', true, false, 'Comma'), true, 'Ctrl+Comma must be handled');
+    assert.ok(calls.some((c) => c.command === 'open_settings'), 'Ctrl+Comma invokes open_settings');
+
+    // Equal -> Zoom In
+    const zoomBeforeEqual = parseFloat(harness.document.body.style.zoom || '1.0');
+    assert.equal(fireKey('=', true, false, 'Equal'), true, 'Ctrl+Equal must be handled');
+    assert.ok(parseFloat(harness.document.body.style.zoom) > zoomBeforeEqual, 'Ctrl+Equal zooms in');
+
+    // Minus -> Zoom Out
+    const zoomBeforeMinus = parseFloat(harness.document.body.style.zoom);
+    assert.equal(fireKey('-', true, false, 'Minus'), true, 'Ctrl+Minus must be handled');
+    assert.ok(parseFloat(harness.document.body.style.zoom) < zoomBeforeMinus, 'Ctrl+Minus zooms out');
+
+    // Digit0 -> Reset Zoom
+    assert.equal(fireKey('0', true, false, 'Digit0'), true, 'Ctrl+Digit0 must be handled');
+    assert.equal(harness.document.body.style.zoom, '1', 'Ctrl+Digit0 resets zoom to 1');
+
+    // NumpadAdd -> Zoom In
+    assert.equal(fireKey('+', true, false, 'NumpadAdd'), true, 'Ctrl+NumpadAdd must be handled');
+    assert.equal(harness.document.body.style.zoom, '1.1', 'Ctrl+NumpadAdd zooms in');
+
+    // NumpadSubtract -> Zoom Out
+    assert.equal(fireKey('-', true, false, 'NumpadSubtract'), true, 'Ctrl+NumpadSubtract must be handled');
+    assert.equal(harness.document.body.style.zoom, '1', 'Ctrl+NumpadSubtract zooms out');
+
+    // Numpad0 -> Reset Zoom
+    fireKey('+', true, false, 'NumpadAdd');
+    assert.equal(harness.document.body.style.zoom, '1.1');
+    assert.equal(fireKey('0', true, false, 'Numpad0'), true, 'Ctrl+Numpad0 must be handled');
+    assert.equal(harness.document.body.style.zoom, '1', 'Ctrl+Numpad0 resets zoom to 1');
+  });
+
+  test('VAL-HOTKEY-003: cross-iframe key event relay via postMessage and nested iframe key interception', () => {
+    const harness = createContainerHarness();
+    const { docListeners, bridge } = harness;
+
+    // Relay via window message
+    const messageListeners = docListeners['message'] || [];
+    assert.ok(messageListeners.length > 0, 'window message listener must be registered for iframe relay');
+
+    // Simulate cross-iframe message event
+    for (const fn of messageListeners) {
+      fn({
+        data: {
+          type: 'aqvn:keydown',
+          key: '=',
+          code: 'Equal',
+          ctrlKey: true,
+          metaKey: false,
+          shiftKey: false,
+          altKey: false
+        }
+      });
+    }
+    assert.equal(harness.document.body.style.zoom, '1.1', 'relayed Ctrl+= must zoom in');
+
+    // Nested iframe element listener
+    const iframeListeners = {};
+    const fakeIframe = {
+      tagName: 'IFRAME',
+      contentWindow: {
+        document: {
+          addEventListener: (type, fn) => {
+            (iframeListeners[type] = iframeListeners[type] || []).push(fn);
+          }
+        }
+      },
+      addEventListener: () => {}
+    };
+
+    assert.equal(typeof bridge.hookIframe, 'function', 'hookIframe must be exposed');
+    bridge.hookIframe(fakeIframe);
+    assert.ok((iframeListeners['keydown'] || []).length > 0, 'iframe keydown listener installed');
+
+    let prevented = false;
+    for (const fn of iframeListeners['keydown']) {
+      fn({
+        key: 'F1',
+        code: 'F1',
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        preventDefault: () => {
+          prevented = true;
+        }
+      });
+    }
+    assert.equal(prevented, true, 'iframe F1 keydown calls preventDefault');
+    assert.ok(harness.calls.some((c) => c.command === 'open_help'), 'iframe F1 relayed to open_help');
   });
 });
 

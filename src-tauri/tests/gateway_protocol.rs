@@ -6,7 +6,8 @@
 //! - Handshake payload includes auth.handlers
 
 use aqvn_workspace_lib::connector::protocol::{
-    ConnectorHello, SCOPE_BROWSER, SCOPE_DESKTOP, SCOPE_EXEC, SCOPE_FILES,
+    format_socketio_ack, format_socketio_event, parse_socketio_packet, ConnectorHello,
+    SCOPE_BROWSER, SCOPE_DESKTOP, SCOPE_EXEC, SCOPE_FILES, SIO_PACKET_ACK, SIO_PACKET_EVENT,
 };
 use serde_json::Value;
 
@@ -93,4 +94,59 @@ fn test_connector_hello_legacy_format_backward_compat() {
     let hello_legacy = ConnectorHello::new_legacy("leg-id", "leg-host", vec!["files".to_string()]);
     assert!(hello_legacy.auth.is_none());
     assert!(hello_legacy.gateway.is_none());
+}
+
+#[test]
+fn test_socketio_framing_parsing_and_formatting() {
+    // 1. Event with namespace and no ack id
+    let pkt1 = parse_socketio_packet("42/ws,[\"connector_file_op\",{\"action\":\"read\"}]")
+        .expect("must parse pkt1");
+    assert_eq!(pkt1.engine_type, '4');
+    assert_eq!(pkt1.packet_type, SIO_PACKET_EVENT);
+    assert_eq!(pkt1.namespace, Some("/ws"));
+    assert_eq!(pkt1.ack_id, None);
+    assert_eq!(pkt1.data, "[\"connector_file_op\",{\"action\":\"read\"}]");
+
+    // 2. Event with namespace and ack id
+    let pkt2 = parse_socketio_packet("42/ws,123[\"connector_file_op\",{\"action\":\"read\"}]")
+        .expect("must parse pkt2");
+    assert_eq!(pkt2.packet_type, SIO_PACKET_EVENT);
+    assert_eq!(pkt2.namespace, Some("/ws"));
+    assert_eq!(pkt2.ack_id, Some(123));
+
+    // 3. Event on default namespace without ack id
+    let pkt3 = parse_socketio_packet("42[\"ping\",{}]").expect("must parse pkt3");
+    assert_eq!(pkt3.packet_type, SIO_PACKET_EVENT);
+    assert_eq!(pkt3.namespace, None);
+    assert_eq!(pkt3.ack_id, None);
+    assert_eq!(pkt3.data, "[\"ping\",{}]");
+
+    // 4. Ack packet
+    let pkt4 = parse_socketio_packet("43/ws,123[{\"status\":\"ok\"}]").expect("must parse pkt4");
+    assert_eq!(pkt4.packet_type, SIO_PACKET_ACK);
+    assert_eq!(pkt4.namespace, Some("/ws"));
+    assert_eq!(pkt4.ack_id, Some(123));
+
+    // 5. Non-engine.io packet or ping
+    assert!(parse_socketio_packet("2").is_none());
+    assert!(parse_socketio_packet("3").is_none());
+    assert!(parse_socketio_packet("0{\"sid\":\"abc\"}").is_none());
+
+    // 6. Formatting
+    assert_eq!(
+        format_socketio_event(Some("/ws"), "hello", "{\"a\":1}"),
+        "42/ws,[\"hello\",{\"a\":1}]"
+    );
+    assert_eq!(
+        format_socketio_event(None, "hello", "{\"a\":1}"),
+        "42[\"hello\",{\"a\":1}]"
+    );
+    assert_eq!(
+        format_socketio_ack(Some("/ws"), 123, "{\"ok\":true}"),
+        "43/ws,123[{\"ok\":true}]"
+    );
+    assert_eq!(
+        format_socketio_ack(None, 456, "{\"ok\":true}"),
+        "43456[{\"ok\":true}]"
+    );
 }

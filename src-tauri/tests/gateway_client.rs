@@ -581,3 +581,278 @@ fn test_build_ws_url_variants() {
         "wss://localhost:3000/socket.io/?EIO=4&transport=websocket"
     );
 }
+
+#[tokio::test]
+async fn test_socketio_event_dispatch_and_ack() {
+    let (tx_event, rx_event) = tokio::sync::mpsc::channel::<String>(16);
+    let (tx_reply, mut rx_reply) = tokio::sync::mpsc::channel::<String>(16);
+    let rx_event = Arc::new(Mutex::new(rx_event));
+    let tx_reply = Arc::new(Mutex::new(tx_reply));
+
+    let router = Router::new().route(
+        "/socket.io/",
+        get({
+            let rx_event = Arc::clone(&rx_event);
+            let tx_reply = Arc::clone(&tx_reply);
+            move |ws: WebSocketUpgrade| {
+                let rx_event = Arc::clone(&rx_event);
+                let tx_reply = Arc::clone(&tx_reply);
+                async move {
+                    ws.on_upgrade(move |mut socket: WebSocket| async move {
+                        // 1. Send Engine.IO open packet
+                        let open_pkt = serde_json::json!({
+                            "sid": "mock-sio-event-sid",
+                            "upgrades": [],
+                            "pingInterval": 25000,
+                            "pingTimeout": 20000
+                        });
+                        let _ = socket
+                            .send(axum::extract::ws::Message::Text(
+                                format!("0{open_pkt}").into(),
+                            ))
+                            .await;
+
+                        // 2. Wait for namespace /ws join packet
+                        while let Some(Ok(msg)) = socket.recv().await {
+                            if let axum::extract::ws::Message::Text(text) = msg {
+                                if text.starts_with("40/ws") {
+                                    let _ = socket
+                                        .send(axum::extract::ws::Message::Text(
+                                            "40/ws,{\"sid\":\"test-sid\"}".into(),
+                                        ))
+                                        .await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 3. Receive connector_hello
+                        while let Some(Ok(msg)) = socket.recv().await {
+                            if let axum::extract::ws::Message::Text(text) = msg {
+                                if text.contains("connector_hello") {
+                                    let ack = format!(
+                                        "42/ws,[\"{MSG_TYPE_HELLO_ACK}\",{{\"status\":\"ok\"}}]"
+                                    );
+                                    let _ = socket
+                                        .send(axum::extract::ws::Message::Text(ack.into()))
+                                        .await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 4. Pump test events from rx_event and forward replies to tx_reply
+                        let mut rx_event_lock = rx_event.lock().await;
+                        while let Some(event_str) = rx_event_lock.recv().await {
+                            if socket
+                                .send(axum::extract::ws::Message::Text(event_str.into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                            // Wait for reply frame
+                            while let Some(Ok(msg)) = socket.recv().await {
+                                if let axum::extract::ws::Message::Text(reply_text) = msg {
+                                    if reply_text.starts_with("42") || reply_text.starts_with("43")
+                                    {
+                                        let tx = tx_reply.lock().await;
+                                        let _ = tx.send(reply_text.to_string()).await;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    })
+                }
+            }
+        }),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind listener");
+    let port = listener.local_addr().expect("port").port();
+    let server_task = tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+
+    let config = GatewayConfig {
+        enabled: true,
+        server_url: format!("http://127.0.0.1:{port}"),
+        gateway_id: "test-gw-sio-events".to_string(),
+        host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
+        scope_files: true,
+        scope_exec: true,
+        scope_browser: true,
+        scope_desktop: true,
+        ping_interval_secs: 25,
+        reconnect_delay_ms: 200,
+    };
+
+    let client = GatewayClient::new(config);
+    let (handle, join_handle) = client.start();
+
+    handle
+        .wait_for_handshake(Duration::from_secs(5))
+        .await
+        .expect("handshake");
+
+    // Case A: Send event without ack ID -> Expect 42/ws,["pong", ...]
+    tx_event
+        .send("42/ws,[\"ping\",{}]".to_string())
+        .await
+        .unwrap();
+    let reply_a = tokio::time::timeout(Duration::from_secs(3), rx_reply.recv())
+        .await
+        .expect("reply_a timeout")
+        .expect("reply_a recv");
+    assert!(
+        reply_a.starts_with("42/ws,[\"pong\""),
+        "reply_a must be 42/ws event, got: {reply_a}"
+    );
+
+    // Case B: Send event with ack ID 42 -> Expect 43/ws,42[...]
+    tx_event
+        .send("42/ws,42[\"ping\",{}]".to_string())
+        .await
+        .unwrap();
+    let reply_b = tokio::time::timeout(Duration::from_secs(3), rx_reply.recv())
+        .await
+        .expect("reply_b timeout")
+        .expect("reply_b recv");
+    assert!(
+        reply_b.starts_with("43/ws,42["),
+        "reply_b must be 43/ws ack, got: {reply_b}"
+    );
+
+    handle.stop();
+    let _ = join_handle.await;
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn test_socketio_interleaved_ping_pong() {
+    let pongs_received = Arc::new(AtomicUsize::new(0));
+    let pongs_clone = Arc::clone(&pongs_received);
+
+    let router = Router::new().route(
+        "/socket.io/",
+        get({
+            move |ws: WebSocketUpgrade| {
+                let pongs = Arc::clone(&pongs_clone);
+                async move {
+                    ws.on_upgrade(move |mut socket: WebSocket| async move {
+                        // 1. Send Engine.IO open packet
+                        let open_pkt = serde_json::json!({
+                            "sid": "mock-ping-pong-sid",
+                            "upgrades": [],
+                            "pingInterval": 25000,
+                            "pingTimeout": 20000
+                        });
+                        let _ = socket
+                            .send(axum::extract::ws::Message::Text(
+                                format!("0{open_pkt}").into(),
+                            ))
+                            .await;
+
+                        // 2. Interleave a ping before namespace connect ack!
+                        let _ = socket
+                            .send(axum::extract::ws::Message::Text("2".into()))
+                            .await;
+
+                        // Wait for namespace /ws join packet or pong
+                        while let Some(Ok(msg)) = socket.recv().await {
+                            if let axum::extract::ws::Message::Text(text) = msg {
+                                if text == "3" {
+                                    pongs.fetch_add(1, Ordering::SeqCst);
+                                } else if text.starts_with("40/ws") {
+                                    let _ = socket
+                                        .send(axum::extract::ws::Message::Text(
+                                            "40/ws,{\"sid\":\"test-sid\"}".into(),
+                                        ))
+                                        .await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 3. Receive connector_hello
+                        while let Some(Ok(msg)) = socket.recv().await {
+                            if let axum::extract::ws::Message::Text(text) = msg {
+                                if text.contains("connector_hello") {
+                                    let ack = format!(
+                                        "42/ws,[\"{MSG_TYPE_HELLO_ACK}\",{{\"status\":\"ok\"}}]"
+                                    );
+                                    let _ = socket
+                                        .send(axum::extract::ws::Message::Text(ack.into()))
+                                        .await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 4. Send probe ping
+                        let _ = socket
+                            .send(axum::extract::ws::Message::Text("2probe".into()))
+                            .await;
+
+                        while let Some(Ok(msg)) = socket.recv().await {
+                            if let axum::extract::ws::Message::Text(text) = msg {
+                                if text == "3probe" {
+                                    pongs.fetch_add(1, Ordering::SeqCst);
+                                    break;
+                                } else if text == "3" {
+                                    pongs.fetch_add(1, Ordering::SeqCst);
+                                }
+                            }
+                        }
+                    })
+                }
+            }
+        }),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind listener");
+    let port = listener.local_addr().expect("port").port();
+    let server_task = tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+
+    let config = GatewayConfig {
+        enabled: true,
+        server_url: format!("http://127.0.0.1:{port}"),
+        gateway_id: "test-gw-ping-pong".to_string(),
+        host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
+        scope_files: true,
+        scope_exec: true,
+        scope_browser: true,
+        scope_desktop: true,
+        ping_interval_secs: 25,
+        reconnect_delay_ms: 200,
+    };
+
+    let client = GatewayClient::new(config);
+    let (handle, join_handle) = client.start();
+
+    handle
+        .wait_for_handshake(Duration::from_secs(5))
+        .await
+        .expect("handshake completed");
+
+    // Wait for 3probe to arrive
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        pongs_received.load(Ordering::SeqCst) >= 2,
+        "must have received both pongs (normal and probe)"
+    );
+
+    handle.stop();
+    let _ = join_handle.await;
+    server_task.abort();
+}

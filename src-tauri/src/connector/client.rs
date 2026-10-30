@@ -7,7 +7,10 @@
 use crate::config::{AppConfig, ConfigWatcher};
 use crate::connector::handlers;
 use crate::connector::protocol::{
-    ConnectorHello, SCOPE_BROWSER, SCOPE_DESKTOP, SCOPE_EXEC, SCOPE_FILES,
+    format_socketio_ack, format_socketio_event, parse_socketio_packet, ConnectorHello,
+    EIO_PACKET_OPEN, EIO_PACKET_PING, EIO_PACKET_PONG, MSG_TYPE_HELLO, MSG_TYPE_HELLO_ACK,
+    SCOPE_BROWSER, SCOPE_DESKTOP, SCOPE_EXEC, SCOPE_FILES, SIO_PACKET_ACK,
+    SIO_PACKET_CONNECT_ERROR, SIO_PACKET_DISCONNECT, SIO_PACKET_EVENT,
 };
 use axum::http::header::{self, HeaderValue};
 use futures_util::{SinkExt, StreamExt};
@@ -346,34 +349,28 @@ impl GatewayClient {
 
         let request = build_request(&ws_url)?;
 
-        let (mut stream, _response) = match tokio_tungstenite::connect_async(request).await {
-            Ok(pair) => pair,
+        let (mut stream, is_legacy) = match tokio_tungstenite::connect_async(request).await {
+            Ok(pair) => (pair.0, false),
             Err(tokio_tungstenite::tungstenite::Error::Http(resp))
                 if resp.status() == axum::http::StatusCode::NOT_FOUND =>
             {
                 let legacy_url = build_legacy_ws_url(&self.config.server_url)?;
                 let legacy_req = build_request(&legacy_url)?;
-                tokio_tungstenite::connect_async(legacy_req)
+                let pair = tokio_tungstenite::connect_async(legacy_req)
                     .await
-                    .map_err(|e| format!("websocket connect error to {legacy_url}: {e}"))?
+                    .map_err(|e| format!("websocket connect error to {legacy_url}: {e}"))?;
+                (pair.0, true)
             }
             Err(e) => return Err(format!("websocket connect error to {ws_url}: {e}")),
         };
 
         connected.store(true, Ordering::SeqCst);
 
-        let mut is_socketio = false;
-
-        let first_frame = tokio::select! {
-            res = tokio::time::timeout(Duration::from_millis(500), stream.next()) => {
-                match res {
-                    Ok(Some(Ok(msg))) => Some(msg),
-                    _ => None,
-                }
-            }
-            _ = shutdown_rx.changed() => {
-                return Ok(());
-            }
+        let mut is_socketio = !is_legacy;
+        let mut active_namespace: Option<String> = if is_socketio {
+            Some("/ws".to_string())
+        } else {
+            None
         };
 
         let hello = ConnectorHello::new(
@@ -384,122 +381,187 @@ impl GatewayClient {
         let hello_json = serde_json::to_string(&hello)
             .map_err(|e| format!("failed to serialize connector_hello: {e}"))?;
 
-        if let Some(Message::Text(text)) = first_frame {
-            if text.starts_with('0') {
-                is_socketio = true;
+        if is_socketio {
+            // 1. Wait for Engine.IO open packet ('0')
+            let mut open_packet_received = false;
+            let open_start = tokio::time::Instant::now();
+            let open_timeout = Duration::from_secs(5);
 
+            while !open_packet_received && open_start.elapsed() < open_timeout {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        let _ = stream.send(Message::Close(None)).await;
+                        return Ok(());
+                    }
+                    frame = stream.next() => {
+                        match frame {
+                            Some(Ok(Message::Text(text))) => {
+                                if text.starts_with(EIO_PACKET_OPEN) {
+                                    open_packet_received = true;
+                                } else if text.starts_with(EIO_PACKET_PING) {
+                                    let pong = format!("3{}", &text[1..]);
+                                    let _ = stream.send(Message::Text(pong.into())).await;
+                                } else if text.contains(MSG_TYPE_HELLO) {
+                                    is_socketio = false;
+                                    break;
+                                }
+                            }
+                            Some(Ok(Message::Ping(data))) => {
+                                let _ = stream.send(Message::Pong(data)).await;
+                            }
+                            Some(Ok(Message::Close(_))) | None => {
+                                return Err("connection closed waiting for engine.io open packet".to_string());
+                            }
+                            Some(Err(e)) => {
+                                return Err(format!("error waiting for engine.io open packet: {e}"));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            if is_socketio && !open_packet_received {
+                return Err("timed out waiting for engine.io open packet".to_string());
+            }
+
+            if is_socketio {
+                // 2. Send namespace connect packet: 40/ws,
                 stream
                     .send(Message::Text("40/ws,".into()))
                     .await
                     .map_err(|e| format!("failed to send namespace connect: {e}"))?;
 
-                let ns_ack = tokio::select! {
-                    res = tokio::time::timeout(Duration::from_secs(5), stream.next()) => {
-                        res
-                    }
-                    _ = shutdown_rx.changed() => {
-                        let _ = stream.send(Message::Close(None)).await;
-                        return Ok(());
-                    }
-                };
+                // 3. Wait for namespace connect ack (40/ws or 40)
+                let mut ns_connected = false;
+                let ns_start = tokio::time::Instant::now();
+                let ns_timeout = Duration::from_secs(5);
 
-                match ns_ack {
-                    Ok(Some(Ok(Message::Text(ns_text)))) if ns_text.starts_with("40/ws") => {}
-                    Ok(Some(Ok(other))) => {
-                        return Err(format!("unexpected namespace connect response: {other:?}"));
-                    }
-                    Ok(Some(Err(e))) => {
-                        return Err(format!("error waiting for namespace connect: {e}"));
-                    }
-                    Ok(None) => {
-                        return Err("connection closed waiting for namespace connect".to_string());
-                    }
-                    Err(_) => {
-                        return Err("timed out waiting for namespace connect ack".to_string());
+                while !ns_connected && ns_start.elapsed() < ns_timeout {
+                    tokio::select! {
+                        _ = shutdown_rx.changed() => {
+                            let _ = stream.send(Message::Close(None)).await;
+                            return Ok(());
+                        }
+                        frame = stream.next() => {
+                            match frame {
+                                Some(Ok(Message::Text(text))) => {
+                                    if text.starts_with("40/ws") {
+                                        active_namespace = Some("/ws".to_string());
+                                        ns_connected = true;
+                                    } else if text.starts_with("40") {
+                                        active_namespace = None;
+                                        ns_connected = true;
+                                    } else if text.starts_with(EIO_PACKET_PING) {
+                                        let pong = format!("3{}", &text[1..]);
+                                        let _ = stream.send(Message::Text(pong.into())).await;
+                                    } else if text.starts_with("44") {
+                                        return Err(format!("namespace connect error: {text}"));
+                                    }
+                                }
+                                Some(Ok(Message::Ping(data))) => {
+                                    let _ = stream.send(Message::Pong(data)).await;
+                                }
+                                Some(Ok(Message::Close(_))) | None => {
+                                    return Err("connection closed waiting for namespace connect".to_string());
+                                }
+                                Some(Err(e)) => {
+                                    return Err(format!("error waiting for namespace connect: {e}"));
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                 }
 
-                let hello_event = format!("42/ws,[\"connector_hello\",{hello_json}]");
-                stream
-                    .send(Message::Text(hello_event.into()))
-                    .await
-                    .map_err(|e| format!("failed to send connector_hello event: {e}"))?;
-            } else if text.starts_with("40/ws") {
-                is_socketio = true;
-                let hello_event = format!("42/ws,[\"connector_hello\",{hello_json}]");
+                if !ns_connected {
+                    return Err("timed out waiting for namespace connect ack".to_string());
+                }
+
+                // 4. Send connector_hello event
+                let hello_event =
+                    format_socketio_event(active_namespace.as_deref(), MSG_TYPE_HELLO, &hello_json);
                 stream
                     .send(Message::Text(hello_event.into()))
                     .await
                     .map_err(|e| format!("failed to send connector_hello event: {e}"))?;
             } else {
                 stream
-                    .send(Message::Text(hello_json.into()))
+                    .send(Message::Text(hello_json.clone().into()))
                     .await
                     .map_err(|e| format!("failed to send connector_hello: {e}"))?;
             }
         } else {
+            // Legacy /ws
             stream
-                .send(Message::Text(hello_json.into()))
+                .send(Message::Text(hello_json.clone().into()))
                 .await
                 .map_err(|e| format!("failed to send connector_hello: {e}"))?;
         }
 
-        let ack_opt = tokio::select! {
-            res = tokio::time::timeout(Duration::from_secs(10), stream.next()) => {
-                res
-            }
-            _ = shutdown_rx.changed() => {
-                let _ = stream.send(Message::Close(None)).await;
-                return Ok(());
-            }
-        };
+        // 5. Wait for handshake acknowledgment (connector_hello_ack)
+        let ack_start = tokio::time::Instant::now();
+        let ack_timeout = Duration::from_secs(10);
+        let mut handshake_ok = false;
 
-        match ack_opt {
-            Ok(Some(Ok(Message::Text(ack_text)))) => {
-                let ack_payload = if let Some(stripped) = ack_text.strip_prefix("42/ws,") {
-                    is_socketio = true;
-                    if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(stripped) {
-                        arr.get(1).cloned().unwrap_or(Value::Null)
-                    } else {
-                        Value::Null
+        while !handshake_ok && ack_start.elapsed() < ack_timeout {
+            tokio::select! {
+                _ = shutdown_rx.changed() => {
+                    let _ = stream.send(Message::Close(None)).await;
+                    return Ok(());
+                }
+                frame = stream.next() => {
+                    match frame {
+                        Some(Ok(Message::Text(ack_text))) => {
+                            if ack_text.starts_with(EIO_PACKET_PING) {
+                                let pong = format!("3{}", &ack_text[1..]);
+                                let _ = stream.send(Message::Text(pong.into())).await;
+                                continue;
+                            }
+                            if let Some(pkt) = parse_socketio_packet(&ack_text) {
+                                is_socketio = true;
+                                if pkt.packet_type == SIO_PACKET_EVENT {
+                                    if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(pkt.data) {
+                                        let event_name = arr.first().and_then(Value::as_str).unwrap_or_default();
+                                        let payload = arr.get(1).cloned().unwrap_or(Value::Null);
+                                        let is_status_ok = payload.get("status").and_then(Value::as_str) == Some("ok")
+                                            || payload.get("type").and_then(Value::as_str) == Some(MSG_TYPE_HELLO_ACK);
+                                        if event_name == MSG_TYPE_HELLO_ACK || is_status_ok {
+                                            handshake_ok = true;
+                                            let _ = handshake_tx.send(true);
+                                            break;
+                                        }
+                                    }
+                                } else if pkt.packet_type == SIO_PACKET_ACK {
+                                    handshake_ok = true;
+                                    let _ = handshake_tx.send(true);
+                                    break;
+                                }
+                            } else {
+                                if ack_text.contains(MSG_TYPE_HELLO_ACK) || ack_text.contains("\"ok\"") {
+                                    handshake_ok = true;
+                                    let _ = handshake_tx.send(true);
+                                    break;
+                                }
+                            }
+                        }
+                        Some(Ok(Message::Ping(data))) => {
+                            let _ = stream.send(Message::Pong(data)).await;
+                        }
+                        Some(Ok(Message::Close(_))) | None => {
+                            return Err("connection closed before handshake ack".to_string());
+                        }
+                        Some(Err(e)) => {
+                            return Err(format!("handshake error: {e}"));
+                        }
+                        _ => {}
                     }
-                } else if ack_text.starts_with("43/ws,") {
-                    is_socketio = true;
-                    Value::Null
-                } else {
-                    serde_json::from_str::<Value>(&ack_text).unwrap_or(Value::Null)
-                };
-
-                let is_ack_ok = if ack_payload != Value::Null {
-                    let msg_type = ack_payload
-                        .get("type")
-                        .or_else(|| ack_payload.get("op"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    msg_type == "connector_hello_ack"
-                        || ack_payload.get("status").and_then(|v| v.as_str()) == Some("ok")
-                } else {
-                    ack_text.contains("connector_hello_ack") || ack_text.contains("\"ok\"")
-                };
-
-                if is_ack_ok {
-                    let _ = handshake_tx.send(true);
-                } else {
-                    return Err(format!("unexpected handshake response: {ack_text}"));
                 }
             }
-            Ok(Some(Ok(other))) => {
-                return Err(format!("unexpected handshake frame type: {other:?}"));
-            }
-            Ok(Some(Err(e))) => {
-                return Err(format!("handshake error: {e}"));
-            }
-            Ok(None) => {
-                return Err("connection closed before handshake ack".to_string());
-            }
-            Err(_) => {
-                return Err("handshake timed out waiting for acknowledgment".to_string());
-            }
+        }
+
+        if !handshake_ok {
+            return Err("handshake timed out waiting for acknowledgment".to_string());
         }
 
         let (mut write, mut read) = stream.split();
@@ -521,12 +583,12 @@ impl GatewayClient {
                 Some(msg) = rx_out.recv() => {
                     let msg_to_send = if is_socketio {
                         if let Message::Text(ref text) = msg {
-                            if !text.starts_with("42/ws,") && !text.starts_with("2") && !text.starts_with("3") && !text.starts_with("40/ws") {
+                            if !text.starts_with("42") && !text.starts_with("43") && !text.starts_with("2") && !text.starts_with("3") && !text.starts_with("40") {
                                 let event_name = serde_json::from_str::<Value>(text)
                                     .ok()
                                     .and_then(|v| v.get("type").or_else(|| v.get("op")).and_then(Value::as_str).map(String::from))
                                     .unwrap_or_else(|| "message".to_string());
-                                Message::Text(format!("42/ws,[\"{event_name}\",{text}]").into())
+                                Message::Text(format_socketio_event(active_namespace.as_deref(), &event_name, text).into())
                             } else {
                                 msg
                             }
@@ -559,36 +621,52 @@ impl GatewayClient {
                                 }
                                 Message::Pong(_) => {}
                                 Message::Text(text) => {
-                                    if text == "2" || text.starts_with("2") {
-                                        if write.send(Message::Text("3".into())).await.is_err() {
+                                    if text.starts_with(EIO_PACKET_PING) {
+                                        let pong = format!("3{}", &text[1..]);
+                                        if write.send(Message::Text(pong.into())).await.is_err() {
                                             break;
                                         }
-                                    } else if text == "3" || text.starts_with("3") {
-                                    } else if let Some(payload_slice) = text.strip_prefix("42/ws,") {
-                                        if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(payload_slice) {
-                                            if let Some(event_name) = arr.first().and_then(Value::as_str) {
-                                                let payload = arr.get(1).cloned().unwrap_or(Value::Null);
-                                                let mut payload_obj = match payload {
-                                                    Value::Object(map) => map,
-                                                    _ => serde_json::Map::new(),
-                                                };
-                                                if !payload_obj.contains_key("type") && !payload_obj.contains_key("op") {
-                                                    payload_obj.insert("op".to_string(), Value::String(event_name.to_string()));
-                                                    payload_obj.insert("type".to_string(), Value::String(event_name.to_string()));
-                                                }
-                                                let dispatch_payload = serde_json::to_string(&Value::Object(payload_obj)).unwrap_or_default();
-                                                if let Some(reply) =
-                                                    handlers::dispatch_message_scoped(&dispatch_payload, Some(&tx_out), &self.config).await
-                                                {
-                                                    let reply_val: Value = serde_json::from_str(&reply).unwrap_or(Value::Null);
-                                                    let reply_event = reply_val.get("type")
-                                                        .or_else(|| reply_val.get("op"))
-                                                        .and_then(Value::as_str)
-                                                        .unwrap_or(event_name);
-                                                    let reply_sio = format!("42/ws,[\"{reply_event}\",{reply}]");
-                                                    let _ = tx_out.send(Message::Text(reply_sio.into())).await;
+                                    } else if text.starts_with(EIO_PACKET_PONG) {
+                                    } else if let Some(packet) = parse_socketio_packet(&text) {
+                                        match packet.packet_type {
+                                            SIO_PACKET_EVENT => {
+                                                if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(packet.data) {
+                                                    if let Some(event_name) = arr.first().and_then(Value::as_str) {
+                                                        let payload = arr.get(1).cloned().unwrap_or(Value::Null);
+                                                        let mut payload_obj = match payload {
+                                                            Value::Object(map) => map,
+                                                            _ => serde_json::Map::new(),
+                                                        };
+                                                        if !payload_obj.contains_key("type") && !payload_obj.contains_key("op") {
+                                                            payload_obj.insert("op".to_string(), Value::String(event_name.to_string()));
+                                                            payload_obj.insert("type".to_string(), Value::String(event_name.to_string()));
+                                                        }
+                                                        let dispatch_payload = serde_json::to_string(&Value::Object(payload_obj)).unwrap_or_default();
+                                                        if let Some(reply) =
+                                                            handlers::dispatch_message_scoped(&dispatch_payload, Some(&tx_out), &self.config).await
+                                                        {
+                                                            let reply_msg = if let Some(ack_id) = packet.ack_id {
+                                                                format_socketio_ack(packet.namespace.or(active_namespace.as_deref()), ack_id, &reply)
+                                                            } else {
+                                                                let reply_val: Value = serde_json::from_str(&reply).unwrap_or(Value::Null);
+                                                                let reply_event = reply_val.get("type")
+                                                                    .or_else(|| reply_val.get("op"))
+                                                                    .and_then(Value::as_str)
+                                                                    .unwrap_or(event_name);
+                                                                format_socketio_event(packet.namespace.or(active_namespace.as_deref()), reply_event, &reply)
+                                                            };
+                                                            let _ = tx_out.send(Message::Text(reply_msg.into())).await;
+                                                        }
+                                                    }
                                                 }
                                             }
+                                            SIO_PACKET_DISCONNECT => {
+                                                break;
+                                            }
+                                            SIO_PACKET_CONNECT_ERROR => {
+                                                break;
+                                            }
+                                            _ => {}
                                         }
                                     } else {
                                         if let Some(reply) =
@@ -600,7 +678,7 @@ impl GatewayClient {
                                                     .or_else(|| reply_val.get("op"))
                                                     .and_then(Value::as_str)
                                                     .unwrap_or("message");
-                                                let reply_sio = format!("42/ws,[\"{reply_event}\",{reply}]");
+                                                let reply_sio = format_socketio_event(active_namespace.as_deref(), reply_event, &reply);
                                                 let _ = tx_out.send(Message::Text(reply_sio.into())).await;
                                             } else {
                                                 let _ = tx_out.send(Message::Text(reply.into())).await;

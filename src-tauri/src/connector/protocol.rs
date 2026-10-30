@@ -28,6 +28,92 @@ pub const SCOPE_EXEC: &str = "code_execution";
 pub const SCOPE_BROWSER: &str = "browser";
 pub const SCOPE_DESKTOP: &str = "computer_use";
 
+// Engine.IO Packet Types (v4)
+pub const EIO_PACKET_OPEN: char = '0';
+pub const EIO_PACKET_CLOSE: char = '1';
+pub const EIO_PACKET_PING: char = '2';
+pub const EIO_PACKET_PONG: char = '3';
+pub const EIO_PACKET_MESSAGE: char = '4';
+pub const EIO_PACKET_UPGRADE: char = '5';
+pub const EIO_PACKET_NOOP: char = '6';
+
+// Socket.IO Packet Types (wrapped in Engine.IO Message packet '4')
+pub const SIO_PACKET_CONNECT: char = '0';
+pub const SIO_PACKET_DISCONNECT: char = '1';
+pub const SIO_PACKET_EVENT: char = '2';
+pub const SIO_PACKET_ACK: char = '3';
+pub const SIO_PACKET_CONNECT_ERROR: char = '4';
+pub const SIO_PACKET_BINARY_EVENT: char = '5';
+pub const SIO_PACKET_BINARY_ACK: char = '6';
+
+/// Represents a parsed Socket.IO packet over Engine.IO framing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocketIoPacket<'a> {
+    pub engine_type: char,
+    pub packet_type: char,
+    pub namespace: Option<&'a str>,
+    pub ack_id: Option<u64>,
+    pub data: &'a str,
+}
+
+/// Parses an inbound Socket.IO frame text (e.g. `42/ws,123["event", {...}]`).
+pub fn parse_socketio_packet(text: &str) -> Option<SocketIoPacket<'_>> {
+    let mut chars = text.chars();
+    let engine_type = chars.next()?;
+    if engine_type != EIO_PACKET_MESSAGE {
+        return None;
+    }
+    let packet_type = chars.next()?;
+    let mut rest = &text[2..];
+
+    let namespace = if rest.starts_with('/') {
+        if let Some(comma_idx) = rest.find(',') {
+            let ns = &rest[..comma_idx];
+            rest = &rest[comma_idx + 1..];
+            Some(ns)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let digits_len = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    let ack_id = if digits_len > 0 {
+        let id = rest[..digits_len].parse::<u64>().ok();
+        rest = &rest[digits_len..];
+        id
+    } else {
+        None
+    };
+
+    Some(SocketIoPacket {
+        engine_type,
+        packet_type,
+        namespace,
+        ack_id,
+        data: rest,
+    })
+}
+
+/// Formats a Socket.IO EVENT packet (`42[namespace,]["event", payload]`).
+pub fn format_socketio_event(namespace: Option<&str>, event_name: &str, payload: &str) -> String {
+    match namespace {
+        Some(ns) if ns != "/" => format!("42{ns},[\"{event_name}\",{payload}]"),
+        _ => format!("42[\"{event_name}\",{payload}]"),
+    }
+}
+
+/// Formats a Socket.IO ACK packet (`43[namespace,]ack_id[payload]`).
+pub fn format_socketio_ack(namespace: Option<&str>, ack_id: u64, payload: &str) -> String {
+    match namespace {
+        Some(ns) if ns != "/" => format!("43{ns},{ack_id}[{payload}]"),
+        _ => format!("43{ack_id}[{payload}]"),
+    }
+}
+
 fn default_true() -> bool {
     true
 }

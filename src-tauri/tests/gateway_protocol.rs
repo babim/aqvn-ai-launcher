@@ -86,8 +86,8 @@ fn test_connector_hello_legacy_format_backward_compat() {
     assert!(hello.auth.is_none());
     assert!(hello.gateway.is_none());
     // ScopeConfig defaults supported to true
-    assert_eq!(hello.remote_files.unwrap().supported, true);
-    assert_eq!(hello.remote_exec.unwrap().supported, true);
+    assert!(hello.remote_files.unwrap().supported);
+    assert!(hello.remote_exec.unwrap().supported);
 
     // new_legacy constructor produces hello without auth/gateway fields
     let hello_legacy = ConnectorHello::new_legacy("leg-id", "leg-host", vec!["files".to_string()]);

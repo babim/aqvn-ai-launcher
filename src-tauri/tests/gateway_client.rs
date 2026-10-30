@@ -110,8 +110,8 @@ async fn handle_socket(mut socket: WebSocket, stub: Arc<StubGatewayServer>) {
     while let Some(Ok(msg)) = socket.recv().await {
         match msg {
             axum::extract::ws::Message::Text(text) => {
-                let hello_opt = if text.starts_with("42/ws,") {
-                    if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&text[6..]) {
+                let hello_opt = if let Some(stripped) = text.strip_prefix("42/ws,") {
+                    if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(stripped) {
                         if arr.first().and_then(Value::as_str) == Some("connector_hello") {
                             arr.get(1).and_then(|v| {
                                 serde_json::from_value::<ConnectorHello>(v.clone()).ok()
@@ -122,10 +122,8 @@ async fn handle_socket(mut socket: WebSocket, stub: Arc<StubGatewayServer>) {
                     } else {
                         None
                     }
-                } else if let Ok(hello) = serde_json::from_str::<ConnectorHello>(&text) {
-                    Some(hello)
                 } else {
-                    None
+                    serde_json::from_str::<ConnectorHello>(&text).ok()
                 };
 
                 if let Some(hello) = hello_opt {

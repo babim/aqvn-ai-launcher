@@ -456,9 +456,9 @@ impl GatewayClient {
 
         match ack_opt {
             Ok(Some(Ok(Message::Text(ack_text)))) => {
-                let ack_payload = if ack_text.starts_with("42/ws,") {
+                let ack_payload = if let Some(stripped) = ack_text.strip_prefix("42/ws,") {
                     is_socketio = true;
-                    if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&ack_text[6..]) {
+                    if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(stripped) {
                         arr.get(1).cloned().unwrap_or(Value::Null)
                     } else {
                         Value::Null
@@ -544,10 +544,8 @@ impl GatewayClient {
                     if write.send(Message::Ping(Default::default())).await.is_err() {
                         break;
                     }
-                    if is_socketio {
-                        if write.send(Message::Text("2".into())).await.is_err() {
-                            break;
-                        }
+                    if is_socketio && write.send(Message::Text("2".into())).await.is_err() {
+                        break;
                     }
                 }
                 msg_res = read.next() => {
@@ -566,8 +564,7 @@ impl GatewayClient {
                                             break;
                                         }
                                     } else if text == "3" || text.starts_with("3") {
-                                    } else if text.starts_with("42/ws,") {
-                                        let payload_slice = &text[6..];
+                                    } else if let Some(payload_slice) = text.strip_prefix("42/ws,") {
                                         if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(payload_slice) {
                                             if let Some(event_name) = arr.first().and_then(Value::as_str) {
                                                 let payload = arr.get(1).cloned().unwrap_or(Value::Null);

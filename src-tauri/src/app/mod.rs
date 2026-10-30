@@ -102,6 +102,39 @@ pub fn open_help(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Opens or focuses the About AQVN Workspace window.
+pub fn open_about_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("about") {
+        if let Err(err) = window.show() {
+            eprintln!("aqvn: about window show failed: {err}");
+        }
+        if let Err(err) = window.set_focus() {
+            eprintln!("aqvn: about window focus failed: {err}");
+        }
+    } else {
+        match tauri::WebviewWindowBuilder::new(
+            app,
+            "about",
+            tauri::WebviewUrl::App("about.html".into()),
+        )
+        .title("About AQVN Workspace")
+        .inner_size(520.0, 580.0)
+        .resizable(false)
+        .build()
+        {
+            Ok(_) => eprintln!("aqvn: about window created"),
+            Err(err) => eprintln!("aqvn: failed to open about window: {err}"),
+        }
+    }
+}
+
+/// Tauri IPC command to open the About window.
+#[tauri::command]
+pub fn open_about(app: AppHandle) -> Result<(), String> {
+    open_about_window(&app);
+    Ok(())
+}
+
 /// Closes the current webview window.
 #[tauri::command]
 pub fn close_current_window(window: tauri::WebviewWindow) -> Result<(), String> {

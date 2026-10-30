@@ -1,7 +1,40 @@
 //! Native OS context menu and action dispatching (VAL-UI-002 and VAL-UI-003).
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem};
 use tauri::{AppHandle, Manager};
+
+pub const ZOOM_MIN: f64 = 0.7;
+pub const ZOOM_MAX: f64 = 2.0;
+pub const ZOOM_STEP: f64 = 0.1;
+pub const ZOOM_DEFAULT: f64 = 1.0;
+
+static CURRENT_ZOOM_PERCENT: AtomicU32 = AtomicU32::new(100);
+
+pub fn get_zoom_scale() -> f64 {
+    (CURRENT_ZOOM_PERCENT.load(Ordering::SeqCst) as f64) / 100.0
+}
+
+pub fn set_zoom_scale(scale: f64) -> f64 {
+    let clamped = scale.clamp(ZOOM_MIN, ZOOM_MAX);
+    let percent = (clamped * 100.0).round() as u32;
+    CURRENT_ZOOM_PERCENT.store(percent, Ordering::SeqCst);
+    (percent as f64) / 100.0
+}
+
+pub fn zoom_in_scale() -> f64 {
+    let current = get_zoom_scale();
+    set_zoom_scale(current + ZOOM_STEP)
+}
+
+pub fn zoom_out_scale() -> f64 {
+    let current = get_zoom_scale();
+    set_zoom_scale(current - ZOOM_STEP)
+}
+
+pub fn reset_zoom_scale() -> f64 {
+    set_zoom_scale(ZOOM_DEFAULT)
+}
 
 pub const ID_SETTINGS: &str = "settings";
 pub const ID_ZOOM_IN: &str = "zoom_in";
@@ -10,6 +43,7 @@ pub const ID_RESET_ZOOM: &str = "reset_zoom";
 pub const ID_RELOAD: &str = "reload";
 pub const ID_HARD_REFRESH: &str = "hard_refresh";
 pub const ID_HELP: &str = "help";
+pub const ID_ABOUT: &str = "about";
 
 pub const LABEL_SETTINGS: &str = "Settings";
 pub const LABEL_ZOOM_IN: &str = "Zoom In";
@@ -18,6 +52,7 @@ pub const LABEL_RESET_ZOOM: &str = "Reset Zoom";
 pub const LABEL_RELOAD: &str = "Reload";
 pub const LABEL_HARD_REFRESH: &str = "Hard Refresh";
 pub const LABEL_HELP: &str = "Help & Shortcuts";
+pub const LABEL_ABOUT: &str = "About AQVN Workspace";
 
 /// Builds the native OS context menu.
 pub fn build_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
@@ -45,6 +80,8 @@ pub fn build_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let help = MenuItemBuilder::with_id(ID_HELP, LABEL_HELP)
         .accelerator("F1")
         .build(app)?;
+    let sep4 = PredefinedMenuItem::separator(app)?;
+    let about = MenuItemBuilder::with_id(ID_ABOUT, LABEL_ABOUT).build(app)?;
 
     Menu::with_items(
         app,
@@ -59,6 +96,8 @@ pub fn build_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &hard_refresh,
             &sep3,
             &help,
+            &sep4,
+            &about,
         ],
     )
 }
@@ -73,6 +112,7 @@ pub enum ContextMenuAction {
     Reload,
     HardRefresh,
     Help,
+    About,
 }
 
 impl ContextMenuAction {
@@ -86,6 +126,7 @@ impl ContextMenuAction {
             ID_RELOAD => Some(Self::Reload),
             ID_HARD_REFRESH => Some(Self::HardRefresh),
             ID_HELP => Some(Self::Help),
+            ID_ABOUT => Some(Self::About),
             _ => None,
         }
     }
@@ -126,11 +167,31 @@ pub fn dispatch_action(
             super::open_help_window(app);
             Ok(())
         }
-        ContextMenuAction::ZoomIn
-        | ContextMenuAction::ZoomOut
-        | ContextMenuAction::ResetZoom
-        | ContextMenuAction::Reload
-        | ContextMenuAction::HardRefresh => {
+        ContextMenuAction::About => {
+            super::open_about_window(app);
+            Ok(())
+        }
+        ContextMenuAction::ZoomIn | ContextMenuAction::ZoomOut | ContextMenuAction::ResetZoom => {
+            let native_scale = match action {
+                ContextMenuAction::ZoomIn => Some(zoom_in_scale()),
+                ContextMenuAction::ZoomOut => Some(zoom_out_scale()),
+                ContextMenuAction::ResetZoom => Some(reset_zoom_scale()),
+                _ => None,
+            };
+
+            let target_window = window.cloned().or_else(|| app.get_webview_window("main"));
+            if let (Some(w), Some(scale)) = (&target_window, native_scale) {
+                let _ = w.set_zoom(scale);
+            }
+
+            if let Some(js) = action.js_action() {
+                if let Some(w) = &target_window {
+                    w.eval(js).map_err(|e| e.to_string())?;
+                }
+            }
+            Ok(())
+        }
+        ContextMenuAction::Reload | ContextMenuAction::HardRefresh => {
             if let Some(js) = action.js_action() {
                 if let Some(w) = window {
                     w.eval(js).map_err(|e| e.to_string())?;

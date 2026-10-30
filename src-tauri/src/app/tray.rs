@@ -45,8 +45,9 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let toggle = MenuItemBuilder::with_id("toggle", "Show / Hide window").build(app)?;
     let settings = MenuItemBuilder::with_id("settings", "Launcher Settings...").build(app)?;
     let help = MenuItemBuilder::with_id("help", "Help & Shortcuts (F1)...").build(app)?;
+    let about = MenuItemBuilder::with_id("about", "About AQVN Workspace...").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit AQVN Workspace").build(app)?;
-    let menu = Menu::with_items(app, &[&toggle, &settings, &help, &quit])?;
+    let menu = Menu::with_items(app, &[&toggle, &settings, &help, &about, &quit])?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(image(false))
@@ -57,6 +58,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
             "toggle" => super::toggle_main_window(app),
             "settings" => super::open_settings_window(app),
             "help" => super::open_help_window(app),
+            "about" => super::open_about_window(app),
             "quit" => {
                 // Process exit closes the proxy and the RFC/SSH listeners.
                 eprintln!("aqvn: quitting from tray menu");
@@ -67,7 +69,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     eprintln!(
-        "aqvn: tray registered (menu: Show / Hide window, Launcher Settings..., Help & Shortcuts (F1)..., Quit)"
+        "aqvn: tray registered (menu: Show / Hide window, Launcher Settings..., Help & Shortcuts (F1)..., About AQVN Workspace..., Quit)"
     );
     Ok(())
 }

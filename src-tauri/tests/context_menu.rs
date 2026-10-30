@@ -1,9 +1,9 @@
 //! Tests for Native OS Context Menu (VAL-UI-002 and VAL-UI-003).
 
 use aqvn_workspace_lib::app::context_menu::{
-    ContextMenuAction, ID_HARD_REFRESH, ID_HELP, ID_RELOAD, ID_RESET_ZOOM, ID_SETTINGS, ID_ZOOM_IN,
-    ID_ZOOM_OUT, LABEL_HARD_REFRESH, LABEL_HELP, LABEL_RELOAD, LABEL_RESET_ZOOM, LABEL_SETTINGS,
-    LABEL_ZOOM_IN, LABEL_ZOOM_OUT,
+    ContextMenuAction, ID_ABOUT, ID_HARD_REFRESH, ID_HELP, ID_RELOAD, ID_RESET_ZOOM, ID_SETTINGS,
+    ID_ZOOM_IN, ID_ZOOM_OUT, LABEL_ABOUT, LABEL_HARD_REFRESH, LABEL_HELP, LABEL_RELOAD,
+    LABEL_RESET_ZOOM, LABEL_SETTINGS, LABEL_ZOOM_IN, LABEL_ZOOM_OUT,
 };
 
 #[test]
@@ -15,6 +15,7 @@ fn test_context_menu_item_constants() {
     assert_eq!(ID_RELOAD, "reload");
     assert_eq!(ID_HARD_REFRESH, "hard_refresh");
     assert_eq!(ID_HELP, "help");
+    assert_eq!(ID_ABOUT, "about");
 
     assert_eq!(LABEL_SETTINGS, "Settings");
     assert_eq!(LABEL_ZOOM_IN, "Zoom In");
@@ -23,6 +24,7 @@ fn test_context_menu_item_constants() {
     assert_eq!(LABEL_RELOAD, "Reload");
     assert_eq!(LABEL_HARD_REFRESH, "Hard Refresh");
     assert_eq!(LABEL_HELP, "Help & Shortcuts");
+    assert_eq!(LABEL_ABOUT, "About AQVN Workspace");
 }
 
 #[test]
@@ -58,6 +60,10 @@ fn test_context_menu_action_resolution() {
     assert_eq!(
         ContextMenuAction::from_id("help"),
         Some(ContextMenuAction::Help)
+    );
+    assert_eq!(
+        ContextMenuAction::from_id("about"),
+        Some(ContextMenuAction::About)
     );
     assert_eq!(ContextMenuAction::from_id("unknown"), None);
 }
@@ -103,6 +109,11 @@ fn test_context_menu_action_scripts() {
         ContextMenuAction::Help.js_action(),
         None,
         "Help is a native window action, not js_action"
+    );
+    assert_eq!(
+        ContextMenuAction::About.js_action(),
+        None,
+        "About is a native window action, not js_action"
     );
 }
 
@@ -150,6 +161,7 @@ fn test_context_menu_items_construction() {
         "Reload",
         "Hard Refresh",
         "Help & Shortcuts",
+        "About AQVN Workspace",
     ] {
         assert!(
             ctx_rs.contains(label),
@@ -179,5 +191,99 @@ fn test_ui_container_contextmenu_listener() {
     assert!(
         container_js.contains("getSelection") || container_js.contains("selection"),
         "ui/container.js must check text selection before triggering context menu"
+    );
+}
+
+#[test]
+fn test_capabilities_and_build_manifest_permissions() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let build_rs = std::fs::read_to_string(manifest_dir.join("build.rs")).unwrap();
+    let caps_default =
+        std::fs::read_to_string(manifest_dir.join("capabilities/default.json")).unwrap();
+
+    // Verify build.rs declares app commands via AppManifest
+    assert!(
+        build_rs.contains("AppManifest"),
+        "build.rs must configure AppManifest with application commands"
+    );
+    let expected_commands = [
+        "show_context_menu",
+        "open_settings",
+        "open_help",
+        "open_about",
+        "set_tray_busy",
+        "notify_task_complete",
+        "close_current_window",
+    ];
+    for cmd in expected_commands {
+        assert!(
+            build_rs.contains(&format!("\"{cmd}\"")),
+            "build.rs AppManifest commands list must include {cmd}"
+        );
+    }
+
+    // Verify capabilities allow the app commands for remote proxy origin
+    let parsed: serde_json::Value =
+        serde_json::from_str(&caps_default).expect("capabilities/default.json must be valid JSON");
+    let remote_urls = parsed["remote"]["urls"]
+        .as_array()
+        .expect("remote.urls must be an array")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(
+        remote_urls.contains(&"http://127.0.0.1:*"),
+        "capabilities/default.json remote.urls must include http://127.0.0.1:*"
+    );
+    assert!(
+        remote_urls.contains(&"http://localhost:*"),
+        "capabilities/default.json remote.urls must include http://localhost:*"
+    );
+
+    let permissions = parsed["permissions"]
+        .as_array()
+        .expect("permissions must be an array")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect::<Vec<_>>();
+
+    let expected_permissions = [
+        "allow-show-context-menu",
+        "allow-open-settings",
+        "allow-open-help",
+        "allow-open-about",
+        "allow-set-tray-busy",
+        "allow-notify-task-complete",
+        "allow-close-current-window",
+    ];
+    for perm in expected_permissions {
+        assert!(
+            permissions.contains(&perm),
+            "capabilities/default.json permissions must include {perm}"
+        );
+    }
+
+    // Verify generated ACL schemas
+    let acl_manifest =
+        std::fs::read_to_string(manifest_dir.join("gen/schemas/acl-manifests.json")).unwrap();
+    let parsed_acl: serde_json::Value =
+        serde_json::from_str(&acl_manifest).expect("acl-manifests.json must be valid JSON");
+    let app_acl_permissions = &parsed_acl["__app-acl__"]["permissions"];
+    for perm in expected_permissions {
+        assert!(
+            app_acl_permissions.get(perm).is_some(),
+            "gen/schemas/acl-manifests.json must include {perm} in __app-acl__"
+        );
+    }
+}
+
+#[test]
+fn test_dispatch_action_handles_native_set_zoom() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let ctx_rs = std::fs::read_to_string(manifest_dir.join("src/app/context_menu.rs")).unwrap();
+    assert!(
+        ctx_rs.contains(".set_zoom("),
+        "dispatch_action in context_menu.rs must invoke native webview.set_zoom"
     );
 }

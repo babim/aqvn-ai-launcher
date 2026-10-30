@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Core permissions for the AQVN Workspace main window",
-  "windows": ["main", "settings", "help"],
+  "windows": ["main", "settings", "help", "about"],
   "remote": {
     "urls": [
       "http://127.0.0.1:*",
@@ -18,6 +18,13 @@
     "notification:allow-notify",
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",
-    "store:default"
+    "store:default",
+    "allow-open-settings",
+    "allow-open-help",
+    "allow-open-about",
+    "allow-show-context-menu",
+    "allow-set-tray-busy",
+    "allow-notify-task-complete",
+    "allow-close-current-window"
   ]
 }

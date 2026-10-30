@@ -284,3 +284,61 @@ fn test_help_window_helper_exists() {
         "ui/container.js must handle F1 keydown"
     );
 }
+
+#[test]
+fn test_about_window_helper_exists() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let app_mod = std::fs::read_to_string(manifest_dir.join("src/app/mod.rs")).unwrap();
+    assert!(
+        app_mod.contains("pub fn open_about_window"),
+        "app/mod.rs must define open_about_window"
+    );
+    assert!(
+        app_mod.contains("pub fn open_about("),
+        "app/mod.rs must define open_about IPC command"
+    );
+    assert!(
+        app_mod.contains("about.html"),
+        "open_about_window must load about.html"
+    );
+    assert!(
+        app_mod.contains("About AQVN Workspace"),
+        "open_about_window must set window title"
+    );
+
+    let tray_rs = std::fs::read_to_string(manifest_dir.join("src/app/tray.rs")).unwrap();
+    assert!(
+        tray_rs.contains("About AQVN Workspace..."),
+        "tray.rs must contain About AQVN Workspace... menu item"
+    );
+    assert!(
+        tray_rs.contains("open_about_window"),
+        "tray.rs must route about menu item to open_about_window"
+    );
+
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib_rs.contains("app::open_about"),
+        "lib.rs must register app::open_about command"
+    );
+
+    let cap = std::fs::read_to_string(manifest_dir.join("capabilities/default.json")).unwrap();
+    assert!(
+        cap.contains("\"about\""),
+        "capabilities/default.json must include about window"
+    );
+    assert!(
+        cap.contains("allow-open-about"),
+        "capabilities/default.json must allow open_about command"
+    );
+
+    let container_js = std::fs::read_to_string(manifest_dir.join("../ui/container.js")).unwrap();
+    assert!(
+        container_js.contains("open_about"),
+        "ui/container.js must invoke open_about"
+    );
+    assert!(
+        container_js.contains("openAbout"),
+        "ui/container.js must expose openAbout in bridgeApi"
+    );
+}

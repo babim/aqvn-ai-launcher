@@ -11,5 +11,6 @@ pub mod protocol;
 
 pub use client::{GatewayClient, GatewayConfig, GatewayHandle};
 pub use protocol::{
-    ConnectorBrowserOp, ConnectorBrowserOpResult, ConnectorHello, ConnectorHelloAck, ScopeConfig,
+    AuthPayload, ConnectorBrowserOp, ConnectorBrowserOpResult, ConnectorHello, ConnectorHelloAck,
+    GatewayMetadata, ScopeCapability, ScopeConfig,
 };

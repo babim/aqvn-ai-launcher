@@ -279,6 +279,7 @@ async fn test_gateway_pty_websocket_roundtrip() {
         server_url: format!("http://127.0.0.1:{port}"),
         gateway_id: "test-gw-ws-exec".to_string(),
         host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
         scope_files: false,
         scope_exec: true,
         scope_browser: false,

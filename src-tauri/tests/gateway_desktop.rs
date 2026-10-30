@@ -322,6 +322,7 @@ async fn test_gateway_computer_use() {
         server_url: format!("http://127.0.0.1:{port}"),
         gateway_id: "test-gw-desktop-1".to_string(),
         host_label: "test-host".to_string(),
+        session_cookie: None,
         scope_files: false,
         scope_exec: false,
         scope_browser: false,

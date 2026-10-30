@@ -17,10 +17,12 @@ use aqvn_workspace_lib::connector::protocol::{
 };
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::http::{header, HeaderMap};
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use futures_util::sink::SinkExt;
+use serde_json::Value;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,43 +33,140 @@ use tokio::sync::Mutex;
 struct StubGatewayServer {
     hello_count: AtomicUsize,
     last_hello: Mutex<Option<ConnectorHello>>,
+    last_cookie: Mutex<Option<String>>,
     ping_count: AtomicUsize,
     disconnect_first_client: AtomicBool,
 }
 
-async fn handle_ws(ws: WebSocketUpgrade, State(stub): State<Arc<StubGatewayServer>>) -> Response {
+async fn handle_ws(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    State(stub): State<Arc<StubGatewayServer>>,
+) -> Response {
+    if let Some(cookie) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) {
+        *stub.last_cookie.lock().await = Some(cookie.to_string());
+    }
     ws.on_upgrade(move |socket| handle_socket(socket, stub))
 }
 
 async fn handle_socket(mut socket: WebSocket, stub: Arc<StubGatewayServer>) {
-    // 1. Receive connector_hello
-    if let Some(Ok(axum::extract::ws::Message::Text(text))) = socket.recv().await {
-        if let Ok(hello) = serde_json::from_str::<ConnectorHello>(&text) {
-            stub.hello_count.fetch_add(1, Ordering::SeqCst);
-            *stub.last_hello.lock().await = Some(hello);
+    // 1. Send Engine.IO open packet
+    let open_pkt = serde_json::json!({
+        "sid": "mock-stub-sid-1",
+        "upgrades": [],
+        "pingInterval": 25000,
+        "pingTimeout": 20000
+    });
+    if socket
+        .send(axum::extract::ws::Message::Text(
+            format!("0{open_pkt}").into(),
+        ))
+        .await
+        .is_err()
+    {
+        return;
+    }
 
-            // Reply with connector_hello_ack
-            let ack = serde_json::json!({
-                "type": MSG_TYPE_HELLO_ACK,
-                "status": "ok"
-            });
-            let _ = socket
-                .send(axum::extract::ws::Message::Text(ack.to_string().into()))
-                .await;
+    // 2. Wait for namespace /ws join packet: 40/ws,
+    while let Some(Ok(msg)) = socket.recv().await {
+        match msg {
+            axum::extract::ws::Message::Text(text) => {
+                if text.starts_with("40/ws") {
+                    // Send namespace connect confirmation
+                    let _ = socket
+                        .send(axum::extract::ws::Message::Text(
+                            "40/ws,{\"sid\":\"mock-client-sid-1\"}".into(),
+                        ))
+                        .await;
+                    break;
+                } else if text.contains(MSG_TYPE_HELLO) {
+                    // Direct text hello (legacy)
+                    if let Ok(hello) = serde_json::from_str::<ConnectorHello>(&text) {
+                        stub.hello_count.fetch_add(1, Ordering::SeqCst);
+                        *stub.last_hello.lock().await = Some(hello);
 
-            if stub.disconnect_first_client.swap(false, Ordering::SeqCst) {
-                let _ = socket.close().await;
-                return;
+                        let ack = serde_json::json!({
+                            "type": MSG_TYPE_HELLO_ACK,
+                            "status": "ok"
+                        });
+                        let _ = socket
+                            .send(axum::extract::ws::Message::Text(ack.to_string().into()))
+                            .await;
+
+                        if stub.disconnect_first_client.swap(false, Ordering::SeqCst) {
+                            let _ = socket.close().await;
+                            return;
+                        }
+                    }
+                    break;
+                }
             }
+            axum::extract::ws::Message::Close(_) => return,
+            _ => {}
         }
     }
 
-    // 2. Receive frames (including pings)
+    // 3. Receive connector_hello
+    while let Some(Ok(msg)) = socket.recv().await {
+        match msg {
+            axum::extract::ws::Message::Text(text) => {
+                let hello_opt = if text.starts_with("42/ws,") {
+                    if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&text[6..]) {
+                        if arr.first().and_then(Value::as_str) == Some("connector_hello") {
+                            arr.get(1).and_then(|v| {
+                                serde_json::from_value::<ConnectorHello>(v.clone()).ok()
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else if let Ok(hello) = serde_json::from_str::<ConnectorHello>(&text) {
+                    Some(hello)
+                } else {
+                    None
+                };
+
+                if let Some(hello) = hello_opt {
+                    stub.hello_count.fetch_add(1, Ordering::SeqCst);
+                    *stub.last_hello.lock().await = Some(hello);
+
+                    let ack_payload = serde_json::json!({
+                        "type": MSG_TYPE_HELLO_ACK,
+                        "status": "ok"
+                    });
+                    let ack_msg = format!("42/ws,[\"{MSG_TYPE_HELLO_ACK}\",{ack_payload}]");
+                    let _ = socket
+                        .send(axum::extract::ws::Message::Text(ack_msg.into()))
+                        .await;
+
+                    if stub.disconnect_first_client.swap(false, Ordering::SeqCst) {
+                        let _ = socket.close().await;
+                        return;
+                    }
+                    break;
+                }
+            }
+            axum::extract::ws::Message::Close(_) => return,
+            _ => {}
+        }
+    }
+
+    // 4. Receive frames (including pings)
     while let Some(Ok(msg)) = socket.recv().await {
         match msg {
             axum::extract::ws::Message::Ping(data) => {
                 stub.ping_count.fetch_add(1, Ordering::SeqCst);
                 let _ = socket.send(axum::extract::ws::Message::Pong(data)).await;
+            }
+            axum::extract::ws::Message::Text(text) => {
+                if text == "2" || text.starts_with("2") {
+                    stub.ping_count.fetch_add(1, Ordering::SeqCst);
+                    let _ = socket
+                        .send(axum::extract::ws::Message::Text("3".into()))
+                        .await;
+                }
             }
             axum::extract::ws::Message::Close(_) => break,
             _ => {}
@@ -78,6 +177,7 @@ async fn handle_socket(mut socket: WebSocket, stub: Arc<StubGatewayServer>) {
 async fn spawn_stub_server() -> (Arc<StubGatewayServer>, u16, tokio::task::JoinHandle<()>) {
     let stub = Arc::new(StubGatewayServer::default());
     let router = Router::new()
+        .route("/socket.io/", get(handle_ws))
         .route("/ws", get(handle_ws))
         .with_state(Arc::clone(&stub));
 
@@ -102,6 +202,7 @@ async fn test_outbound_handshake_hello() {
         server_url: format!("http://127.0.0.1:{port}"),
         gateway_id: "test-gw-12345".to_string(),
         host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
         scope_files: true,
         scope_exec: true,
         scope_browser: true,
@@ -162,6 +263,7 @@ async fn test_heartbeat_ping() {
         server_url: format!("http://127.0.0.1:{port}"),
         gateway_id: "test-gw-ping".to_string(),
         host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
         scope_files: true,
         scope_exec: false,
         scope_browser: false,
@@ -201,6 +303,7 @@ async fn test_auto_reconnect_on_disconnect() {
         server_url: format!("http://127.0.0.1:{port}"),
         gateway_id: "test-gw-reconnect".to_string(),
         host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
         scope_files: true,
         scope_exec: true,
         scope_browser: true,
@@ -243,6 +346,7 @@ async fn test_gateway_scopes_and_toggle() {
         server_url: format!("http://127.0.0.1:{port}"),
         gateway_id: "test-gw-scopes".to_string(),
         host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
         scope_files: true,
         scope_exec: false,
         scope_browser: true,
@@ -355,26 +459,127 @@ async fn test_gateway_supervisor_hot_reload_and_master_toggle() {
     sup_handle.abort();
 }
 
+#[tokio::test]
+async fn test_gateway_session_cookie_auth() {
+    let (stub, port, _server) = spawn_stub_server().await;
+
+    let config = GatewayConfig {
+        enabled: true,
+        server_url: format!("http://127.0.0.1:{port}"),
+        gateway_id: "test-gw-cookie".to_string(),
+        host_label: "AQVN-Test-Host".to_string(),
+        scope_files: true,
+        scope_exec: false,
+        scope_browser: false,
+        scope_desktop: false,
+        ping_interval_secs: 25,
+        reconnect_delay_ms: 200,
+        session_cookie: Some("session_runtime123=tok_abc456".to_string()),
+    };
+
+    let client = GatewayClient::new(config);
+    let (handle, join_handle) = client.start();
+
+    handle
+        .wait_for_handshake(Duration::from_secs(5))
+        .await
+        .expect("handshake should complete within 5s");
+
+    let received_cookie = stub
+        .last_cookie
+        .lock()
+        .await
+        .clone()
+        .expect("must have received Cookie header");
+
+    assert!(
+        received_cookie.contains("session_runtime123=tok_abc456"),
+        "cookie header must contain session cookie, got: {received_cookie}"
+    );
+
+    handle.stop();
+    let _ = join_handle.await;
+}
+
+#[tokio::test]
+async fn test_gateway_cookie_jar_from_file_auth() {
+    let (stub, port, _server) = spawn_stub_server().await;
+    let server_url = format!("http://127.0.0.1:{port}");
+
+    // Persist a session cookie into the CookieJar on disk for this origin
+    let cookie_file = aqvn_workspace_lib::proxy::upstream::cookie_file_path(&server_url);
+    let mut jar = aqvn_workspace_lib::proxy::jar::CookieJar::new();
+    jar.store("session_disk123=token_file_789; Path=/; HttpOnly");
+    jar.save_to_file(&cookie_file)
+        .expect("save test cookie jar");
+
+    let config = GatewayConfig {
+        enabled: true,
+        server_url: server_url.clone(),
+        gateway_id: "test-gw-cookie-jar".to_string(),
+        host_label: "AQVN-Test-Host".to_string(),
+        scope_files: true,
+        scope_exec: false,
+        scope_browser: false,
+        scope_desktop: false,
+        ping_interval_secs: 25,
+        reconnect_delay_ms: 200,
+        session_cookie: None, // No explicit cookie, must load from disk CookieJar
+    };
+
+    let client = GatewayClient::new(config);
+    let (handle, join_handle) = client.start();
+
+    handle
+        .wait_for_handshake(Duration::from_secs(5))
+        .await
+        .expect("handshake should complete within 5s");
+
+    let received_cookie = stub
+        .last_cookie
+        .lock()
+        .await
+        .clone()
+        .expect("must have received Cookie header from disk jar");
+
+    assert!(
+        received_cookie.contains("session_disk123=token_file_789"),
+        "cookie header must contain session cookie loaded from disk jar, got: {received_cookie}"
+    );
+
+    handle.stop();
+    let _ = join_handle.await;
+    aqvn_workspace_lib::proxy::jar::CookieJar::remove_file(&cookie_file);
+}
+
 #[test]
 fn test_build_ws_url_variants() {
     assert_eq!(
         build_ws_url("http://127.0.0.1:8080").unwrap(),
-        "ws://127.0.0.1:8080/ws"
+        "ws://127.0.0.1:8080/socket.io/?EIO=4&transport=websocket"
     );
     assert_eq!(
         build_ws_url("https://a0.matmagoc.com").unwrap(),
-        "wss://a0.matmagoc.com/ws"
+        "wss://a0.matmagoc.com/socket.io/?EIO=4&transport=websocket"
+    );
+    assert_eq!(
+        build_ws_url("http://127.0.0.1:8080/").unwrap(),
+        "ws://127.0.0.1:8080/socket.io/?EIO=4&transport=websocket"
     );
     assert_eq!(
         build_ws_url("http://127.0.0.1:8080/ws").unwrap(),
-        "ws://127.0.0.1:8080/ws"
+        "ws://127.0.0.1:8080/socket.io/?EIO=4&transport=websocket"
     );
     assert_eq!(
         build_ws_url("ws://localhost:3000").unwrap(),
-        "ws://localhost:3000/ws"
+        "ws://localhost:3000/socket.io/?EIO=4&transport=websocket"
     );
     assert_eq!(
         build_ws_url("wss://localhost:3000/ws").unwrap(),
-        "wss://localhost:3000/ws"
+        "wss://localhost:3000/socket.io/?EIO=4&transport=websocket"
+    );
+    assert_eq!(
+        build_ws_url("wss://localhost:3000/socket.io/?EIO=4&transport=websocket").unwrap(),
+        "wss://localhost:3000/socket.io/?EIO=4&transport=websocket"
     );
 }

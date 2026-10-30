@@ -162,6 +162,7 @@ pub fn run() {
             app::notify::notify_task_complete,
             app::open_settings,
             app::open_help,
+            app::open_about,
             app::close_current_window,
             app::context_menu::show_context_menu
         ])

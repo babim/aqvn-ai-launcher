@@ -498,6 +498,7 @@ async fn test_gateway_client_browser_op_dispatch() {
         server_url: format!("http://{}:{ws_port}", Ipv4Addr::LOCALHOST),
         gateway_id: "test-gw-browser-ws".to_string(),
         host_label: "test-host".to_string(),
+        session_cookie: None,
         scope_files: false,
         scope_exec: false,
         scope_browser: true,

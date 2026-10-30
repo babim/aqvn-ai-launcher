@@ -332,18 +332,22 @@
   }
 
   function applyZoom(level) {
-    if (typeof document === 'undefined') return 1;
     var zoom = clampZoom(level);
-    if (document.documentElement && document.documentElement.style) {
-      document.documentElement.style.zoom = String(zoom);
-    }
-    if (document.body && document.body.style) {
-      document.body.style.zoom = String(zoom);
+    if (typeof document !== 'undefined') {
+      if (document.documentElement && document.documentElement.style) {
+        document.documentElement.style.zoom = String(zoom);
+      }
+      if (document.body && document.body.style) {
+        document.body.style.zoom = String(zoom);
+      }
     }
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem(ZOOM_KEY, String(zoom));
       }
+    } catch (err) {}
+    try {
+      invokeIpc('plugin:webview|set_webview_zoom', { value: zoom });
     } catch (err) {}
     return zoom;
   }
@@ -398,29 +402,24 @@
 
   function installKeyboardShortcuts(dom) {
     function keyHandler(e) {
-      var key = String(e.key || '').toLowerCase();
+      if (!e) return;
+      var rawKey = String(e.key || '');
+      var key = rawKey.toLowerCase();
+      var code = String(e.code || '');
       var isCtrl = Boolean(e.ctrlKey || e.metaKey);
 
       if (!isCtrl && !e.altKey) {
-        if (e.key === 'F1') {
+        if (key === 'f1' || code === 'F1') {
           if (typeof e.preventDefault === 'function') e.preventDefault();
-          if (
-            typeof window !== 'undefined' &&
-            window.__TAURI_INTERNALS__ &&
-            typeof window.__TAURI_INTERNALS__.invoke === 'function'
-          ) {
-            window.__TAURI_INTERNALS__.invoke('open_help');
-          } else {
-            invokeIpc('open_help');
-          }
+          invokeIpc('open_help');
           return;
         }
-        if (e.key === 'F5') {
+        if (key === 'f5' || code === 'F5') {
           if (typeof e.preventDefault === 'function') e.preventDefault();
           hardRefresh();
           return;
         }
-        if (key === 'f11') {
+        if (key === 'f11' || code === 'F11') {
           if (typeof e.preventDefault === 'function') e.preventDefault();
           toggleFocusMode();
           return;
@@ -428,43 +427,47 @@
       }
 
       if (isCtrl && !e.altKey) {
-        if (e.key === ',') {
+        if (rawKey === ',' || code === 'Comma') {
           if (typeof e.preventDefault === 'function') e.preventDefault();
-          if (
-            typeof window !== 'undefined' &&
-            window.__TAURI_INTERNALS__ &&
-            typeof window.__TAURI_INTERNALS__.invoke === 'function'
-          ) {
-            window.__TAURI_INTERNALS__.invoke('open_settings');
-          } else {
-            invokeIpc('open_settings');
-          }
+          invokeIpc('open_settings');
           return;
         }
-        if (e.shiftKey && (key === 'f' || e.code === 'KeyF')) {
+        if (e.shiftKey && (key === 'f' || code === 'KeyF')) {
           if (typeof e.preventDefault === 'function') e.preventDefault();
           toggleFocusMode();
           return;
         }
-        if (e.shiftKey && (key === 'r' || e.code === 'KeyR')) {
+        if (e.shiftKey && (key === 'r' || code === 'KeyR')) {
           if (typeof e.preventDefault === 'function') e.preventDefault();
           hardRefresh();
           return;
         }
         // Zoom in: Ctrl+=, Ctrl++, or NumpadAdd (can have shiftKey or not)
-        if (key === '=' || key === '+' || e.code === 'Equal' || e.code === 'NumpadAdd') {
+        if (
+          rawKey === '=' ||
+          rawKey === '+' ||
+          key === 'add' ||
+          code === 'Equal' ||
+          code === 'NumpadAdd'
+        ) {
           if (typeof e.preventDefault === 'function') e.preventDefault();
           zoomIn();
           return;
         }
         // Zoom out: Ctrl+-, Ctrl+_, or NumpadSubtract
-        if (!e.shiftKey && (key === '-' || key === '_' || e.code === 'Minus' || e.code === 'NumpadSubtract')) {
+        if (
+          rawKey === '-' ||
+          rawKey === '_' ||
+          key === 'subtract' ||
+          code === 'Minus' ||
+          code === 'NumpadSubtract'
+        ) {
           if (typeof e.preventDefault === 'function') e.preventDefault();
           zoomOut();
           return;
         }
         // Reset zoom: Ctrl+0, Numpad0, or Digit0
-        if (!e.shiftKey && (key === '0' || e.code === 'Digit0' || e.code === 'Numpad0')) {
+        if (!e.shiftKey && (rawKey === '0' || code === 'Digit0' || code === 'Numpad0')) {
           if (typeof e.preventDefault === 'function') e.preventDefault();
           resetZoom();
           return;
@@ -534,10 +537,15 @@
     }
   }
 
+  function openAbout() {
+    return invokeIpc('open_about');
+  }
+
   var bridgeApi = {
     setTaskState: setTaskState,
     notifyTaskComplete: notifyTaskComplete,
     updateTrayBusy: updateTrayBusy,
+    openAbout: openAbout,
     handleWebSocketMessage: handleWebSocketMessage,
     checkDomState: checkDomState,
     installKeyboardShortcuts: installKeyboardShortcuts,

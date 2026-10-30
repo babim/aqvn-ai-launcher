@@ -1746,6 +1746,33 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     // Zoom in with Shift (Ctrl+Shift+= on standard keyboard)
     assert.equal(fireKey('+', true, { shiftKey: true }), true);
     assert.equal(document.body.style.zoom, '1.1');
+
+    // Zoom out with Ctrl+_ (Shift+Minus)
+    assert.equal(fireKey('_', true, { shiftKey: true, code: 'Minus' }), true);
+    assert.equal(document.body.style.zoom, '1');
+
+    // Zoom in with NumpadAdd
+    assert.equal(fireKey('Add', true, { code: 'NumpadAdd' }), true);
+    assert.equal(document.body.style.zoom, '1.1');
+
+    // Zoom out with NumpadSubtract
+    assert.equal(fireKey('Subtract', true, { code: 'NumpadSubtract' }), true);
+    assert.equal(document.body.style.zoom, '1');
+
+    // Zoom in, then reset with Numpad0
+    assert.equal(fireKey('+', true), true);
+    assert.equal(document.body.style.zoom, '1.1');
+    assert.equal(fireKey('0', true, { code: 'Numpad0' }), true);
+    assert.equal(document.body.style.zoom, '1');
+
+    // Native Tauri webview zoom calls must be dispatched alongside CSS zoom
+    const nativeZoomCalls = harness.calls.filter(
+      (c) => c.command === 'plugin:webview|set_webview_zoom'
+    );
+    assert.ok(
+      nativeZoomCalls.length > 0,
+      'Native plugin:webview|set_webview_zoom IPC must be invoked on zoom'
+    );
   });
 
   test('test_web_notification_bridge handles hard refresh shortcuts (F5, Ctrl+Shift+R)', () => {
@@ -1797,6 +1824,101 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     assert.equal(prevented, true, 'contextmenu without selection must call preventDefault()');
     const ctxCalls = calls.filter((c) => c.command === 'show_context_menu');
     assert.equal(ctxCalls.length, 1, 'show_context_menu IPC command must be dispatched');
+  });
+
+  test('test_web_notification_bridge allows native context menu when text is selected', () => {
+    const harness = createContainerHarness();
+    const { calls, docListeners } = harness;
+    const contextMenuListeners = docListeners['contextmenu'] || [];
+
+    // Mock active text selection on window
+    harness.context.window.getSelection = () => ({
+      toString: () => 'selected text snippet'
+    });
+
+    let prevented = false;
+    const event = {
+      preventDefault: () => {
+        prevented = true;
+      }
+    };
+    for (const fn of contextMenuListeners) {
+      fn(event);
+    }
+    assert.equal(prevented, false, 'contextmenu with selection must NOT call preventDefault()');
+    const ctxCalls = calls.filter((c) => c.command === 'show_context_menu');
+    assert.equal(ctxCalls.length, 0, 'show_context_menu must NOT be dispatched when text is selected');
+  });
+
+  test('test_web_notification_bridge shortcuts work when focus is in input/textarea without blocking typing', () => {
+    const harness = createContainerHarness();
+    const { calls, docListeners } = harness;
+    const keydownListeners = docListeners['keydown'] || [];
+
+    // Mock activeElement as an input element
+    const inputEl = {
+      tagName: 'INPUT',
+      selectionStart: 5,
+      selectionEnd: 5
+    };
+    harness.document.activeElement = inputEl;
+
+    function fireKey(key, ctrlKey = false, shiftKey = false, extra = {}) {
+      let prevented = false;
+      const event = {
+        ctrlKey,
+        metaKey: false,
+        shiftKey,
+        altKey: false,
+        key,
+        target: inputEl,
+        preventDefault: () => {
+          prevented = true;
+        },
+        ...extra
+      };
+      for (const fn of keydownListeners) {
+        fn(event);
+      }
+      return prevented;
+    }
+
+    // Standard typing should NOT be prevented
+    assert.equal(fireKey('a', false, false), false, 'Normal typing "a" must not call preventDefault()');
+    assert.equal(fireKey('1', false, false), false, 'Normal typing "1" must not call preventDefault()');
+    assert.equal(fireKey('+', false, false), false, 'Normal typing "+" must not call preventDefault()');
+    assert.equal(fireKey('-', false, false), false, 'Normal typing "-" must not call preventDefault()');
+    assert.equal(fireKey('0', false, false), false, 'Normal typing "0" must not call preventDefault()');
+
+    // Shortcuts should still trigger and call preventDefault
+    // Ctrl+,
+    assert.equal(fireKey(',', true, false), true, 'Ctrl+, in input must trigger');
+    assert.ok(calls.some((c) => c.command === 'open_settings'), 'open_settings must be called');
+
+    // F1
+    assert.equal(fireKey('F1', false, false), true, 'F1 in input must trigger');
+    assert.ok(calls.some((c) => c.command === 'open_help'), 'open_help must be called');
+
+    // F5
+    assert.equal(fireKey('F5', false, false), true, 'F5 in input must trigger');
+
+    // Zoom In: Ctrl+=
+    assert.equal(fireKey('=', true, false), true, 'Ctrl+= in input must trigger');
+
+    // Zoom Out: Ctrl+-
+    assert.equal(fireKey('-', true, false), true, 'Ctrl+- in input must trigger');
+
+    // Reset Zoom: Ctrl+0
+    assert.equal(fireKey('0', true, false), true, 'Ctrl+0 in input must trigger');
+  });
+
+  test('test_web_notification_bridge exposes openAbout on bridgeApi', () => {
+    const harness = createContainerHarness();
+    const { bridge, calls } = harness;
+    assert.equal(typeof bridge.openAbout, 'function', 'openAbout must be exposed on bridgeApi');
+    bridge.openAbout();
+    const aboutCalls = calls.filter((c) => c.command === 'open_about');
+    assert.equal(aboutCalls.length, 1, 'open_about IPC command must be dispatched');
   });
 });
 

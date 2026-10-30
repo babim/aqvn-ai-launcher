@@ -28,8 +28,50 @@ pub const SCOPE_EXEC: &str = "code_execution";
 pub const SCOPE_BROWSER: &str = "browser";
 pub const SCOPE_DESKTOP: &str = "computer_use";
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_gateway_version() -> u32 {
+    1
+}
+
+fn default_gateway_kind() -> String {
+    "launcher".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScopeCapability {
+    #[serde(default = "default_true")]
+    pub supported: bool,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayMetadata {
+    #[serde(default = "default_gateway_version")]
+    pub version: u32,
+    #[serde(default = "default_gateway_kind")]
+    pub kind: String,
+    #[serde(default = "default_true")]
+    pub master_enabled: bool,
+    #[serde(default)]
+    pub scopes: HashMap<String, ScopeCapability>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthPayload {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub handlers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScopeConfig {
+    #[serde(default = "default_true")]
+    pub supported: bool,
     pub enabled: bool,
 }
 
@@ -50,6 +92,10 @@ pub struct ConnectorHello {
     pub host_browser: Option<ScopeConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub computer_use: Option<ScopeConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<GatewayMetadata>,
 }
 
 impl ConnectorHello {
@@ -63,10 +109,66 @@ impl ConnectorHello {
             capabilities.insert(scope.clone(), true);
         }
 
-        let has_files = scopes.iter().any(|s| s == SCOPE_FILES);
-        let has_exec = scopes.iter().any(|s| s == SCOPE_EXEC);
-        let has_browser = scopes.iter().any(|s| s == SCOPE_BROWSER);
-        let has_desktop = scopes.iter().any(|s| s == SCOPE_DESKTOP);
+        let has_files = scopes.iter().any(|s| s == SCOPE_FILES || s == "files");
+        let has_exec = scopes.iter().any(|s| s == SCOPE_EXEC || s == "exec");
+        let has_browser = scopes.iter().any(|s| s == SCOPE_BROWSER || s == "browser");
+        let has_desktop = scopes.iter().any(|s| s == SCOPE_DESKTOP || s == "desktop");
+
+        let mut gateway_scopes = HashMap::new();
+        gateway_scopes.insert(
+            "files".to_string(),
+            ScopeCapability {
+                supported: true,
+                enabled: has_files,
+            },
+        );
+        gateway_scopes.insert(
+            "exec".to_string(),
+            ScopeCapability {
+                supported: true,
+                enabled: has_exec,
+            },
+        );
+        gateway_scopes.insert(
+            "browser".to_string(),
+            ScopeCapability {
+                supported: true,
+                enabled: has_browser,
+            },
+        );
+        gateway_scopes.insert(
+            "desktop".to_string(),
+            ScopeCapability {
+                supported: true,
+                enabled: has_desktop,
+            },
+        );
+
+        let gateway = GatewayMetadata {
+            version: 1,
+            kind: "launcher".to_string(),
+            master_enabled: true,
+            scopes: gateway_scopes,
+        };
+
+        let mut auth_handlers = Vec::new();
+        if has_files {
+            auth_handlers.push("files".to_string());
+        }
+        if has_exec {
+            auth_handlers.push("exec".to_string());
+        }
+        if has_browser {
+            auth_handlers.push("browser".to_string());
+        }
+        if has_desktop {
+            auth_handlers.push("desktop".to_string());
+        }
+
+        let auth = AuthPayload {
+            handlers: auth_handlers,
+            token: None,
+        };
 
         Self {
             msg_type: MSG_TYPE_HELLO.to_string(),
@@ -74,16 +176,37 @@ impl ConnectorHello {
             gateway_id: gateway_id.into(),
             host_label: host_label.into(),
             capabilities,
-            remote_files: Some(ScopeConfig { enabled: has_files }),
-            remote_exec: Some(ScopeConfig { enabled: has_exec }),
+            remote_files: Some(ScopeConfig {
+                supported: true,
+                enabled: has_files,
+            }),
+            remote_exec: Some(ScopeConfig {
+                supported: true,
+                enabled: has_exec,
+            }),
             host_browser: Some(ScopeConfig {
+                supported: true,
                 enabled: has_browser,
             }),
             computer_use: Some(ScopeConfig {
+                supported: true,
                 enabled: has_desktop,
             }),
+            auth: Some(auth),
+            gateway: Some(gateway),
             scopes,
         }
+    }
+
+    pub fn new_legacy(
+        gateway_id: impl Into<String>,
+        host_label: impl Into<String>,
+        scopes: Vec<String>,
+    ) -> Self {
+        let mut hello = Self::new(gateway_id, host_label, scopes);
+        hello.auth = None;
+        hello.gateway = None;
+        hello
     }
 }
 

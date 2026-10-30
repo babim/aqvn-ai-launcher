@@ -344,6 +344,7 @@ async fn test_gateway_websocket_roundtrip() {
         server_url: format!("http://127.0.0.1:{port}"),
         gateway_id: "test-gw-ws-files".to_string(),
         host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
         scope_files: true,
         scope_exec: false,
         scope_browser: false,

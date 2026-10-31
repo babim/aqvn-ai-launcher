@@ -390,3 +390,128 @@ async fn test_gateway_computer_use() {
     let _ = join_handle.await;
     server_task.abort();
 }
+
+#[tokio::test]
+async fn test_screenshot_scaling_and_compression() {
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use base64::Engine;
+    use std::io::Cursor;
+
+    // Create an 800x600 PNG image with gradient pattern to give realistic non-trivial bytes
+    let orig_w = 800u32;
+    let orig_h = 600u32;
+    let mut img_buf = image::RgbaImage::new(orig_w, orig_h);
+    for (x, y, pixel) in img_buf.enumerate_pixels_mut() {
+        *pixel = image::Rgba([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255]);
+    }
+
+    let mut orig_png_bytes = Vec::new();
+    img_buf
+        .write_to(
+            &mut Cursor::new(&mut orig_png_bytes),
+            image::ImageFormat::Png,
+        )
+        .expect("write test png");
+    let orig_b64 = BASE64_STANDARD.encode(&orig_png_bytes);
+
+    set_test_screen_capture(Some(json!({
+        "data": orig_b64,
+        "width": orig_w,
+        "height": orig_h,
+    })));
+
+    // 1. Direct call to capture_screen_native with scale = 0.5
+    let (scaled_b64, w_s, h_s) =
+        computer_use::capture_screen_native("png", false, None, Some(0.5), None);
+    assert_eq!(w_s, 400);
+    assert_eq!(h_s, 300);
+
+    let decoded_bytes = BASE64_STANDARD.decode(&scaled_b64).expect("valid base64");
+    let decoded_img = image::load_from_memory(&decoded_bytes).expect("valid png image");
+    assert_eq!(decoded_img.width(), 400);
+    assert_eq!(decoded_img.height(), 300);
+    assert!(
+        scaled_b64.len() < orig_b64.len(),
+        "Scaled screenshot base64 (len {}) must be smaller than original (len {}) to reduce token payload",
+        scaled_b64.len(),
+        orig_b64.len()
+    );
+
+    // 2. Direct call to capture_screen_native with max_width = 200
+    let (mw_b64, w_mw, h_mw) =
+        computer_use::capture_screen_native("png", false, None, None, Some(200));
+    assert_eq!(w_mw, 200);
+    assert_eq!(h_mw, 150);
+
+    let mw_bytes = BASE64_STANDARD.decode(&mw_b64).expect("valid base64");
+    let mw_img = image::load_from_memory(&mw_bytes).expect("valid png image");
+    assert_eq!(mw_img.width(), 200);
+    assert_eq!(mw_img.height(), 150);
+    assert!(mw_b64.len() < scaled_b64.len());
+
+    // 3. Direct call with both scale = 0.5 and max_width = 200
+    let (_both_b64, w_both, h_both) =
+        computer_use::capture_screen_native("png", false, None, Some(0.5), Some(200));
+    assert_eq!(w_both, 200);
+    assert_eq!(h_both, 150);
+
+    // 4. Test format conversion to JPEG
+    let (jpeg_b64, w_jpeg, h_jpeg) =
+        computer_use::capture_screen_native("jpeg", false, None, Some(0.5), None);
+    assert_eq!(w_jpeg, 400);
+    assert_eq!(h_jpeg, 300);
+    let jpeg_bytes = BASE64_STANDARD.decode(&jpeg_b64).expect("valid base64");
+    let jpeg_img = image::load_from_memory(&jpeg_bytes).expect("valid jpeg image");
+    assert_eq!(jpeg_img.width(), 400);
+    assert_eq!(jpeg_img.height(), 300);
+
+    // 5. Op dispatch via handle_computer_use_op with scale
+    let scale_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-scale-half",
+        "action": "capture",
+        "scale": 0.5,
+    });
+    let reply_str = computer_use::handle_computer_use_op(&scale_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse scale reply");
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["data"]["width"], 400);
+    assert_eq!(reply["data"]["height"], 300);
+    let op_screenshot = reply["screenshot"].as_str().expect("screenshot present");
+    let op_bytes = BASE64_STANDARD
+        .decode(op_screenshot)
+        .expect("decode op screenshot");
+    let op_img = image::load_from_memory(&op_bytes).expect("load op screenshot");
+    assert_eq!(op_img.width(), 400);
+    assert_eq!(op_img.height(), 300);
+
+    // 6. Op dispatch via handle_computer_use_op with max_width
+    let mw_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-mw",
+        "action": "capture",
+        "max_width": 200,
+    });
+    let mw_reply_str = computer_use::handle_computer_use_op(&mw_op).await;
+    let mw_reply: Value = serde_json::from_str(&mw_reply_str).expect("parse mw reply");
+    assert_eq!(mw_reply["success"], true);
+    assert_eq!(mw_reply["data"]["width"], 200);
+    assert_eq!(mw_reply["data"]["height"], 150);
+
+    // 7. Op dispatch active_window with scale inside params
+    let act_win_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-act-scale",
+        "action": "active_window",
+        "params": {
+            "scale": 0.25
+        }
+    });
+    let act_reply_str = computer_use::handle_computer_use_op(&act_win_op).await;
+    let act_reply: Value = serde_json::from_str(&act_reply_str).expect("parse act win reply");
+    assert_eq!(act_reply["success"], true);
+    assert_eq!(act_reply["data"]["width"], 200);
+    assert_eq!(act_reply["data"]["height"], 150);
+
+    set_test_screen_capture(None);
+}

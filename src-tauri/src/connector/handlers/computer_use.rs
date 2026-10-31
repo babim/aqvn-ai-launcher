@@ -9,6 +9,7 @@ use crate::connector::protocol::{
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use serde_json::{json, Value};
+use std::io::Cursor;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::RwLock;
@@ -81,11 +82,123 @@ fn which_executable(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Computes target dimensions when scaling or capping by max_width.
+pub fn compute_scaled_dimensions(
+    orig_w: u32,
+    orig_h: u32,
+    scale: Option<f64>,
+    max_width: Option<u32>,
+) -> (u32, u32) {
+    if orig_w == 0 || orig_h == 0 {
+        return (orig_w, orig_h);
+    }
+    let mut w = orig_w as f64;
+    let mut h = orig_h as f64;
+
+    if let Some(s) = scale {
+        if s > 0.0 && s < 1.0 {
+            w = (w * s).max(1.0);
+            h = (h * s).max(1.0);
+        }
+    }
+
+    if let Some(mw) = max_width {
+        if mw > 0 && w > mw as f64 {
+            let ratio = mw as f64 / w;
+            w = mw as f64;
+            h = (h * ratio).max(1.0);
+        }
+    }
+
+    let target_w = (w.round() as u32).max(1);
+    let target_h = (h.round() as u32).max(1);
+    (target_w, target_h)
+}
+
+fn process_and_encode_image(
+    image_bytes: &[u8],
+    orig_w: u32,
+    orig_h: u32,
+    format: &str,
+    scale: Option<f64>,
+    max_width: Option<u32>,
+) -> (String, u32, u32) {
+    let (target_w, target_h) = compute_scaled_dimensions(orig_w, orig_h, scale, max_width);
+    let is_jpeg = format.eq_ignore_ascii_case("jpeg") || format.eq_ignore_ascii_case("jpg");
+
+    if target_w == orig_w && target_h == orig_h && !is_jpeg {
+        return (BASE64_STANDARD.encode(image_bytes), orig_w, orig_h);
+    }
+
+    if let Ok(img) = image::load_from_memory(image_bytes) {
+        let resized = img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle);
+        let mut buf = Vec::new();
+        if is_jpeg {
+            let rgb = resized.to_rgb8();
+            if rgb
+                .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+                .is_ok()
+            {
+                return (BASE64_STANDARD.encode(&buf), target_w, target_h);
+            }
+        } else if resized
+            .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
+            .is_ok()
+        {
+            return (BASE64_STANDARD.encode(&buf), target_w, target_h);
+        }
+    }
+
+    (BASE64_STANDARD.encode(image_bytes), target_w, target_h)
+}
+
+fn process_and_encode_b64(
+    b64_data: &str,
+    orig_w: u32,
+    orig_h: u32,
+    format: &str,
+    scale: Option<f64>,
+    max_width: Option<u32>,
+) -> (String, u32, u32) {
+    let (target_w, target_h) = compute_scaled_dimensions(orig_w, orig_h, scale, max_width);
+    let is_jpeg = format.eq_ignore_ascii_case("jpeg") || format.eq_ignore_ascii_case("jpg");
+
+    if target_w == orig_w && target_h == orig_h && !is_jpeg {
+        return (b64_data.to_string(), orig_w, orig_h);
+    }
+
+    if let Ok(bytes) = BASE64_STANDARD.decode(b64_data.trim()) {
+        if let Ok(img) = image::load_from_memory(&bytes) {
+            let resized =
+                img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle);
+            let mut buf = Vec::new();
+            if is_jpeg {
+                let rgb = resized.to_rgb8();
+                if rgb
+                    .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+                    .is_ok()
+                {
+                    return (BASE64_STANDARD.encode(&buf), target_w, target_h);
+                }
+            } else if resized
+                .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
+                .is_ok()
+            {
+                return (BASE64_STANDARD.encode(&buf), target_w, target_h);
+            }
+        }
+    }
+
+    (b64_data.to_string(), target_w, target_h)
+}
+
 /// Performs native screen capture or window capture on host OS.
-fn capture_screen_native(
+pub fn capture_screen_native(
     format: &str,
     active_window: bool,
     _display_id: Option<u32>,
+    scale: Option<f64>,
+    max_width: Option<u32>,
 ) -> (String, u32, u32) {
     // 1. Check test override
     if let Ok(lock) = TEST_SCREEN_CAPTURE.read() {
@@ -106,7 +219,7 @@ fn capture_screen_native(
                 .and_then(|v| v.as_u64())
                 .map(|h| h as u32)
                 .unwrap_or(1080);
-            return (data, width, height);
+            return process_and_encode_b64(&data, width, height, format, scale, max_width);
         }
     }
 
@@ -124,8 +237,7 @@ fn capture_screen_native(
             if status.success() {
                 if let Ok(bytes) = std::fs::read(&tmp_file) {
                     let _ = std::fs::remove_file(&tmp_file);
-                    let b64 = BASE64_STANDARD.encode(bytes);
-                    return (b64, 1920, 1080);
+                    return process_and_encode_image(&bytes, 1920, 1080, format, scale, max_width);
                 }
             }
         }
@@ -151,7 +263,7 @@ fn capture_screen_native(
             if output.status.success() {
                 let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !text.is_empty() {
-                    return (text, 1920, 1080);
+                    return process_and_encode_b64(&text, 1920, 1080, format, scale, max_width);
                 }
             }
         }
@@ -173,7 +285,9 @@ fn capture_screen_native(
                     if status.success() {
                         if let Ok(bytes) = std::fs::read(&tmp_file) {
                             let _ = std::fs::remove_file(&tmp_file);
-                            return (BASE64_STANDARD.encode(bytes), 1920, 1080);
+                            return process_and_encode_image(
+                                &bytes, 1920, 1080, format, scale, max_width,
+                            );
                         }
                     }
                 }
@@ -200,7 +314,14 @@ fn capture_screen_native(
                     .output();
                 if let Ok(out) = output {
                     if out.status.success() && !out.stdout.is_empty() {
-                        return (BASE64_STANDARD.encode(out.stdout), 1920, 1080);
+                        return process_and_encode_image(
+                            &out.stdout,
+                            1920,
+                            1080,
+                            format,
+                            scale,
+                            max_width,
+                        );
                     }
                 }
             }
@@ -208,9 +329,8 @@ fn capture_screen_native(
     }
 
     // 3. Fallback valid PNG base64 for headless / CI
-    let _ = format;
     let _ = active_window;
-    (FALLBACK_PNG_BASE64.to_string(), 1920, 1080)
+    process_and_encode_b64(FALLBACK_PNG_BASE64, 1920, 1080, format, scale, max_width)
 }
 
 fn inject_mouse_move(x: f64, y: f64) {
@@ -414,7 +534,19 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_u64)
                 .map(|v| v as u32);
 
-            let (b64, width, height) = capture_screen_native(format, active_win, display_id);
+            let scale = envelope
+                .get("scale")
+                .or_else(|| params_obj.and_then(|p| p.get("scale")))
+                .and_then(Value::as_f64);
+
+            let max_width = envelope
+                .get("max_width")
+                .or_else(|| params_obj.and_then(|p| p.get("max_width")))
+                .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+                .map(|v| v as u32);
+
+            let (b64, width, height) =
+                capture_screen_native(format, active_win, display_id, scale, max_width);
 
             make_ok_reply(
                 id,
@@ -438,7 +570,18 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or("png");
 
-            let (b64, width, height) = capture_screen_native(format, true, None);
+            let scale = envelope
+                .get("scale")
+                .or_else(|| params_obj.and_then(|p| p.get("scale")))
+                .and_then(Value::as_f64);
+
+            let max_width = envelope
+                .get("max_width")
+                .or_else(|| params_obj.and_then(|p| p.get("max_width")))
+                .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+                .map(|v| v as u32);
+
+            let (b64, width, height) = capture_screen_native(format, true, None, scale, max_width);
 
             make_ok_reply(
                 id,

@@ -80,7 +80,10 @@
     if (state.busy !== wasBusy) {
       updateTrayBusy(state.busy);
       if (wasBusy && !state.busy) {
-        if (typeof document !== 'undefined' && document.hidden === true) {
+        if (
+          typeof document !== 'undefined' &&
+          (document.hidden === true || (typeof document.hasFocus === 'function' && !document.hasFocus()))
+        ) {
           notifyTaskComplete(summary);
         }
       }

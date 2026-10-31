@@ -163,6 +163,7 @@ __harness__.exports = (function () {
     getElementById: getEl,
     createElement: () => createElementMock('el'),
     createTextNode: () => ({}),
+    hasFocus: () => (options.hasFocus !== undefined ? options.hasFocus : true),
     addEventListener: (type, fn) => {
       (docListeners[type] = docListeners[type] || []).push(fn);
     },
@@ -967,6 +968,29 @@ describe('ui/chat.js notifications, connection LED and offline outbox', () => {
     assert.match(notes()[0].args.body, /all done/);
   });
 
+  test('VAL-UX-001: notify_task_complete fires when window is visible but unfocused (!document.hasFocus())', () => {
+    const harness = createHarness();
+    const calls = tauriRecorder(harness);
+    const { applyProgress } = harness.exports;
+    const notes = () => calls.filter((c) => c.command === 'notify_task_complete');
+
+    // Visible and focused: no notification
+    harness.document.hidden = false;
+    harness.document.hasFocus = () => true;
+    applyProgress(true, 'working');
+    applyProgress(false, 'done');
+    assert.equal(notes().length, 0, 'visible and focused window must not raise a notification');
+
+    // Visible but unfocused: raises notification
+    harness.document.hidden = false;
+    harness.document.hasFocus = () => false;
+    applyProgress(true, 'background job');
+    applyProgress(false, 'background done');
+    assert.equal(notes().length, 1, 'unfocused window must raise notification');
+    assert.equal(notes()[0].args.title, 'Task complete');
+    assert.match(notes()[0].args.body, /background done/);
+  });
+
   test('VAL-CONN-002: #connection-pill renders 🟢 Online, 🟡 Polling and 🔴 Offline', () => {
     const harness = createHarness();
     harness.exports.init();
@@ -1482,6 +1506,7 @@ function createContainerHarness(options = {}) {
   const documentMock = {
     title: 'AQVN Workspace',
     hidden: options.hidden !== undefined ? options.hidden : false,
+    hasFocus: () => (options.hasFocus !== undefined ? options.hasFocus : true),
     body: {
       classList: createClassList(),
       getAttribute: (name) => (name in attributes ? attributes[name] : null),
@@ -1667,6 +1692,18 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     );
     assert.equal(hiddenHarness.calls.find((c) => c.command === 'notify_task_complete').args.title, 'Task complete');
     assert.match(hiddenHarness.calls.find((c) => c.command === 'notify_task_complete').args.body, /done hidden/);
+  });
+
+  test('VAL-UX-001: test_web_notification_bridge triggers notification when window is visible but unfocused', () => {
+    const harness = createContainerHarness({ hidden: false, hasFocus: false });
+    const { bridge, calls } = harness;
+
+    bridge.setTaskState(true, 'working unfocused');
+    bridge.setTaskState(false, 'done unfocused');
+    const notifyCalls = calls.filter((c) => c.command === 'notify_task_complete');
+    assert.equal(notifyCalls.length, 1, 'visible but unfocused window must trigger notification');
+    assert.equal(notifyCalls[0].args.title, 'Task complete');
+    assert.match(notifyCalls[0].args.body, /done unfocused/);
   });
 
   test('test_web_notification_bridge updates system tray icon state between idle and busy', () => {

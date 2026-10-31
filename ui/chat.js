@@ -530,7 +530,11 @@
 
     if (state.active !== wasActive) {
       invokeIpc('set_tray_busy', { busy: state.active });
-      if (wasActive && !state.active && document.hidden === true) {
+      if (
+        wasActive &&
+        !state.active &&
+        (document.hidden === true || (typeof document.hasFocus === 'function' && !document.hasFocus()))
+      ) {
         notifyComplete();
       }
     }

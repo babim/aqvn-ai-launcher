@@ -212,6 +212,14 @@ fn test_ui_container_contextmenu_listener() {
         container_js.contains("getSelection") || container_js.contains("selection"),
         "ui/container.js must check text selection before triggering context menu"
     );
+    assert!(
+        container_js.contains("e.button === 0 && !e.ctrlKey"),
+        "ui/container.js must ignore primary mouse button contextmenu events (VAL-WIN-003)"
+    );
+    assert!(
+        container_js.contains("CONTEXT_MENU_COOLDOWN_MS = 300") || container_js.contains("300"),
+        "ui/container.js must enforce 300ms context menu cooldown (VAL-WIN-003)"
+    );
 }
 
 #[test]

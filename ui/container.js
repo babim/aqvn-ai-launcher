@@ -788,11 +788,22 @@
     return false;
   }
 
+  var CONTEXT_MENU_COOLDOWN_MS = 300;
+  var lastContextMenuTime = 0;
+
   function installContextMenu(dom) {
     function contextMenuHandler(e) {
+      if (e && e.button === 0 && !e.ctrlKey) {
+        return;
+      }
       if (isTextSelected()) {
         return;
       }
+      var now = (e && typeof e.timeStamp === 'number' && e.timeStamp > 0) ? e.timeStamp : Date.now();
+      if (now - lastContextMenuTime < CONTEXT_MENU_COOLDOWN_MS) {
+        return;
+      }
+      lastContextMenuTime = now;
       if (e && typeof e.preventDefault === 'function') {
         e.preventDefault();
       }

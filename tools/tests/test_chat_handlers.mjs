@@ -2063,6 +2063,86 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     assert.equal(ctxCalls.length, 0, 'show_context_menu must NOT be dispatched when text is selected');
   });
 
+  test('VAL-WIN-003: contextMenuHandler drops primary click events (button === 0 && !ctrlKey) and allows right click or Ctrl+left click', () => {
+    const harness = createContainerHarness();
+    const { calls, docListeners } = harness;
+    const contextMenuListeners = docListeners['contextmenu'] || [];
+
+    function fireContextMenu(button, ctrlKey = false, timeStamp = undefined) {
+      let prevented = false;
+      const event = {
+        button,
+        ctrlKey,
+        timeStamp,
+        preventDefault: () => {
+          prevented = true;
+        }
+      };
+      for (const fn of contextMenuListeners) {
+        fn(event);
+      }
+      return prevented;
+    }
+
+    // 1. Primary click (button 0 without ctrlKey): must be dropped
+    assert.equal(fireContextMenu(0, false, 1000), false, 'button 0 without ctrlKey must not preventDefault');
+    assert.equal(calls.filter((c) => c.command === 'show_context_menu').length, 0, 'button 0 without ctrlKey must not invoke show_context_menu');
+
+    // 2. Right click (button 2 without ctrlKey): must be handled
+    assert.equal(fireContextMenu(2, false, 2000), true, 'button 2 must call preventDefault');
+    assert.equal(calls.filter((c) => c.command === 'show_context_menu').length, 1, 'button 2 must invoke show_context_menu');
+
+    // 3. Ctrl + Left click (button 0 with ctrlKey): must be handled (macOS / standard gesture)
+    assert.equal(fireContextMenu(0, true, 3000), true, 'Ctrl+button 0 must call preventDefault');
+    assert.equal(calls.filter((c) => c.command === 'show_context_menu').length, 2, 'Ctrl+button 0 must invoke show_context_menu');
+  });
+
+  test('VAL-WIN-003: contextMenuHandler enforces 300ms dismissal cooldown timestamp guard', () => {
+    const harness = createContainerHarness();
+    const { calls, docListeners } = harness;
+    const contextMenuListeners = docListeners['contextmenu'] || [];
+
+    function fireContextMenu(button = 2, ctrlKey = false, timeStamp = undefined) {
+      let prevented = false;
+      const event = {
+        button,
+        ctrlKey,
+        timeStamp,
+        preventDefault: () => {
+          prevented = true;
+        }
+      };
+      for (const fn of contextMenuListeners) {
+        fn(event);
+      }
+      return prevented;
+    }
+
+    // First context menu at t=1000ms: allowed
+    assert.equal(fireContextMenu(2, false, 1000), true, 'first contextmenu at t=1000 must be handled');
+    assert.equal(calls.filter((c) => c.command === 'show_context_menu').length, 1);
+
+    // Repeated context menu at t=1150ms (< 300ms cooldown): dropped
+    assert.equal(fireContextMenu(2, false, 1150), false, 'contextmenu at t=1150ms (< 300ms) must be dropped');
+    assert.equal(calls.filter((c) => c.command === 'show_context_menu').length, 1);
+
+    // Another repeated context menu at t=1299ms (< 300ms from t=1000ms): dropped
+    assert.equal(fireContextMenu(2, false, 1299), false, 'contextmenu at t=1299ms (< 300ms) must be dropped');
+    assert.equal(calls.filter((c) => c.command === 'show_context_menu').length, 1);
+
+    // Context menu at t=1300ms (>= 300ms cooldown from t=1000ms): allowed
+    assert.equal(fireContextMenu(2, false, 1300), true, 'contextmenu at t=1300ms (>= 300ms) must be handled');
+    assert.equal(calls.filter((c) => c.command === 'show_context_menu').length, 2);
+
+    // Rapid event after t=1300 at t=1400 (< 300ms from t=1300): dropped
+    assert.equal(fireContextMenu(2, false, 1400), false, 'contextmenu at t=1400ms must be dropped');
+    assert.equal(calls.filter((c) => c.command === 'show_context_menu').length, 2);
+
+    // Event at t=1605 (>= 300ms from t=1300): allowed
+    assert.equal(fireContextMenu(2, false, 1605), true, 'contextmenu at t=1605ms must be handled');
+    assert.equal(calls.filter((c) => c.command === 'show_context_menu').length, 3);
+  });
+
   test('test_web_notification_bridge shortcuts work when focus is in input/textarea without blocking typing', () => {
     const harness = createContainerHarness();
     const { calls, docListeners } = harness;

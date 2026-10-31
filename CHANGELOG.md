@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-10-31
+
+### Added
+- **Native Context Menu & Viewport Zoom Engine**:
+  - Right-click native context menu with dynamic zoom level indicator (e.g. `Zoom (100%)`).
+  - Native viewport scaling (`w.set_zoom(scale)`) clamping between 70% and 200% with 0.1 step size.
+  - Context menu actions for Zoom In (`CmdOrCtrl+=`), Zoom Out (`CmdOrCtrl+-`), and Reset Zoom (`CmdOrCtrl+0`).
+  - Full Tauri v2 ACL capabilities configuration for remote loopback origins (`http://[IP]:*` and `http://localhost:*`).
+- **Window Menu Bar Toggle in Settings (Default OFF)**:
+  - Added `show_menu_bar` configuration (defaulting to `false`).
+  - Main window startup hides top menu bar by default (`remove_menu()`).
+  - Toggle switch in Settings UI (General section) with bilingual Vietnamese/English labels.
+  - Live hot-reload dynamically attaches (`set_menu`) or detaches (`remove_menu`) the menu bar on setting change without app restart.
+- **Native Keyboard Shortcuts & Cross-Iframe Relay**:
+  - Native `zoom_hotkeys_enabled(true)` on WebviewWindowBuilder for smooth OS-level zoom.
+  - Window accelerators binding `F1` (Help), `F5` (Reload), `CmdOrCtrl+,` (Settings), `CmdOrCtrl+Shift+R` (Hard Refresh), and `F11` (Focus Mode).
+  - Cross-iframe key event propagation and transparent error logging in `container.js`.
+- **A0 Workspace Remote Tools & Control Compatibility**:
+  - Socket.IO namespace connect handshake carrying explicit auth handlers (`plugins/_a0_connector/ws_connector`), activating remote tools in assistant prompts.
+  - Standardized boolean scopes (`files`, `file_write`, `code_execution`, `browser`, `computer_use`) and `write_enabled: true` in `remote_files` metadata.
+  - Dual-key tracking (`id` and `op_id`) across all operation results (`connector_*_result`), eliminating server timeout errors.
+  - Flexible PTY session parsing for both integer and string session IDs.
+  - Persistent machine-bound `gateway_id` in configuration, preventing `multiple_hosts` lockout across reconnects.
+  - Configurable `workspace_path` in Settings with automatic periodic directory tree updates (`connector_remote_tree_update`) sent to cloud assistant.
+- **Dedicated About Modal Dialog**:
+  - Dedicated `About AQVN Workspace` modal dialog (`ui/about.html`) showing system info, runtime engine, gateway connector status, and copyright.
+  - Added About menu item in both System Tray menu and native context menu.
+
+### Changed
+- Refactored outbound connector WebSocket to use Socket.IO protocol framing (`/socket.io/?EIO=4&transport=websocket`).
+- Isolated integration test suites to avoid port contention during parallel test runs.
+
 ## [0.1.7] - 2026-10-30
 
 ### Added

@@ -2115,6 +2115,12 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     assert.match(html, /HELP_I18N/, 'help.html must define HELP_I18N');
     assert.match(html, /closeHelpWindow/, 'help.html must implement closeHelpWindow()');
   });
+
+  test('about.html displays version v0.1.8', () => {
+    const htmlPath = new URL('../../ui/about.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+    assert.match(html, /<span class="version-tag">v0\.1\.8<\/span>/, 'about.html must show v0.1.8');
+  });
 });
 
 describe('VAL-HOTKEY-003 & VAL-HOTKEY-004: Container bridge shortcuts and IPC error visibility', () => {

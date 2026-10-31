@@ -1507,6 +1507,9 @@ function createContainerHarness(options = {}) {
     title: 'AQVN Workspace',
     hidden: options.hidden !== undefined ? options.hidden : false,
     hasFocus: () => (options.hasFocus !== undefined ? options.hasFocus : true),
+    documentElement: {
+      style: {}
+    },
     body: {
       classList: createClassList(),
       getAttribute: (name) => (name in attributes ? attributes[name] : null),
@@ -1841,12 +1844,77 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     assert.equal(openSettingsCalls.length, 1, 'open_settings IPC command must be dispatched');
   });
 
-  test('test_web_notification_bridge handles zoom shortcuts (Ctrl+=, Ctrl+-, Ctrl+0) and sets body.style.zoom', () => {
+  test('VAL-WIN-001: applyZoom sets documentElement.style.zoom only and accepts absolute target scale', () => {
+    const harness = createContainerHarness();
+    const { document, bridge, store } = harness;
+
+    const result = bridge.applyZoom(1.35);
+    assert.equal(result, 1.35);
+    assert.equal(document.documentElement.style.zoom, '1.35');
+    assert.equal(document.body.style.zoom, undefined, 'body.style.zoom must not be mutated');
+    assert.equal(store['aqvn_zoom'], '1.35');
+
+    bridge.applyZoom('0.85');
+    assert.equal(document.documentElement.style.zoom, '0.85');
+    assert.equal(document.body.style.zoom, undefined);
+    assert.equal(store['aqvn_zoom'], '0.85');
+
+    bridge.applyZoom({ scale: 1.5 });
+    assert.equal(document.documentElement.style.zoom, '1.5');
+    assert.equal(document.body.style.zoom, undefined);
+    assert.equal(store['aqvn_zoom'], '1.5');
+
+    bridge.applyZoom(3.5);
+    assert.equal(document.documentElement.style.zoom, '2');
+    bridge.applyZoom(0.2);
+    assert.equal(document.documentElement.style.zoom, '0.7');
+  });
+
+  test('VAL-WIN-001: keyHandler drops repeated zoom shortcut events within 150ms debounce window', () => {
+    const harness = createContainerHarness();
+    const { document, docListeners } = harness;
+    const keydownListeners = docListeners['keydown'] || [];
+
+    function fireKeyAt(key, timeStamp, ctrlKey = true) {
+      let prevented = false;
+      const event = {
+        ctrlKey,
+        metaKey: false,
+        shiftKey: false,
+        altKey: false,
+        key,
+        timeStamp,
+        preventDefault: () => {
+          prevented = true;
+        }
+      };
+      for (const fn of keydownListeners) {
+        fn(event);
+      }
+      return prevented;
+    }
+
+    // First zoom in at t=1000ms: accepted -> 1.1
+    assert.equal(fireKeyAt('=', 1000), true);
+    assert.equal(document.documentElement.style.zoom, '1.1');
+    assert.equal(document.body.style.zoom, undefined);
+
+    // Repeated zoom in at t=1050ms (< 150ms): dropped -> zoom stays 1.1
+    assert.equal(fireKeyAt('=', 1050), true);
+    assert.equal(document.documentElement.style.zoom, '1.1');
+
+    // Zoom in at t=1160ms (>= 150ms): accepted -> 1.2
+    assert.equal(fireKeyAt('+', 1160), true);
+    assert.equal(document.documentElement.style.zoom, '1.2');
+  });
+
+  test('test_web_notification_bridge handles zoom shortcuts (Ctrl+=, Ctrl+-, Ctrl+0) and sets documentElement.style.zoom without mutating body.style.zoom', () => {
     const harness = createContainerHarness();
     const { document, docListeners, store } = harness;
     const keydownListeners = docListeners['keydown'] || [];
     assert.ok(keydownListeners.length > 0, 'keydown listener must be registered');
 
+    let simulatedTime = 1000;
     function fireKey(key, ctrlKey = true, extra = {}) {
       let prevented = false;
       const event = {
@@ -1855,11 +1923,13 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
         shiftKey: false,
         altKey: false,
         key,
+        timeStamp: simulatedTime,
         preventDefault: () => {
           prevented = true;
         },
         ...extra
       };
+      simulatedTime += 200;
       for (const fn of keydownListeners) {
         fn(event);
       }
@@ -1868,43 +1938,45 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
 
     // Zoom in: Ctrl+=
     assert.equal(fireKey('='), true);
-    assert.equal(document.body.style.zoom, '1.1');
+    assert.equal(document.documentElement.style.zoom, '1.1');
+    assert.equal(document.body.style.zoom, undefined, 'body.style.zoom must not be mutated');
     assert.equal(store['aqvn_zoom'], '1.1');
 
     // Zoom in again: Ctrl++
     assert.equal(fireKey('+'), true);
-    assert.equal(document.body.style.zoom, '1.2');
+    assert.equal(document.documentElement.style.zoom, '1.2');
+    assert.equal(document.body.style.zoom, undefined);
 
     // Zoom out: Ctrl+-
     assert.equal(fireKey('-'), true);
-    assert.equal(document.body.style.zoom, '1.1');
+    assert.equal(document.documentElement.style.zoom, '1.1');
 
     // Reset zoom: Ctrl+0
     assert.equal(fireKey('0'), true);
-    assert.equal(document.body.style.zoom, '1');
+    assert.equal(document.documentElement.style.zoom, '1');
     assert.equal(store['aqvn_zoom'], '1');
 
     // Zoom in with Shift (Ctrl+Shift+= on standard keyboard)
     assert.equal(fireKey('+', true, { shiftKey: true }), true);
-    assert.equal(document.body.style.zoom, '1.1');
+    assert.equal(document.documentElement.style.zoom, '1.1');
 
     // Zoom out with Ctrl+_ (Shift+Minus)
     assert.equal(fireKey('_', true, { shiftKey: true, code: 'Minus' }), true);
-    assert.equal(document.body.style.zoom, '1');
+    assert.equal(document.documentElement.style.zoom, '1');
 
     // Zoom in with NumpadAdd
     assert.equal(fireKey('Add', true, { code: 'NumpadAdd' }), true);
-    assert.equal(document.body.style.zoom, '1.1');
+    assert.equal(document.documentElement.style.zoom, '1.1');
 
     // Zoom out with NumpadSubtract
     assert.equal(fireKey('Subtract', true, { code: 'NumpadSubtract' }), true);
-    assert.equal(document.body.style.zoom, '1');
+    assert.equal(document.documentElement.style.zoom, '1');
 
     // Zoom in, then reset with Numpad0
     assert.equal(fireKey('+', true), true);
-    assert.equal(document.body.style.zoom, '1.1');
+    assert.equal(document.documentElement.style.zoom, '1.1');
     assert.equal(fireKey('0', true, { code: 'Numpad0' }), true);
-    assert.equal(document.body.style.zoom, '1');
+    assert.equal(document.documentElement.style.zoom, '1');
 
     // Native Tauri webview zoom calls must be dispatched alongside CSS zoom
     const nativeZoomCalls = harness.calls.filter(
@@ -2289,6 +2361,7 @@ describe('VAL-HOTKEY-003 & VAL-HOTKEY-004: Container bridge shortcuts and IPC er
     const { calls, docListeners } = harness;
     const keydownListeners = docListeners['keydown'] || [];
 
+    let simulatedTime = 2000;
     function fireKey(key, ctrlKey, shiftKey, code) {
       let prevented = false;
       const event = {
@@ -2298,10 +2371,12 @@ describe('VAL-HOTKEY-003 & VAL-HOTKEY-004: Container bridge shortcuts and IPC er
         metaKey: false,
         shiftKey,
         altKey: false,
+        timeStamp: simulatedTime,
         preventDefault: () => {
           prevented = true;
         }
       };
+      simulatedTime += 200;
       for (const fn of keydownListeners) {
         fn(event);
       }
@@ -2321,32 +2396,32 @@ describe('VAL-HOTKEY-003 & VAL-HOTKEY-004: Container bridge shortcuts and IPC er
     assert.ok(calls.some((c) => c.command === 'open_settings'), 'Ctrl+Comma invokes open_settings');
 
     // Equal -> Zoom In
-    const zoomBeforeEqual = parseFloat(harness.document.body.style.zoom || '1.0');
+    const zoomBeforeEqual = parseFloat(harness.document.documentElement.style.zoom || '1.0');
     assert.equal(fireKey('=', true, false, 'Equal'), true, 'Ctrl+Equal must be handled');
-    assert.ok(parseFloat(harness.document.body.style.zoom) > zoomBeforeEqual, 'Ctrl+Equal zooms in');
+    assert.ok(parseFloat(harness.document.documentElement.style.zoom) > zoomBeforeEqual, 'Ctrl+Equal zooms in');
 
     // Minus -> Zoom Out
-    const zoomBeforeMinus = parseFloat(harness.document.body.style.zoom);
+    const zoomBeforeMinus = parseFloat(harness.document.documentElement.style.zoom);
     assert.equal(fireKey('-', true, false, 'Minus'), true, 'Ctrl+Minus must be handled');
-    assert.ok(parseFloat(harness.document.body.style.zoom) < zoomBeforeMinus, 'Ctrl+Minus zooms out');
+    assert.ok(parseFloat(harness.document.documentElement.style.zoom) < zoomBeforeMinus, 'Ctrl+Minus zooms out');
 
     // Digit0 -> Reset Zoom
     assert.equal(fireKey('0', true, false, 'Digit0'), true, 'Ctrl+Digit0 must be handled');
-    assert.equal(harness.document.body.style.zoom, '1', 'Ctrl+Digit0 resets zoom to 1');
+    assert.equal(harness.document.documentElement.style.zoom, '1', 'Ctrl+Digit0 resets zoom to 1');
 
     // NumpadAdd -> Zoom In
     assert.equal(fireKey('+', true, false, 'NumpadAdd'), true, 'Ctrl+NumpadAdd must be handled');
-    assert.equal(harness.document.body.style.zoom, '1.1', 'Ctrl+NumpadAdd zooms in');
+    assert.equal(harness.document.documentElement.style.zoom, '1.1', 'Ctrl+NumpadAdd zooms in');
 
     // NumpadSubtract -> Zoom Out
     assert.equal(fireKey('-', true, false, 'NumpadSubtract'), true, 'Ctrl+NumpadSubtract must be handled');
-    assert.equal(harness.document.body.style.zoom, '1', 'Ctrl+NumpadSubtract zooms out');
+    assert.equal(harness.document.documentElement.style.zoom, '1', 'Ctrl+NumpadSubtract zooms out');
 
     // Numpad0 -> Reset Zoom
     fireKey('+', true, false, 'NumpadAdd');
-    assert.equal(harness.document.body.style.zoom, '1.1');
+    assert.equal(harness.document.documentElement.style.zoom, '1.1');
     assert.equal(fireKey('0', true, false, 'Numpad0'), true, 'Ctrl+Numpad0 must be handled');
-    assert.equal(harness.document.body.style.zoom, '1', 'Ctrl+Numpad0 resets zoom to 1');
+    assert.equal(harness.document.documentElement.style.zoom, '1', 'Ctrl+Numpad0 resets zoom to 1');
   });
 
   test('VAL-HOTKEY-003: cross-iframe key event relay via postMessage and nested iframe key interception', () => {
@@ -2367,11 +2442,12 @@ describe('VAL-HOTKEY-003 & VAL-HOTKEY-004: Container bridge shortcuts and IPC er
           ctrlKey: true,
           metaKey: false,
           shiftKey: false,
-          altKey: false
+          altKey: false,
+          timeStamp: 3000
         }
       });
     }
-    assert.equal(harness.document.body.style.zoom, '1.1', 'relayed Ctrl+= must zoom in');
+    assert.equal(harness.document.documentElement.style.zoom, '1.1', 'relayed Ctrl+= must zoom in');
 
     // Nested iframe element listener
     const iframeListeners = {};

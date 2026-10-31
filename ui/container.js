@@ -444,8 +444,14 @@
   var ZOOM_MIN = 0.7;
   var ZOOM_MAX = 2.0;
   var ZOOM_STEP = 0.1;
+  var ZOOM_DEBOUNCE_MS = 150;
+  var lastZoomTime = 0;
 
   function clampZoom(value) {
+    if (value !== null && typeof value === 'object') {
+      if ('scale' in value) value = value.scale;
+      else if ('value' in value) value = value.value;
+    }
     var n = value === null || value === undefined || value === '' ? 1 : Number(value);
     if (!isFinite(n)) n = 1;
     n = Math.round(n * 100) / 100;
@@ -457,9 +463,6 @@
     if (typeof document !== 'undefined') {
       if (document.documentElement && document.documentElement.style) {
         document.documentElement.style.zoom = String(zoom);
-      }
-      if (document.body && document.body.style) {
-        document.body.style.zoom = String(zoom);
       }
     }
     try {
@@ -606,37 +609,42 @@
         return;
       }
       // Zoom in: Ctrl+=, Ctrl++, or NumpadAdd (can have shiftKey or not)
-      if (
+      var isZoomIn = (
         rawKey === '=' ||
         rawKey === '+' ||
         key === 'add' ||
         code === 'Equal' ||
         code === 'NumpadAdd'
-      ) {
-        if (typeof e.preventDefault === 'function') e.preventDefault();
-        zoomIn();
-        return;
-      }
+      );
       // Zoom out: Ctrl+-, Ctrl+_, or NumpadSubtract
-      if (
+      var isZoomOut = (
         rawKey === '-' ||
         rawKey === '_' ||
         key === 'subtract' ||
         code === 'Minus' ||
         code === 'NumpadSubtract'
-      ) {
-        if (typeof e.preventDefault === 'function') e.preventDefault();
-        zoomOut();
-        return;
-      }
+      );
       // Reset zoom: Ctrl+0, Numpad0, or Digit0
-      if (
+      var isZoomReset = (
         code === 'Numpad0' ||
         code === 'Digit0' ||
         (!e.shiftKey && (rawKey === '0' || key === '0'))
-      ) {
+      );
+
+      if (isZoomIn || isZoomOut || isZoomReset) {
         if (typeof e.preventDefault === 'function') e.preventDefault();
-        resetZoom();
+        var now = (e && typeof e.timeStamp === 'number' && e.timeStamp > 0) ? e.timeStamp : Date.now();
+        if (now - lastZoomTime < ZOOM_DEBOUNCE_MS) {
+          return;
+        }
+        lastZoomTime = now;
+        if (isZoomIn) {
+          zoomIn();
+        } else if (isZoomOut) {
+          zoomOut();
+        } else {
+          resetZoom();
+        }
         return;
       }
     }
@@ -675,7 +683,8 @@
                 ctrlKey: e.ctrlKey,
                 metaKey: e.metaKey,
                 shiftKey: e.shiftKey,
-                altKey: e.altKey
+                altKey: e.altKey,
+                timeStamp: e.timeStamp || Date.now()
               };
               if (typeof window !== 'undefined' && typeof window.postMessage === 'function') {
                 window.postMessage(payload, '*');

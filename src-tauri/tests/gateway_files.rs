@@ -6,11 +6,12 @@
 //! - Replies with connector_file_op_result over WebSocket
 //! - Transfer Protocol v1 support (checksum, base64, chunking, protocol_version)
 
+use aqvn_workspace_lib::config::AppConfig;
 use aqvn_workspace_lib::connector::client::{GatewayClient, GatewayConfig};
 use aqvn_workspace_lib::connector::handlers::files::{self, set_test_sandbox};
 use aqvn_workspace_lib::connector::protocol::{
     MSG_TYPE_FILE_OP, MSG_TYPE_FILE_OP_RESULT, MSG_TYPE_HELLO, MSG_TYPE_HELLO_ACK,
-    TRANSFER_PROTOCOL_V1,
+    MSG_TYPE_REMOTE_TREE_UPDATE, TRANSFER_PROTOCOL_V1,
 };
 use aqvn_workspace_lib::rfc::sandbox::{Sandbox, DEFAULT_SANDBOX};
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
@@ -37,8 +38,11 @@ fn create_temp_sandbox() -> (PathBuf, Sandbox) {
     (root, sandbox)
 }
 
+static TEST_SANDBOX_LOCK: Mutex<()> = Mutex::const_new(());
+
 #[tokio::test]
 async fn test_gateway_file_operations() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
     let (sandbox_dir, sandbox) = create_temp_sandbox();
     set_test_sandbox(Some(sandbox.clone()));
 
@@ -220,6 +224,7 @@ async fn test_gateway_file_operations() {
 
 #[tokio::test]
 async fn test_transfer_protocol_v1_binary_base64() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
     let (sandbox_dir, sandbox) = create_temp_sandbox();
     set_test_sandbox(Some(sandbox.clone()));
 
@@ -279,6 +284,7 @@ async fn test_transfer_protocol_v1_binary_base64() {
 
 #[tokio::test]
 async fn test_gateway_websocket_roundtrip() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
     let (sandbox_dir, sandbox) = create_temp_sandbox();
     set_test_sandbox(Some(sandbox.clone()));
 
@@ -321,10 +327,13 @@ async fn test_gateway_websocket_roundtrip() {
                             {
                                 break;
                             }
-                            if let Some(Ok(axum::extract::ws::Message::Text(reply_text))) =
+                            while let Some(Ok(axum::extract::ws::Message::Text(reply_text))) =
                                 socket.recv().await
                             {
-                                let _ = tx_reply.send(reply_text.to_string()).await;
+                                if !reply_text.contains(MSG_TYPE_REMOTE_TREE_UPDATE) {
+                                    let _ = tx_reply.send(reply_text.to_string()).await;
+                                    break;
+                                }
                             }
                         }
                     })
@@ -351,6 +360,7 @@ async fn test_gateway_websocket_roundtrip() {
         scope_desktop: false,
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -415,6 +425,7 @@ async fn test_gateway_websocket_roundtrip() {
 
 #[tokio::test]
 async fn test_default_sandbox_workspace_confinement() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
     let sandbox = Sandbox::from_allowed_paths(&[DEFAULT_SANDBOX.to_string()]);
 
     assert!(
@@ -494,4 +505,204 @@ async fn test_default_sandbox_workspace_confinement() {
         "path": test_filename
     });
     let _ = files::handle_file_op_with_sandbox(&remove_op, &sandbox).await;
+}
+
+#[tokio::test]
+async fn test_configurable_workspace_path() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    // 1. Verify AppConfig default workspace_path is ~/Workspace
+    let default_config = AppConfig::default();
+    assert_eq!(default_config.workspace_path, "~/Workspace");
+
+    // 2. Verify AppConfig serialization and deserialization
+    let custom_config_json = json!({
+        "workspace_path": "/tmp/custom-workspace-test"
+    });
+    let parsed: AppConfig = serde_json::from_value(custom_config_json).expect("parse AppConfig");
+    assert_eq!(parsed.workspace_path, "/tmp/custom-workspace-test");
+
+    // 3. Verify dynamic binding to current_sandbox()
+    set_test_sandbox(None);
+
+    let (temp_dir, _) = create_temp_sandbox();
+    let temp_str = temp_dir.to_string_lossy().to_string();
+
+    files::set_workspace_path(Some(&temp_str));
+    assert_eq!(files::get_workspace_path(), temp_str);
+
+    let active_sandbox = files::current_sandbox();
+    let roots = active_sandbox.canonical_roots().expect("canonical roots");
+    let temp_canonical = std::fs::canonicalize(&temp_dir).expect("canonicalize temp");
+    assert!(
+        roots.iter().any(|r| r == &temp_canonical),
+        "current_sandbox root must match configured workspace_path"
+    );
+
+    // Verify file operations work within this dynamic sandbox root
+    let test_file = "configured_ws_test.txt";
+    let write_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-cfg-write",
+        "action": "write",
+        "path": test_file,
+        "content": "dynamic workspace test content\n"
+    });
+    let reply_str = files::handle_file_op(&write_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], true);
+
+    let on_disk = temp_dir.join(test_file);
+    assert!(
+        on_disk.is_file(),
+        "file must be created in dynamically configured workspace"
+    );
+
+    // Path traversal outside the configured workspace must be rejected
+    let traversal_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-cfg-traversal",
+        "action": "read",
+        "path": "../../etc/shadow"
+    });
+    let reply_str = files::handle_file_op(&traversal_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], false);
+    assert_eq!(reply["status"], "error");
+
+    // 4. Reset to default and clean up
+    files::set_workspace_path(None);
+    assert_eq!(files::get_workspace_path(), "~/Workspace");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[tokio::test]
+async fn test_remote_tree_snapshot_generation() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (temp_dir, sandbox) = create_temp_sandbox();
+
+    // Setup multi-level folder structure
+    // depth 1: file_d1.txt, dir_d1
+    // depth 2: dir_d1/file_d2.txt, dir_d1/dir_d2
+    // depth 3: dir_d1/dir_d2/file_d3.txt, dir_d1/dir_d2/dir_d3
+    // depth 4: dir_d1/dir_d2/dir_d3/file_d4.txt, dir_d1/dir_d2/dir_d3/dir_d4
+    // depth 5: dir_d1/dir_d2/dir_d3/dir_d4/file_d5.txt
+    let d1 = temp_dir.join("dir_d1");
+    let d2 = d1.join("dir_d2");
+    let d3 = d2.join("dir_d3");
+    let d4 = d3.join("dir_d4");
+    std::fs::create_dir_all(&d4).expect("create nested dirs");
+
+    std::fs::write(temp_dir.join("file_d1.txt"), b"d1").unwrap();
+    std::fs::write(d1.join("file_d2.txt"), b"d2").unwrap();
+    std::fs::write(d2.join("file_d3.txt"), b"d3").unwrap();
+    std::fs::write(d3.join("file_d4.txt"), b"d4").unwrap();
+    std::fs::write(d4.join("file_d5.txt"), b"d5").unwrap();
+
+    // 1. Generate snapshot bounded to max_depth = 3
+    let snapshot = files::generate_remote_tree_update(&sandbox, 3);
+    assert_eq!(snapshot["type"], MSG_TYPE_REMOTE_TREE_UPDATE);
+    assert_eq!(snapshot["op"], MSG_TYPE_REMOTE_TREE_UPDATE);
+    assert_eq!(snapshot["max_depth"], 3);
+
+    let entries = snapshot["entries"].as_array().expect("entries array");
+
+    // Depths 1, 2, 3 must be present
+    assert!(entries
+        .iter()
+        .any(|e| e["name"] == "file_d1.txt" && e["depth"] == 1));
+    assert!(entries
+        .iter()
+        .any(|e| e["name"] == "file_d2.txt" && e["depth"] == 2));
+    assert!(entries
+        .iter()
+        .any(|e| e["name"] == "file_d3.txt" && e["depth"] == 3));
+
+    // Depths > 3 must NOT be present
+    assert!(!entries.iter().any(|e| e["name"] == "file_d4.txt"));
+    assert!(!entries.iter().any(|e| e["name"] == "file_d5.txt"));
+
+    let snapshot_str = serde_json::to_string(&snapshot).unwrap();
+    assert!(!snapshot_str.contains("file_d4.txt"));
+    assert!(!snapshot_str.contains("file_d5.txt"));
+
+    // 2. Test emission via GatewayClient over WebSocket
+    let (tx_msg, mut rx_msg) = mpsc::channel::<String>(16);
+    let router = Router::new().route(
+        "/ws",
+        get(move |ws: WebSocketUpgrade| {
+            let tx_msg = tx_msg.clone();
+            async move {
+                ws.on_upgrade(move |mut socket: WebSocket| async move {
+                    while let Some(Ok(axum::extract::ws::Message::Text(text))) = socket.recv().await
+                    {
+                        if text.contains(MSG_TYPE_HELLO) {
+                            let ack = json!({ "type": MSG_TYPE_HELLO_ACK, "status": "ok" });
+                            let _ = socket
+                                .send(axum::extract::ws::Message::Text(ack.to_string().into()))
+                                .await;
+                        } else if text.contains(MSG_TYPE_REMOTE_TREE_UPDATE) {
+                            let _ = tx_msg.send(text.to_string()).await;
+                            break;
+                        }
+                    }
+                })
+            }
+        }),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server_task = tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+
+    files::set_workspace_path(Some(&temp_dir.to_string_lossy()));
+
+    let client_config = GatewayConfig {
+        enabled: true,
+        server_url: format!("http://127.0.0.1:{port}"),
+        gateway_id: "test-gw-tree-emit".to_string(),
+        host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
+        scope_files: true,
+        scope_exec: false,
+        scope_browser: false,
+        scope_desktop: false,
+        ping_interval_secs: 25,
+        reconnect_delay_ms: 200,
+        workspace_path: temp_dir.to_string_lossy().to_string(),
+    };
+
+    let client = GatewayClient::new(client_config);
+    let (handle, join_handle) = client.start();
+
+    handle
+        .wait_for_handshake(Duration::from_secs(5))
+        .await
+        .expect("handshake completed");
+
+    let received_tree_text = tokio::time::timeout(Duration::from_secs(5), rx_msg.recv())
+        .await
+        .expect("tree update received within timeout")
+        .expect("channel message");
+
+    assert!(
+        received_tree_text.contains(MSG_TYPE_REMOTE_TREE_UPDATE),
+        "received message must be connector_remote_tree_update"
+    );
+    assert!(
+        received_tree_text.contains("file_d1.txt"),
+        "received snapshot must contain file_d1.txt"
+    );
+    assert!(
+        !received_tree_text.contains("file_d4.txt"),
+        "received snapshot must NOT contain file_d4.txt"
+    );
+
+    handle.stop();
+    let _ = join_handle.await;
+    server_task.abort();
+    files::set_workspace_path(None);
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }

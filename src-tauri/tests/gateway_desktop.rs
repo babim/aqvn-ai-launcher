@@ -329,6 +329,7 @@ async fn test_gateway_computer_use() {
         scope_desktop: true,
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);

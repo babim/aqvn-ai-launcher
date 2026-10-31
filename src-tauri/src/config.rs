@@ -19,6 +19,7 @@ pub const DEFAULT_RFC_ENABLED: bool = false;
 pub const DEFAULT_RFC_PORT: u16 = 55080;
 pub const DEFAULT_SSH_PORT: u16 = 55022;
 pub const DEFAULT_ALLOWED_PATHS: &[&str] = &["~/Workspace"];
+pub const DEFAULT_WORKSPACE_PATH: &str = "~/Workspace";
 pub const DEFAULT_CONNECTOR_ENABLED: bool = true;
 pub const DEFAULT_SCOPE_FILES: bool = true;
 pub const DEFAULT_SCOPE_EXEC: bool = true;
@@ -79,6 +80,10 @@ fn default_global_hotkey() -> String {
     DEFAULT_GLOBAL_HOTKEY.to_string()
 }
 
+pub fn default_workspace_path() -> String {
+    DEFAULT_WORKSPACE_PATH.to_string()
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -90,6 +95,8 @@ pub struct AppConfig {
     pub server_profiles: Vec<String>,
     #[serde(default = "default_gateway_id")]
     pub gateway_id: String,
+    #[serde(default = "default_workspace_path")]
+    pub workspace_path: String,
     pub rfc_enabled: bool,
     pub rfc_password: String,
     pub ssh_password: String,
@@ -123,6 +130,7 @@ impl Default for AppConfig {
                 .map(|s| s.to_string())
                 .collect(),
             gateway_id: default_gateway_id(),
+            workspace_path: DEFAULT_WORKSPACE_PATH.to_string(),
             rfc_enabled: DEFAULT_RFC_ENABLED,
             rfc_password: String::new(),
             ssh_password: String::new(),
@@ -174,6 +182,13 @@ impl AppConfig {
             if let Some(s) = val.as_str() {
                 if !s.trim().is_empty() {
                     config.gateway_id = s.to_string();
+                }
+            }
+        }
+        if let Some(val) = store.get("workspace_path") {
+            if let Some(s) = val.as_str() {
+                if !s.trim().is_empty() {
+                    config.workspace_path = s.to_string();
                 }
             }
         }
@@ -269,6 +284,7 @@ impl AppConfig {
         store.set("server_url", serde_json::json!(self.server_url));
         store.set("server_profiles", serde_json::json!(self.server_profiles));
         store.set("gateway_id", serde_json::json!(self.gateway_id));
+        store.set("workspace_path", serde_json::json!(self.workspace_path));
         store.set("rfc_enabled", serde_json::json!(self.rfc_enabled));
         store.set("rfc_password", serde_json::json!(self.rfc_password));
         store.set("ssh_password", serde_json::json!(self.ssh_password));

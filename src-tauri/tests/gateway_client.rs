@@ -12,8 +12,8 @@ use aqvn_workspace_lib::connector::client::{
     build_ws_url, run_supervised, GatewayClient, GatewayConfig,
 };
 use aqvn_workspace_lib::connector::protocol::{
-    ConnectorHello, MSG_TYPE_HELLO, MSG_TYPE_HELLO_ACK, SCOPE_BROWSER, SCOPE_DESKTOP, SCOPE_EXEC,
-    SCOPE_FILES,
+    ConnectorHello, MSG_TYPE_HELLO, MSG_TYPE_HELLO_ACK, MSG_TYPE_REMOTE_TREE_UPDATE, SCOPE_BROWSER,
+    SCOPE_DESKTOP, SCOPE_EXEC, SCOPE_FILES,
 };
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -209,6 +209,7 @@ async fn test_outbound_handshake_hello() {
         scope_desktop: true,
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -270,6 +271,7 @@ async fn test_heartbeat_ping() {
         scope_desktop: false,
         ping_interval_secs: 1, // 1s interval for fast test
         reconnect_delay_ms: 200,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -310,6 +312,7 @@ async fn test_auto_reconnect_on_disconnect() {
         scope_desktop: true,
         ping_interval_secs: 25,
         reconnect_delay_ms: 50, // fast retry
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -353,6 +356,7 @@ async fn test_gateway_scopes_and_toggle() {
         scope_desktop: false,
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -475,6 +479,7 @@ async fn test_gateway_session_cookie_auth() {
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
         session_cookie: Some("session_runtime123=tok_abc456".to_string()),
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -525,6 +530,7 @@ async fn test_gateway_cookie_jar_from_file_auth() {
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
         session_cookie: None, // No explicit cookie, must load from disk CookieJar
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -656,6 +662,9 @@ async fn test_socketio_event_dispatch_and_ack() {
                             // Wait for reply frame
                             while let Some(Ok(msg)) = socket.recv().await {
                                 if let axum::extract::ws::Message::Text(reply_text) = msg {
+                                    if reply_text.contains(MSG_TYPE_REMOTE_TREE_UPDATE) {
+                                        continue;
+                                    }
                                     if reply_text.starts_with("42") || reply_text.starts_with("43")
                                     {
                                         let tx = tx_reply.lock().await;
@@ -691,6 +700,7 @@ async fn test_socketio_event_dispatch_and_ack() {
         scope_desktop: true,
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -836,6 +846,7 @@ async fn test_socketio_interleaved_ping_pong() {
         scope_desktop: true,
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -875,6 +886,7 @@ async fn test_namespace_connect_carries_auth_handlers() {
         scope_desktop: true,
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);
@@ -988,6 +1000,9 @@ async fn test_gateway_control_acknowledged() {
                             // Wait for reply frame
                             while let Some(Ok(msg)) = socket.recv().await {
                                 if let axum::extract::ws::Message::Text(reply_text) = msg {
+                                    if reply_text.contains(MSG_TYPE_REMOTE_TREE_UPDATE) {
+                                        continue;
+                                    }
                                     if reply_text.starts_with("42") || reply_text.starts_with("43")
                                     {
                                         let tx = tx_reply.lock().await;
@@ -1023,6 +1038,7 @@ async fn test_gateway_control_acknowledged() {
         scope_desktop: false,
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);

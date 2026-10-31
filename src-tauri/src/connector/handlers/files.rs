@@ -5,7 +5,8 @@
 //! sandbox root (`~/Workspace`), with Transfer Protocol v1 support.
 
 use crate::connector::protocol::{
-    extract_id_and_op_id, MSG_TYPE_FILE_OP_RESULT, TRANSFER_PROTOCOL_V1,
+    extract_id_and_op_id, MSG_TYPE_FILE_OP_RESULT, MSG_TYPE_REMOTE_TREE_UPDATE,
+    TRANSFER_PROTOCOL_V1,
 };
 use crate::rfc::sandbox::{Sandbox, DEFAULT_SANDBOX};
 use crate::rfc::text_editor::{apply_context_patch, apply_parsed_edits, parse_edits};
@@ -17,6 +18,7 @@ use std::path::Path;
 use std::sync::RwLock;
 
 static CUSTOM_SANDBOX: RwLock<Option<Sandbox>> = RwLock::new(None);
+static CONFIGURED_WORKSPACE_PATH: RwLock<Option<String>> = RwLock::new(None);
 
 /// Overrides the active sandbox for testing or custom configuration.
 pub fn set_test_sandbox(sandbox: Option<Sandbox>) {
@@ -25,14 +27,39 @@ pub fn set_test_sandbox(sandbox: Option<Sandbox>) {
     }
 }
 
-/// Returns the currently active sandbox (custom or default `~/Workspace`).
+/// Dynamically updates the active workspace directory for the sandbox.
+pub fn set_workspace_path(path: Option<&str>) {
+    if let Ok(mut lock) = CONFIGURED_WORKSPACE_PATH.write() {
+        *lock = path.map(|s| s.to_string());
+    }
+}
+
+/// Binds the active workspace directory for the sandbox.
+pub fn bind_workspace_path(path: &str) {
+    set_workspace_path(Some(path));
+}
+
+/// Gets the currently configured workspace directory or defaults to `~/Workspace`.
+pub fn get_workspace_path() -> String {
+    if let Ok(lock) = CONFIGURED_WORKSPACE_PATH.read() {
+        if let Some(ref path) = *lock {
+            if !path.trim().is_empty() {
+                return path.clone();
+            }
+        }
+    }
+    DEFAULT_SANDBOX.to_string()
+}
+
+/// Returns the currently active sandbox (custom test override or configured `workspace_path`).
 pub fn current_sandbox() -> Sandbox {
     if let Ok(lock) = CUSTOM_SANDBOX.read() {
         if let Some(ref sb) = *lock {
             return sb.clone();
         }
     }
-    Sandbox::from_allowed_paths(&[DEFAULT_SANDBOX.to_string()])
+    let ws_path = get_workspace_path();
+    Sandbox::from_allowed_paths(&[ws_path])
 }
 
 /// Normalizes path strings: empty or `.` becomes `/a0`, relative paths get `/a0/` prefix.
@@ -109,6 +136,22 @@ pub async fn handle_file_op_with_sandbox(envelope: &Value, sandbox: &Sandbox) ->
         "files_mkdir" | "mkdir" => op_files_mkdir(&id, &op_id, raw_path, sandbox),
         "files_remove" | "remove" | "delete" => op_files_remove(&id, &op_id, raw_path, sandbox),
         "files_rename" | "rename" | "move" => op_files_rename(&id, &op_id, envelope, sandbox),
+        "tree" | "tree_update" | "remote_tree" => {
+            let max_depth = envelope
+                .get("max_depth")
+                .and_then(Value::as_u64)
+                .unwrap_or(3) as usize;
+            let mut snapshot = generate_remote_tree_update(sandbox, max_depth);
+            if let Some(obj) = snapshot.as_object_mut() {
+                if !id.is_empty() {
+                    obj.insert("id".to_string(), Value::String(id));
+                }
+                if !op_id.is_empty() {
+                    obj.insert("op_id".to_string(), Value::String(op_id));
+                }
+            }
+            snapshot.to_string()
+        }
         unknown => make_error_reply(
             &id,
             &op_id,
@@ -854,4 +897,138 @@ fn op_files_rename(id: &str, op_id: &str, envelope: &Value, sandbox: &Sandbox) -
     res["data"] = json!({"success": true});
     res["result"] = json!({"success": true});
     res.to_string()
+}
+
+// ------------------------------------------------------------- remote tree update
+
+/// Generates a remote tree snapshot bounded to `max_depth` (default 3) for the given sandbox.
+pub fn generate_remote_tree_update(sandbox: &Sandbox, max_depth: usize) -> Value {
+    let mut flat_entries = Vec::new();
+    let mut file_count = 0usize;
+    let mut dir_count = 0usize;
+
+    let roots = sandbox.canonical_roots().unwrap_or_default();
+    let tree_nodes = if let Some(first_root) = roots.first() {
+        build_tree_recursive(
+            first_root,
+            first_root,
+            1,
+            max_depth,
+            &mut flat_entries,
+            &mut file_count,
+            &mut dir_count,
+        )
+    } else {
+        Vec::new()
+    };
+
+    let total_count = flat_entries.len();
+
+    json!({
+        "type": MSG_TYPE_REMOTE_TREE_UPDATE,
+        "op": MSG_TYPE_REMOTE_TREE_UPDATE,
+        "workspace_path": "/a0",
+        "root": "/a0",
+        "max_depth": max_depth,
+        "tree": tree_nodes,
+        "entries": flat_entries,
+        "count": total_count,
+        "total_count": total_count,
+        "total_files": file_count,
+        "total_dirs": dir_count,
+    })
+}
+
+/// Alias for `generate_remote_tree_update`.
+pub fn generate_remote_tree_snapshot(sandbox: &Sandbox, max_depth: usize) -> Value {
+    generate_remote_tree_update(sandbox, max_depth)
+}
+
+fn build_tree_recursive(
+    base: &Path,
+    current: &Path,
+    current_depth: usize,
+    max_depth: usize,
+    flat_entries: &mut Vec<Value>,
+    file_count: &mut usize,
+    dir_count: &mut usize,
+) -> Vec<Value> {
+    if current_depth > max_depth {
+        return Vec::new();
+    }
+
+    let mut nodes = Vec::new();
+    let Ok(entries) = fs::read_dir(current) else {
+        return nodes;
+    };
+
+    let mut sorted_entries: Vec<_> = entries.filter_map(Result::ok).collect();
+    sorted_entries.sort_by_key(|e| e.file_name());
+
+    for entry in sorted_entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let entry_path = entry.path();
+        let metadata = match fs::metadata(&entry_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        let is_dir = metadata.is_dir();
+        let is_file = metadata.is_file();
+        let rel_path = entry_path
+            .strip_prefix(base)
+            .unwrap_or(&entry_path)
+            .to_string_lossy()
+            .to_string();
+
+        if is_file {
+            *file_count += 1;
+        } else if is_dir {
+            *dir_count += 1;
+        }
+
+        let size = metadata.len();
+        let modified = epoch_secs(metadata.modified().unwrap_or(std::time::UNIX_EPOCH));
+
+        flat_entries.push(json!({
+            "name": name,
+            "path": rel_path,
+            "is_file": is_file,
+            "is_dir": is_dir,
+            "depth": current_depth,
+            "size": size,
+            "modified": modified,
+        }));
+
+        let children = if is_dir && current_depth < max_depth {
+            build_tree_recursive(
+                base,
+                &entry_path,
+                current_depth + 1,
+                max_depth,
+                flat_entries,
+                file_count,
+                dir_count,
+            )
+        } else {
+            Vec::new()
+        };
+
+        nodes.push(json!({
+            "name": name,
+            "path": rel_path,
+            "is_file": is_file,
+            "is_dir": is_dir,
+            "depth": current_depth,
+            "size": size,
+            "modified": modified,
+            "children": children,
+        }));
+    }
+
+    nodes
 }

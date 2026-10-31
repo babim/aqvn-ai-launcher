@@ -20,6 +20,8 @@ pub const MSG_TYPE_COMPUTER_USE_OP_RESULT: &str = "connector_computer_use_op_res
 pub const MSG_TYPE_GATEWAY_CONTROL: &str = "connector_gateway_control";
 pub const MSG_TYPE_GATEWAY_CONTROL_RESULT: &str = "connector_gateway_control_result";
 
+pub const MSG_TYPE_REMOTE_TREE_UPDATE: &str = "connector_remote_tree_update";
+
 pub const RUNTIME_TERMINAL: &str = "terminal";
 
 pub const TRANSFER_PROTOCOL_V1: &str = "v1";
@@ -954,4 +956,29 @@ pub struct ConnectorGatewayControlResult {
     pub success: bool,
     pub status: String,
     pub state: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConnectorRemoteTreeUpdate {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op_id: Option<String>,
+    pub workspace_path: String,
+    pub root: String,
+    pub max_depth: usize,
+    pub tree: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entries: Option<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_files: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_dirs: Option<usize>,
 }

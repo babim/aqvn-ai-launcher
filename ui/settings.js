@@ -10,6 +10,7 @@
   const DEFAULTS = {
     server_url: 'https://a0.matmagoc.com',
     server_profiles: ['https://a0.matmagoc.com'],
+    workspace_path: '~/Workspace',
     rfc_enabled: false,
     rfc_password: '',
     ssh_password: '',
@@ -45,6 +46,7 @@
   const scopeExecInput = document.getElementById('scope-exec');
   const scopeBrowserInput = document.getElementById('scope-browser');
   const scopeDesktopInput = document.getElementById('scope-desktop');
+  const workspacePathInput = document.getElementById('workspace-path');
   const rfcEnabledInput = document.getElementById('rfc-enabled');
   const rfcPasswordInput = document.getElementById('rfc-password');
   const sshPasswordInput = document.getElementById('ssh-password');
@@ -90,6 +92,8 @@
       scope_browser_desc: ' — tự động hóa Chrome/Edge qua CDP',
       scope_desktop_title: 'Computer Use',
       scope_desktop_desc: ' — chụp màn hình và điều khiển chuột/phím',
+      workspace_path_label: 'Thư mục không gian làm việc (workspace_path)',
+      workspace_path_help: 'Thư mục gốc được cô lập (sandbox) cho các thao tác tệp từ xa và đồng bộ cây thư mục (mặc định: ~/Workspace).',
       agent_control_title: 'Điều khiển Agent (RFC & SSH)',
       rfc_toggle: 'Cho phép điều khiển Agent',
       security_warning: 'Cảnh báo bảo mật: Bật tính năng này cho phép Agent từ xa truy cập tệp và chạy lệnh qua cầu nối RFC và SSH. Chỉ bật khi bạn tin cậy máy chủ và mạng.',
@@ -140,6 +144,8 @@
       scope_browser_desc: ' — automate local Chrome/Edge via CDP',
       scope_desktop_title: 'Computer Use',
       scope_desktop_desc: ' — screen capture and mouse/keyboard injection',
+      workspace_path_label: 'Workspace Directory (workspace_path)',
+      workspace_path_help: 'Root directory sandboxed for remote file operations and file tree snapshots (defaults to ~/Workspace).',
       agent_control_title: 'Agent Control (RFC & SSH)',
       rfc_toggle: 'Allow agent control',
       security_warning: 'Security Warning: Enabling agent control allows remote automated agents to access files in allowed paths and execute commands via RFC and SSH bridges. Keep this disabled unless you trust the remote agent and network environment.',
@@ -381,6 +387,12 @@
           scopeDesktop !== undefined ? Boolean(scopeDesktop) : DEFAULTS.scope_desktop;
       }
 
+      const workspacePath = await store.get('workspace_path');
+      if (workspacePathInput) {
+        workspacePathInput.value =
+          workspacePath !== undefined && workspacePath ? workspacePath : DEFAULTS.workspace_path;
+      }
+
       const globalHotkey = await store.get('global_hotkey');
       if (globalHotkeyInput) {
         globalHotkeyInput.value =
@@ -417,6 +429,7 @@
       if (scopeExecInput) scopeExecInput.checked = DEFAULTS.scope_exec;
       if (scopeBrowserInput) scopeBrowserInput.checked = DEFAULTS.scope_browser;
       if (scopeDesktopInput) scopeDesktopInput.checked = DEFAULTS.scope_desktop;
+      if (workspacePathInput) workspacePathInput.value = DEFAULTS.workspace_path;
       if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
       if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
       let fallbackLang = DEFAULTS.app_language;
@@ -490,6 +503,11 @@
       await store.set('scope_browser', scopeBrowser);
       await store.set('scope_desktop', scopeDesktop);
 
+      const workspacePath = (
+        (workspacePathInput ? workspacePathInput.value : DEFAULTS.workspace_path) || DEFAULTS.workspace_path
+      ).trim();
+      await store.set('workspace_path', workspacePath || DEFAULTS.workspace_path);
+
       const globalHotkey = (
         (globalHotkeyInput ? globalHotkeyInput.value : DEFAULTS.global_hotkey) || DEFAULTS.global_hotkey
       ).trim();
@@ -539,6 +557,7 @@
     if (scopeExecInput) scopeExecInput.checked = DEFAULTS.scope_exec;
     if (scopeBrowserInput) scopeBrowserInput.checked = DEFAULTS.scope_browser;
     if (scopeDesktopInput) scopeDesktopInput.checked = DEFAULTS.scope_desktop;
+    if (workspacePathInput) workspacePathInput.value = DEFAULTS.workspace_path;
     if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
     if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
     setLanguage(DEFAULTS.app_language);

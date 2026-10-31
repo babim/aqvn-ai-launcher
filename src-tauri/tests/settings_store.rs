@@ -72,6 +72,7 @@ fn config_json_serde_roundtrip() {
         server_url: "https://persist-check.example".to_string(),
         server_profiles: vec!["https://persist-check.example".to_string()],
         gateway_id: "test-gw-roundtrip".to_string(),
+        workspace_path: "~/Workspace".to_string(),
         rfc_enabled: true,
         rfc_password: "secret-pass".to_string(),
         ssh_password: "ssh-pass".to_string(),

@@ -121,6 +121,8 @@ pub struct GatewayConfig {
     pub scope_desktop: bool,
     pub ping_interval_secs: u64,
     pub reconnect_delay_ms: u64,
+    #[serde(default = "crate::config::default_workspace_path")]
+    pub workspace_path: String,
 }
 
 impl Default for GatewayConfig {
@@ -137,6 +139,7 @@ impl Default for GatewayConfig {
             scope_desktop: true,
             ping_interval_secs: DEFAULT_PING_INTERVAL_SECS,
             reconnect_delay_ms: DEFAULT_RECONNECT_DELAY_MS,
+            workspace_path: crate::config::DEFAULT_WORKSPACE_PATH.to_string(),
         }
     }
 }
@@ -155,6 +158,7 @@ impl GatewayConfig {
             scope_exec: app_config.scope_exec,
             scope_browser: app_config.scope_browser,
             scope_desktop: app_config.scope_desktop,
+            workspace_path: app_config.workspace_path.clone(),
             ..Default::default()
         }
     }
@@ -236,6 +240,8 @@ impl GatewayClient {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (handshake_tx, handshake_rx) = watch::channel(false);
         let connected = Arc::new(AtomicBool::new(false));
+
+        crate::connector::handlers::files::set_workspace_path(Some(&self.config.workspace_path));
 
         let handle = GatewayHandle {
             connected: Arc::clone(&connected),
@@ -577,6 +583,16 @@ impl GatewayClient {
         let (mut write, mut read) = stream.split();
         let (tx_out, mut rx_out) = tokio::sync::mpsc::channel::<Message>(32);
 
+        // Emit initial remote tree snapshot for agent contextual awareness (VAL-A0-008)
+        if self.config.scope_files {
+            let tree_update = crate::connector::handlers::files::generate_remote_tree_update(
+                &crate::connector::handlers::files::current_sandbox(),
+                3,
+            );
+            let tree_json = serde_json::to_string(&tree_update).unwrap_or_default();
+            let _ = tx_out.send(Message::Text(tree_json.into())).await;
+        }
+
         let mut ping_interval =
             tokio::time::interval(Duration::from_secs(self.config.ping_interval_secs));
         ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -722,6 +738,7 @@ pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
 
     loop {
         let app_config = receiver.borrow_and_update().clone();
+        crate::connector::handlers::files::set_workspace_path(Some(&app_config.workspace_path));
         if let Some((handle, join_handle)) = current.take() {
             handle.stop();
             let _ = join_handle.await;

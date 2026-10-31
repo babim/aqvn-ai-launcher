@@ -13,6 +13,7 @@ use crate::connector::protocol::{
     MSG_TYPE_BROWSER_OP, MSG_TYPE_BROWSER_OP_RESULT, MSG_TYPE_COMPUTER_USE_OP,
     MSG_TYPE_COMPUTER_USE_OP_RESULT, MSG_TYPE_EXEC_OP, MSG_TYPE_EXEC_OP_RESULT, MSG_TYPE_FILE_OP,
     MSG_TYPE_FILE_OP_RESULT, MSG_TYPE_GATEWAY_CONTROL, MSG_TYPE_GATEWAY_CONTROL_RESULT,
+    MSG_TYPE_REMOTE_TREE_UPDATE,
 };
 use serde_json::Value;
 
@@ -98,7 +99,71 @@ pub async fn dispatch_message_scoped(
                     .to_string(),
                 );
             }
-            Some(files::handle_file_op(&envelope).await)
+            let reply = files::handle_file_op(&envelope).await;
+            let action = envelope
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if matches!(
+                action.as_str(),
+                "write"
+                    | "patch"
+                    | "files_remove"
+                    | "remove"
+                    | "delete"
+                    | "files_rename"
+                    | "rename"
+                    | "move"
+                    | "files_mkdir"
+                    | "mkdir"
+            ) {
+                if let Some(tx) = sender {
+                    let tree_update =
+                        files::generate_remote_tree_update(&files::current_sandbox(), 3);
+                    let tree_str = tree_update.to_string();
+                    let _ = tx
+                        .send(tokio_tungstenite::tungstenite::Message::Text(
+                            tree_str.into(),
+                        ))
+                        .await;
+                }
+            }
+            Some(reply)
+        }
+        MSG_TYPE_REMOTE_TREE_UPDATE
+        | "remote_tree_update"
+        | "remote_tree"
+        | "connector_remote_tree" => {
+            if !config.scope_files {
+                return Some(
+                    serde_json::json!({
+                        "type": MSG_TYPE_REMOTE_TREE_UPDATE,
+                        "op": MSG_TYPE_REMOTE_TREE_UPDATE,
+                        "id": id,
+                        "op_id": op_id,
+                        "success": false,
+                        "status": "error",
+                        "error": "files scope disabled by configuration"
+                    })
+                    .to_string(),
+                );
+            }
+            let max_depth = envelope
+                .get("max_depth")
+                .and_then(Value::as_u64)
+                .unwrap_or(3) as usize;
+            let mut snapshot =
+                files::generate_remote_tree_update(&files::current_sandbox(), max_depth);
+            if let Some(obj) = snapshot.as_object_mut() {
+                if !id.is_empty() {
+                    obj.insert("id".to_string(), Value::String(id));
+                }
+                if !op_id.is_empty() {
+                    obj.insert("op_id".to_string(), Value::String(op_id));
+                }
+            }
+            Some(snapshot.to_string())
         }
         MSG_TYPE_EXEC_OP | "exec_op" => {
             if !config.scope_exec {

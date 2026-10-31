@@ -1961,6 +1961,20 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     assert.match(js, /scope_desktop/, 'settings.js must reference scope_desktop');
   });
 
+  test('VAL-A0-007: settings.html and settings.js support configurable workspace_path', () => {
+    const htmlPath = new URL('../../ui/settings.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /id="workspace-path"/, 'settings.html must expose #workspace-path');
+    assert.match(html, /name="workspace_path"/, 'settings.html must set name="workspace_path"');
+
+    const jsPath = new URL('../../ui/settings.js', import.meta.url);
+    const js = fs.readFileSync(jsPath, 'utf8');
+
+    assert.match(js, /workspace_path/, 'settings.js must reference workspace_path');
+    assert.match(js, /workspacePathInput/, 'settings.js must bind workspacePathInput');
+  });
+
   test('VAL-HOTKEY-001: settings.html exposes shortcuts section, #global-hotkey and #reset-hotkey-btn', () => {
     const htmlPath = new URL('../../ui/settings.html', import.meta.url);
     const html = fs.readFileSync(htmlPath, 'utf8');

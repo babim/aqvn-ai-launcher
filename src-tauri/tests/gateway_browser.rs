@@ -505,6 +505,7 @@ async fn test_gateway_client_browser_op_dispatch() {
         scope_desktop: false,
         ping_interval_secs: 10,
         reconnect_delay_ms: 50,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);

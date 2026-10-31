@@ -308,6 +308,7 @@ async fn test_gateway_pty_websocket_roundtrip() {
         scope_desktop: false,
         ping_interval_secs: 25,
         reconnect_delay_ms: 50,
+        ..Default::default()
     };
 
     let client = GatewayClient::new(config);

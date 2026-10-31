@@ -55,6 +55,7 @@ pub fn run() {
         .setup(|app| {
             let initial_config =
                 config::AppConfig::load_from_store(app.handle()).unwrap_or_default();
+            connector::handlers::files::set_workspace_path(Some(&initial_config.workspace_path));
             let watcher = config::ConfigWatcher::new(initial_config.clone());
             app.manage(watcher.clone());
 
@@ -123,6 +124,7 @@ pub fn run() {
                     let Some(next) = next else { continue };
                     if next != last {
                         last = next.clone();
+                        connector::handlers::files::set_workspace_path(Some(&last.workspace_path));
                         poll_watcher.update(next);
                     }
                 }

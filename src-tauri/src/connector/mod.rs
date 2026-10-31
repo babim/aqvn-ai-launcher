@@ -12,7 +12,7 @@ pub mod protocol;
 pub use client::{GatewayClient, GatewayConfig, GatewayHandle};
 pub use protocol::{
     AuthPayload, ConnectorBrowserOp, ConnectorBrowserOpResult, ConnectorGatewayControl,
-    ConnectorGatewayControlResult, ConnectorHello, ConnectorHelloAck, GatewayMetadata,
-    GatewayScopes, ScopeCapability, ScopeConfig, MSG_TYPE_GATEWAY_CONTROL,
-    MSG_TYPE_GATEWAY_CONTROL_RESULT, SCOPE_FILE_WRITE,
+    ConnectorGatewayControlResult, ConnectorHello, ConnectorHelloAck, ConnectorRemoteTreeUpdate,
+    GatewayMetadata, GatewayScopes, ScopeCapability, ScopeConfig, MSG_TYPE_GATEWAY_CONTROL,
+    MSG_TYPE_GATEWAY_CONTROL_RESULT, MSG_TYPE_REMOTE_TREE_UPDATE, SCOPE_FILE_WRITE,
 };

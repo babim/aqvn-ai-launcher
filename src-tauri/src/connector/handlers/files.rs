@@ -4,7 +4,9 @@
 //! `files_mkdir`, `files_remove`, `files_rename`) strictly bounded to the configured
 //! sandbox root (`~/Workspace`), with Transfer Protocol v1 support.
 
-use crate::connector::protocol::{MSG_TYPE_FILE_OP_RESULT, TRANSFER_PROTOCOL_V1};
+use crate::connector::protocol::{
+    extract_id_and_op_id, MSG_TYPE_FILE_OP_RESULT, TRANSFER_PROTOCOL_V1,
+};
 use crate::rfc::sandbox::{Sandbox, DEFAULT_SANDBOX};
 use crate::rfc::text_editor::{apply_context_patch, apply_parsed_edits, parse_edits};
 use crate::rfc::util::{count_content_lines, decode_base64, encode_base64, epoch_secs};
@@ -54,6 +56,7 @@ fn calculate_checksum(bytes: &[u8]) -> String {
 
 fn make_error_reply(
     id: &str,
+    op_id: &str,
     action: &str,
     path: Option<&str>,
     error_msg: impl Into<String>,
@@ -63,6 +66,7 @@ fn make_error_reply(
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "success": false,
         "status": "error",
         "action": action,
@@ -83,12 +87,7 @@ pub async fn handle_file_op(envelope: &Value) -> String {
 
 /// Dispatches `connector_file_op` against a specific sandbox.
 pub async fn handle_file_op_with_sandbox(envelope: &Value, sandbox: &Sandbox) -> String {
-    let id = envelope
-        .get("id")
-        .or_else(|| envelope.get("request_id"))
-        .or_else(|| envelope.get("call_id"))
-        .and_then(Value::as_str)
-        .unwrap_or("file-op-auto");
+    let (id, op_id) = extract_id_and_op_id(envelope, "file-op-auto");
 
     let action = envelope
         .get("action")
@@ -102,16 +101,17 @@ pub async fn handle_file_op_with_sandbox(envelope: &Value, sandbox: &Sandbox) ->
     let raw_path = envelope.get("path").and_then(Value::as_str).unwrap_or("");
 
     match action.as_str() {
-        "read" => op_read(id, raw_path, envelope, sandbox),
-        "write" => op_write(id, raw_path, envelope, sandbox),
-        "patch" => op_patch(id, raw_path, envelope, sandbox),
-        "files_list" | "list" => op_files_list(id, raw_path, envelope, sandbox),
-        "files_stat" | "stat" => op_files_stat(id, raw_path, sandbox),
-        "files_mkdir" | "mkdir" => op_files_mkdir(id, raw_path, sandbox),
-        "files_remove" | "remove" | "delete" => op_files_remove(id, raw_path, sandbox),
-        "files_rename" | "rename" | "move" => op_files_rename(id, envelope, sandbox),
+        "read" => op_read(&id, &op_id, raw_path, envelope, sandbox),
+        "write" => op_write(&id, &op_id, raw_path, envelope, sandbox),
+        "patch" => op_patch(&id, &op_id, raw_path, envelope, sandbox),
+        "files_list" | "list" => op_files_list(&id, &op_id, raw_path, envelope, sandbox),
+        "files_stat" | "stat" => op_files_stat(&id, &op_id, raw_path, sandbox),
+        "files_mkdir" | "mkdir" => op_files_mkdir(&id, &op_id, raw_path, sandbox),
+        "files_remove" | "remove" | "delete" => op_files_remove(&id, &op_id, raw_path, sandbox),
+        "files_rename" | "rename" | "move" => op_files_rename(&id, &op_id, envelope, sandbox),
         unknown => make_error_reply(
-            id,
+            &id,
+            &op_id,
             unknown,
             Some(raw_path),
             format!("unsupported file operation action: {unknown}"),
@@ -121,16 +121,17 @@ pub async fn handle_file_op_with_sandbox(envelope: &Value, sandbox: &Sandbox) ->
 
 // ----------------------------------------------------------------- read operation
 
-fn op_read(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
+fn op_read(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
     let normalized = normalize_requested_path(raw_path);
     let jailed = match sandbox.jail(&normalized) {
         Ok(p) => p,
-        Err(err) => return make_error_reply(id, "read", Some(raw_path), err.to_string()),
+        Err(err) => return make_error_reply(id, op_id, "read", Some(raw_path), err.to_string()),
     };
 
     if !jailed.exists() {
         return make_error_reply(
             id,
+            op_id,
             "read",
             Some(raw_path),
             format!("file not found: {raw_path}"),
@@ -139,6 +140,7 @@ fn op_read(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> Str
     if !jailed.is_file() {
         return make_error_reply(
             id,
+            op_id,
             "read",
             Some(raw_path),
             format!("path is not a file: {raw_path}"),
@@ -150,6 +152,7 @@ fn op_read(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> Str
         Err(err) => {
             return make_error_reply(
                 id,
+                op_id,
                 "read",
                 Some(raw_path),
                 format!("failed to read file: {err}"),
@@ -199,6 +202,7 @@ fn op_read(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> Str
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "success": true,
         "status": "ok",
         "action": "read",
@@ -231,11 +235,11 @@ fn op_read(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> Str
 
 // ----------------------------------------------------------------- write operation
 
-fn op_write(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
+fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
     let normalized = normalize_requested_path(raw_path);
     let jailed = match sandbox.jail(&normalized) {
         Ok(p) => p,
-        Err(err) => return make_error_reply(id, "write", Some(raw_path), err.to_string()),
+        Err(err) => return make_error_reply(id, op_id, "write", Some(raw_path), err.to_string()),
     };
 
     let encoding = envelope
@@ -255,6 +259,7 @@ fn op_write(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
             Err(err) => {
                 return make_error_reply(
                     id,
+                    op_id,
                     "write",
                     Some(raw_path),
                     format!("invalid base64 content: {err}"),
@@ -269,6 +274,7 @@ fn op_write(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
         if let Err(err) = fs::create_dir_all(parent) {
             return make_error_reply(
                 id,
+                op_id,
                 "write",
                 Some(raw_path),
                 format!("failed to create parent directories: {err}"),
@@ -296,6 +302,7 @@ fn op_write(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
     if let Err(err) = write_res {
         return make_error_reply(
             id,
+            op_id,
             "write",
             Some(raw_path),
             format!("failed to write file: {err}"),
@@ -314,6 +321,7 @@ fn op_write(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "success": true,
         "status": "ok",
         "action": "write",
@@ -338,16 +346,17 @@ fn op_write(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
 
 // ----------------------------------------------------------------- patch operation
 
-fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
+fn op_patch(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
     let normalized = normalize_requested_path(raw_path);
     let jailed = match sandbox.jail(&normalized) {
         Ok(p) => p,
-        Err(err) => return make_error_reply(id, "patch", Some(raw_path), err.to_string()),
+        Err(err) => return make_error_reply(id, op_id, "patch", Some(raw_path), err.to_string()),
     };
 
     if !jailed.exists() {
         return make_error_reply(
             id,
+            op_id,
             "patch",
             Some(raw_path),
             format!("file not found: {raw_path}"),
@@ -356,6 +365,7 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
     if !jailed.is_file() {
         return make_error_reply(
             id,
+            op_id,
             "patch",
             Some(raw_path),
             format!("path is not a file: {raw_path}"),
@@ -367,6 +377,7 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
         Err(err) => {
             return make_error_reply(
                 id,
+                op_id,
                 "patch",
                 Some(raw_path),
                 format!("failed to read file for patching: {err}"),
@@ -382,12 +393,19 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
         envelope.get("new_text").and_then(Value::as_str),
     ) {
         if old_text.is_empty() {
-            return make_error_reply(id, "patch", Some(raw_path), "old_text cannot be empty");
+            return make_error_reply(
+                id,
+                op_id,
+                "patch",
+                Some(raw_path),
+                "old_text cannot be empty",
+            );
         }
         let matches = original.matches(old_text).count();
         if matches == 0 {
             return make_error_reply(
                 id,
+                op_id,
                 "patch",
                 Some(raw_path),
                 format!("old_text not found in file: {old_text}"),
@@ -396,6 +414,7 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
         if matches > 1 {
             return make_error_reply(
                 id,
+                op_id,
                 "patch",
                 Some(raw_path),
                 format!("old_text matched {matches} times; provide a longer unique context"),
@@ -409,6 +428,7 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
             Err(err) => {
                 return make_error_reply(
                     id,
+                    op_id,
                     "patch",
                     Some(raw_path),
                     format!("failed to parse edits: {err}"),
@@ -423,6 +443,7 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
             Err(err) => {
                 return make_error_reply(
                     id,
+                    op_id,
                     "patch",
                     Some(raw_path),
                     format!("failed to apply context patch: {err}"),
@@ -434,6 +455,7 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
     } else {
         return make_error_reply(
             id,
+            op_id,
             "patch",
             Some(raw_path),
             "patch requires 'patch_text', 'old_text'/'new_text', or 'edits'",
@@ -443,6 +465,7 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
     if let Err(err) = fs::write(&jailed, updated.as_bytes()) {
         return make_error_reply(
             id,
+            op_id,
             "patch",
             Some(raw_path),
             format!("failed to write patched file: {err}"),
@@ -456,6 +479,7 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "success": true,
         "status": "ok",
         "action": "patch",
@@ -482,16 +506,25 @@ fn op_patch(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> St
 
 // ------------------------------------------------------------- files_list operation
 
-fn op_files_list(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
+fn op_files_list(
+    id: &str,
+    op_id: &str,
+    raw_path: &str,
+    envelope: &Value,
+    sandbox: &Sandbox,
+) -> String {
     let normalized = normalize_requested_path(raw_path);
     let jailed = match sandbox.jail(&normalized) {
         Ok(p) => p,
-        Err(err) => return make_error_reply(id, "files_list", Some(raw_path), err.to_string()),
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_list", Some(raw_path), err.to_string())
+        }
     };
 
     if !jailed.exists() {
         return make_error_reply(
             id,
+            op_id,
             "files_list",
             Some(raw_path),
             format!("directory not found: {raw_path}"),
@@ -500,6 +533,7 @@ fn op_files_list(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) 
     if !jailed.is_dir() {
         return make_error_reply(
             id,
+            op_id,
             "files_list",
             Some(raw_path),
             format!("path is not a directory: {raw_path}"),
@@ -520,6 +554,7 @@ fn op_files_list(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) 
     if let Err(err) = collect_entries(&jailed, &jailed, include_hidden, recursive, &mut entries) {
         return make_error_reply(
             id,
+            op_id,
             "files_list",
             Some(raw_path),
             format!("failed to list directory: {err}"),
@@ -537,6 +572,7 @@ fn op_files_list(id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) 
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "success": true,
         "status": "ok",
         "action": "files_list",
@@ -603,11 +639,13 @@ fn collect_entries(
 
 // ------------------------------------------------------------- helper operations
 
-fn op_files_stat(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
+fn op_files_stat(id: &str, op_id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
     let normalized = normalize_requested_path(raw_path);
     let jailed = match sandbox.jail(&normalized) {
         Ok(p) => p,
-        Err(err) => return make_error_reply(id, "files_stat", Some(raw_path), err.to_string()),
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_stat", Some(raw_path), err.to_string())
+        }
     };
 
     let exists = jailed.exists();
@@ -630,6 +668,7 @@ fn op_files_stat(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "success": true,
         "status": "ok",
         "action": "files_stat",
@@ -656,16 +695,19 @@ fn op_files_stat(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
     res.to_string()
 }
 
-fn op_files_mkdir(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
+fn op_files_mkdir(id: &str, op_id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
     let normalized = normalize_requested_path(raw_path);
     let jailed = match sandbox.jail(&normalized) {
         Ok(p) => p,
-        Err(err) => return make_error_reply(id, "files_mkdir", Some(raw_path), err.to_string()),
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_mkdir", Some(raw_path), err.to_string())
+        }
     };
 
     if let Err(err) = fs::create_dir_all(&jailed) {
         return make_error_reply(
             id,
+            op_id,
             "files_mkdir",
             Some(raw_path),
             format!("failed to create directory: {err}"),
@@ -676,6 +718,7 @@ fn op_files_mkdir(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "success": true,
         "status": "ok",
         "action": "files_mkdir",
@@ -688,16 +731,19 @@ fn op_files_mkdir(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
     res.to_string()
 }
 
-fn op_files_remove(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
+fn op_files_remove(id: &str, op_id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
     let normalized = normalize_requested_path(raw_path);
     let jailed = match sandbox.jail(&normalized) {
         Ok(p) => p,
-        Err(err) => return make_error_reply(id, "files_remove", Some(raw_path), err.to_string()),
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_remove", Some(raw_path), err.to_string())
+        }
     };
 
     if !jailed.exists() {
         return make_error_reply(
             id,
+            op_id,
             "files_remove",
             Some(raw_path),
             format!("path does not exist: {raw_path}"),
@@ -713,6 +759,7 @@ fn op_files_remove(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
     if let Err(err) = remove_res {
         return make_error_reply(
             id,
+            op_id,
             "files_remove",
             Some(raw_path),
             format!("failed to remove path: {err}"),
@@ -723,6 +770,7 @@ fn op_files_remove(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "success": true,
         "status": "ok",
         "action": "files_remove",
@@ -735,7 +783,7 @@ fn op_files_remove(id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
     res.to_string()
 }
 
-fn op_files_rename(id: &str, envelope: &Value, sandbox: &Sandbox) -> String {
+fn op_files_rename(id: &str, op_id: &str, envelope: &Value, sandbox: &Sandbox) -> String {
     let src_raw = envelope
         .get("src")
         .or_else(|| envelope.get("source"))
@@ -755,16 +803,21 @@ fn op_files_rename(id: &str, envelope: &Value, sandbox: &Sandbox) -> String {
 
     let src_jailed = match sandbox.jail(&src_norm) {
         Ok(p) => p,
-        Err(err) => return make_error_reply(id, "files_rename", Some(src_raw), err.to_string()),
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_rename", Some(src_raw), err.to_string())
+        }
     };
     let dst_jailed = match sandbox.jail(&dst_norm) {
         Ok(p) => p,
-        Err(err) => return make_error_reply(id, "files_rename", Some(dst_raw), err.to_string()),
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_rename", Some(dst_raw), err.to_string())
+        }
     };
 
     if !src_jailed.exists() {
         return make_error_reply(
             id,
+            op_id,
             "files_rename",
             Some(src_raw),
             format!("source path does not exist: {src_raw}"),
@@ -778,6 +831,7 @@ fn op_files_rename(id: &str, envelope: &Value, sandbox: &Sandbox) -> String {
     if let Err(err) = fs::rename(&src_jailed, &dst_jailed) {
         return make_error_reply(
             id,
+            op_id,
             "files_rename",
             Some(src_raw),
             format!("failed to rename: {err}"),
@@ -788,6 +842,7 @@ fn op_files_rename(id: &str, envelope: &Value, sandbox: &Sandbox) -> String {
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "success": true,
         "status": "ok",
         "action": "files_rename",

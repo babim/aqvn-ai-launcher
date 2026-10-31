@@ -33,12 +33,7 @@ pub async fn dispatch_message_scoped(
         .and_then(|v| v.as_str())
         .unwrap_or_default();
 
-    let id = envelope
-        .get("id")
-        .or_else(|| envelope.get("op_id"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let (id, op_id) = crate::connector::protocol::extract_id_and_op_id(&envelope, "");
 
     match op {
         "connector_hello_ack" => None,
@@ -53,13 +48,6 @@ pub async fn dispatch_message_scoped(
             .to_string(),
         ),
         MSG_TYPE_GATEWAY_CONTROL | "gateway_control" => {
-            let op_id = envelope
-                .get("op_id")
-                .or_else(|| envelope.get("id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or(&id)
-                .to_string();
-
             let mut scopes = serde_json::Map::new();
             scopes.insert("files".to_string(), Value::Bool(config.scope_files));
             scopes.insert("file_write".to_string(), Value::Bool(config.scope_files));
@@ -99,6 +87,7 @@ pub async fn dispatch_message_scoped(
                         "type": MSG_TYPE_FILE_OP_RESULT,
                         "op": MSG_TYPE_FILE_OP_RESULT,
                         "id": id,
+                        "op_id": op_id,
                         "success": false,
                         "status": "error",
                         "action": envelope.get("action").and_then(|v| v.as_str()).unwrap_or(""),
@@ -113,12 +102,15 @@ pub async fn dispatch_message_scoped(
         }
         MSG_TYPE_EXEC_OP | "exec_op" => {
             if !config.scope_exec {
+                let session_id = exec::extract_session_id(&envelope);
                 return Some(
                     serde_json::json!({
                         "type": MSG_TYPE_EXEC_OP_RESULT,
                         "op": MSG_TYPE_EXEC_OP_RESULT,
                         "id": id,
-                        "session_id": envelope.get("session_id").and_then(|v| v.as_str()).unwrap_or(""),
+                        "op_id": op_id,
+                        "session_id": session_id,
+                        "session": session_id,
                         "success": false,
                         "status": "error",
                         "done": true,
@@ -136,6 +128,7 @@ pub async fn dispatch_message_scoped(
                         "type": MSG_TYPE_BROWSER_OP_RESULT,
                         "op": MSG_TYPE_BROWSER_OP_RESULT,
                         "id": id,
+                        "op_id": op_id,
                         "success": false,
                         "status": "error",
                         "action": envelope.get("action").and_then(|v| v.as_str()).unwrap_or(""),
@@ -153,6 +146,7 @@ pub async fn dispatch_message_scoped(
                         "type": MSG_TYPE_COMPUTER_USE_OP_RESULT,
                         "op": MSG_TYPE_COMPUTER_USE_OP_RESULT,
                         "id": id,
+                        "op_id": op_id,
                         "success": false,
                         "status": "error",
                         "action": envelope.get("action").and_then(|v| v.as_str()).unwrap_or(""),

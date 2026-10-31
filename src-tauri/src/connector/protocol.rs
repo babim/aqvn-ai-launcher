@@ -150,6 +150,59 @@ pub fn format_socketio_connect<T: Serialize>(namespace: Option<&str>, auth: Opti
     pkt
 }
 
+/// Extracts (id, op_id) from an envelope flexibly handling strings, integers, or missing fields.
+pub fn extract_id_and_op_id(envelope: &Value, default_id: &str) -> (String, String) {
+    let id_opt = envelope
+        .get("id")
+        .or_else(|| envelope.get("request_id"))
+        .or_else(|| envelope.get("call_id"))
+        .or_else(|| {
+            envelope
+                .get("params")
+                .and_then(|p| p.get("id").or_else(|| p.get("request_id")))
+        });
+    let op_id_opt = envelope
+        .get("op_id")
+        .or_else(|| envelope.get("params").and_then(|p| p.get("op_id")));
+
+    let id_str = id_opt.and_then(|v| {
+        v.as_str()
+            .map(String::from)
+            .or_else(|| v.as_i64().map(|n| n.to_string()))
+            .or_else(|| v.as_u64().map(|n| n.to_string()))
+    });
+
+    let op_id_str = op_id_opt.and_then(|v| {
+        v.as_str()
+            .map(String::from)
+            .or_else(|| v.as_i64().map(|n| n.to_string()))
+            .or_else(|| v.as_u64().map(|n| n.to_string()))
+    });
+
+    let id = id_str
+        .or_else(|| op_id_str.clone())
+        .unwrap_or_else(|| default_id.to_string());
+
+    let op_id = op_id_str.unwrap_or_else(|| id.clone());
+
+    (id, op_id)
+}
+
+/// Injects or overwrites "id" and "op_id" in a result envelope JSON string.
+pub fn attach_id_and_op_id(raw_json: String, id: &str, op_id: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<Value>(&raw_json) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("id".to_string(), serde_json::Value::String(id.to_string()));
+            obj.insert(
+                "op_id".to_string(),
+                serde_json::Value::String(op_id.to_string()),
+            );
+            return serde_json::to_string(&val).unwrap_or(raw_json);
+        }
+    }
+    raw_json
+}
+
 fn default_true() -> bool {
     true
 }
@@ -600,6 +653,8 @@ pub struct ConnectorFileOp {
     pub op: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub op_id: Option<String>,
     pub action: String,
     #[serde(default)]
     pub path: Option<String>,
@@ -631,6 +686,8 @@ pub struct ConnectorFileOpResult {
     pub msg_type: String,
     pub op: String,
     pub id: String,
+    #[serde(default)]
+    pub op_id: String,
     pub success: bool,
     pub status: String,
     pub action: String,
@@ -675,6 +732,8 @@ pub struct ConnectorExecOp {
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
+    pub op_id: Option<String>,
+    #[serde(default)]
     pub action: Option<String>,
     #[serde(default)]
     pub runtime: Option<String>,
@@ -686,6 +745,8 @@ pub struct ConnectorExecOp {
     pub input: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub session: Option<Value>,
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
@@ -704,7 +765,11 @@ pub struct ConnectorExecOpResult {
     pub msg_type: String,
     pub op: String,
     pub id: String,
+    #[serde(default)]
+    pub op_id: String,
     pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
     pub success: bool,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -730,6 +795,8 @@ pub struct ConnectorBrowserOp {
     pub op: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub op_id: Option<String>,
     #[serde(default)]
     pub action: Option<String>,
     #[serde(default)]
@@ -766,6 +833,8 @@ pub struct ConnectorBrowserOpResult {
     pub msg_type: String,
     pub op: String,
     pub id: String,
+    #[serde(default)]
+    pub op_id: String,
     pub success: bool,
     pub status: String,
     pub action: String,
@@ -793,6 +862,8 @@ pub struct ConnectorComputerUseOp {
     pub op: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub op_id: Option<String>,
     #[serde(default)]
     pub action: Option<String>,
     #[serde(default)]
@@ -841,6 +912,8 @@ pub struct ConnectorComputerUseOpResult {
     pub msg_type: String,
     pub op: String,
     pub id: String,
+    #[serde(default)]
+    pub op_id: String,
     pub success: bool,
     pub status: String,
     pub action: String,

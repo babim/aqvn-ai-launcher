@@ -244,3 +244,90 @@ fn test_scopes_and_write_enabled_metadata() {
     assert_eq!(partial_val["remote_files"]["write_enabled"], false);
     assert_eq!(partial_val["remote_files"]["mode"], "none");
 }
+
+#[tokio::test]
+async fn test_op_id_and_id_dual_propagation() {
+    use aqvn_workspace_lib::connector::handlers::{browser, computer_use, exec, files};
+    use aqvn_workspace_lib::connector::protocol::{
+        MSG_TYPE_BROWSER_OP, MSG_TYPE_BROWSER_OP_RESULT, MSG_TYPE_COMPUTER_USE_OP,
+        MSG_TYPE_COMPUTER_USE_OP_RESULT, MSG_TYPE_EXEC_OP, MSG_TYPE_EXEC_OP_RESULT,
+        MSG_TYPE_FILE_OP, MSG_TYPE_FILE_OP_RESULT,
+    };
+    use aqvn_workspace_lib::rfc::sandbox::Sandbox;
+    use serde_json::json;
+
+    let temp_dir = std::env::temp_dir().join(format!("aqvn-test-opid-{}", rand::random::<u32>()));
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let sandbox = Sandbox::from_allowed_paths(&[temp_dir.to_string_lossy().to_string()]);
+
+    // 1. files.rs emits both id and op_id
+    let file_req = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "action": "files_stat",
+        "path": ".",
+        "id": "file-req-id-123",
+        "op_id": "file-op-id-456",
+    });
+    let file_rep_str = files::handle_file_op_with_sandbox(&file_req, &sandbox).await;
+    let file_rep: Value = serde_json::from_str(&file_rep_str).expect("parse file reply");
+    assert_eq!(file_rep["type"], MSG_TYPE_FILE_OP_RESULT);
+    assert_eq!(file_rep["id"], "file-req-id-123");
+    assert_eq!(file_rep["op_id"], "file-op-id-456");
+
+    // 1b. files.rs with only id emits op_id matching id
+    let file_req_single = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "action": "files_stat",
+        "path": ".",
+        "id": "file-req-only-789",
+    });
+    let file_rep_single_str = files::handle_file_op_with_sandbox(&file_req_single, &sandbox).await;
+    let file_rep_single: Value =
+        serde_json::from_str(&file_rep_single_str).expect("parse file reply");
+    assert_eq!(file_rep_single["id"], "file-req-only-789");
+    assert_eq!(file_rep_single["op_id"], "file-req-only-789");
+
+    // 2. exec.rs emits both id and op_id
+    let exec_req = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "action": "execute",
+        "command": "echo test_dual_propagation",
+        "session": "test-dual-opid-session",
+        "id": "exec-req-id-101",
+        "op_id": "exec-op-id-202",
+    });
+    let exec_rep_str = exec::handle_exec_op(&exec_req).await;
+    let exec_rep: Value = serde_json::from_str(&exec_rep_str).expect("parse exec reply");
+    assert_eq!(exec_rep["type"], MSG_TYPE_EXEC_OP_RESULT);
+    assert_eq!(exec_rep["id"], "exec-req-id-101");
+    assert_eq!(exec_rep["op_id"], "exec-op-id-202");
+    exec::reset_session("test-dual-opid-session");
+
+    // 3. browser.rs emits both id and op_id
+    let browser_req = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "action": "unknown_action_test",
+        "id": "browser-req-id-303",
+        "op_id": "browser-op-id-404",
+    });
+    let browser_rep_str = browser::handle_browser_op(&browser_req).await;
+    let browser_rep: Value = serde_json::from_str(&browser_rep_str).expect("parse browser reply");
+    assert_eq!(browser_rep["type"], MSG_TYPE_BROWSER_OP_RESULT);
+    assert_eq!(browser_rep["id"], "browser-req-id-303");
+    assert_eq!(browser_rep["op_id"], "browser-op-id-404");
+
+    // 4. computer_use.rs emits both id and op_id
+    let cu_req = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "action": "cursor_position",
+        "id": "cu-req-id-505",
+        "op_id": "cu-op-id-606",
+    });
+    let cu_rep_str = computer_use::handle_computer_use_op(&cu_req).await;
+    let cu_rep: Value = serde_json::from_str(&cu_rep_str).expect("parse cu reply");
+    assert_eq!(cu_rep["type"], MSG_TYPE_COMPUTER_USE_OP_RESULT);
+    assert_eq!(cu_rep["id"], "cu-req-id-505");
+    assert_eq!(cu_rep["op_id"], "cu-op-id-606");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}

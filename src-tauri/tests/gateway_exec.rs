@@ -364,3 +364,78 @@ async fn test_gateway_pty_websocket_roundtrip() {
     server_task.abort();
     exec::reset_session(session_id);
 }
+
+#[tokio::test]
+async fn test_flexible_session_parsing() {
+    // 1. Integer session parameter
+    let session_int = 98765;
+    exec::reset_session(&session_int.to_string());
+
+    let op_set_int = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-int-sess-1",
+        "op_id": "op-int-sess-1",
+        "command": "export TEST_FLEX_VAR=integer_session_works",
+        "session": session_int,
+    });
+    let rep_set_int_str = exec::handle_exec_op(&op_set_int).await;
+    let rep_set_int: Value = serde_json::from_str(&rep_set_int_str).expect("parse rep_set_int");
+    assert_eq!(rep_set_int["success"], true);
+    assert_eq!(rep_set_int["session_id"], "98765");
+    assert_eq!(rep_set_int["id"], "req-int-sess-1");
+    assert_eq!(rep_set_int["op_id"], "op-int-sess-1");
+
+    // 2. String session parameter referring to the SAME session id "98765"
+    let op_read_str = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-int-sess-2",
+        "command": "echo \"READ=$TEST_FLEX_VAR\"",
+        "session": "98765",
+    });
+    let rep_read_str_str = exec::handle_exec_op(&op_read_str).await;
+    let rep_read_str: Value = serde_json::from_str(&rep_read_str_str).expect("parse rep_read_str");
+    assert_eq!(rep_read_str["success"], true);
+    assert!(
+        rep_read_str["output"]
+            .as_str()
+            .unwrap()
+            .contains("READ=integer_session_works"),
+        "session state must be preserved across integer and string references"
+    );
+
+    // 3. Different integer session parameter has isolated environment
+    let op_other_int = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-int-sess-3",
+        "command": "echo \"READ=$TEST_FLEX_VAR\"",
+        "session": 98766,
+    });
+    let rep_other_int_str = exec::handle_exec_op(&op_other_int).await;
+    let rep_other_int: Value =
+        serde_json::from_str(&rep_other_int_str).expect("parse rep_other_int");
+    assert_eq!(rep_other_int["success"], true);
+    assert_eq!(rep_other_int["session_id"], "98766");
+    assert!(
+        !rep_other_int["output"]
+            .as_str()
+            .unwrap()
+            .contains("integer_session_works"),
+        "different session must not see other session state"
+    );
+
+    // 4. Integer 0 is handled validly and distinctly
+    let op_zero = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-zero-1",
+        "command": "echo zero_session",
+        "session": 0,
+    });
+    let rep_zero_str = exec::handle_exec_op(&op_zero).await;
+    let rep_zero: Value = serde_json::from_str(&rep_zero_str).expect("parse rep_zero");
+    assert_eq!(rep_zero["success"], true);
+    assert_eq!(rep_zero["session_id"], "0");
+
+    exec::reset_session("98765");
+    exec::reset_session("98766");
+    exec::reset_session("0");
+}

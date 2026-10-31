@@ -3,7 +3,9 @@
 //! Handles `open`, `navigate`, `click`, `type`, `screenshot`, `evaluate`, and
 //! `open_remote_debugging` bridging to local browser on Chrome DevTools Protocol port 9222.
 
-use crate::connector::protocol::MSG_TYPE_BROWSER_OP_RESULT;
+use crate::connector::protocol::{
+    attach_id_and_op_id, extract_id_and_op_id, MSG_TYPE_BROWSER_OP_RESULT,
+};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -342,6 +344,7 @@ fn make_ok_reply(id: &str, action: &str, data: Value) -> String {
         "type": MSG_TYPE_BROWSER_OP_RESULT,
         "op": MSG_TYPE_BROWSER_OP_RESULT,
         "id": id,
+        "op_id": id,
         "success": true,
         "status": "ok",
         "action": action,
@@ -357,6 +360,7 @@ fn make_error_reply(id: &str, action: &str, error_msg: impl Into<String>) -> Str
         "type": MSG_TYPE_BROWSER_OP_RESULT,
         "op": MSG_TYPE_BROWSER_OP_RESULT,
         "id": id,
+        "op_id": id,
         "success": false,
         "status": "error",
         "action": action,
@@ -369,10 +373,9 @@ fn make_error_reply(id: &str, action: &str, error_msg: impl Into<String>) -> Str
 
 /// Dispatches an incoming `connector_browser_op` envelope.
 pub async fn handle_browser_op(envelope: &Value) -> String {
-    let id = envelope
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("browser-op-req");
+    let (id_str, op_id_str) = extract_id_and_op_id(envelope, "browser-op-req");
+    let id = id_str.as_str();
+    let op_id = op_id_str.as_str();
 
     let params_obj = envelope.get("params");
 
@@ -389,7 +392,7 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
         .map(String::from)
         .unwrap_or_else(current_cdp_endpoint);
 
-    match action {
+    let raw_reply = match action {
         "open" => {
             let target_url = envelope
                 .get("url")
@@ -831,5 +834,6 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
             other,
             format!("unknown or unsupported browser action: {other}"),
         ),
-    }
+    };
+    attach_id_and_op_id(raw_reply, id, op_id)
 }

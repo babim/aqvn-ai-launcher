@@ -5,7 +5,7 @@
 //! Streams standard output and exit codes back via `connector_exec_op_result`.
 
 use crate::connector::handlers::files::current_sandbox;
-use crate::connector::protocol::{MSG_TYPE_EXEC_OP_RESULT, RUNTIME_TERMINAL};
+use crate::connector::protocol::{extract_id_and_op_id, MSG_TYPE_EXEC_OP_RESULT, RUNTIME_TERMINAL};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -166,6 +166,7 @@ impl PtySession {
         timeout_ms: u64,
         chunk_tx: Option<&mpsc::Sender<String>>,
         id: &str,
+        op_id: &str,
         session_id: &str,
     ) -> Result<(String, i32), String> {
         // Drain any stale bytes before executing the command
@@ -254,7 +255,9 @@ impl PtySession {
                                                 "type": MSG_TYPE_EXEC_OP_RESULT,
                                                 "op": MSG_TYPE_EXEC_OP_RESULT,
                                                 "id": id,
+                                                "op_id": op_id,
                                                 "session_id": session_id,
+                                                "session": session_id,
                                                 "stream": "stdout",
                                                 "output": unsent,
                                                 "done": false
@@ -281,7 +284,9 @@ impl PtySession {
                                             "type": MSG_TYPE_EXEC_OP_RESULT,
                                             "op": MSG_TYPE_EXEC_OP_RESULT,
                                             "id": id,
+                                            "op_id": op_id,
                                             "session_id": session_id,
+                                            "session": session_id,
                                             "stream": "stdout",
                                             "output": chunk_str,
                                             "done": false
@@ -396,8 +401,31 @@ pub fn clear_all_sessions() {
     }
 }
 
+/// Extracts flexible session ID as string from integer or string session parameter.
+pub fn extract_session_id(envelope: &Value) -> String {
+    let session_val = envelope
+        .get("session_id")
+        .or_else(|| envelope.get("session"))
+        .or_else(|| envelope.get("session_name"));
+
+    if let Some(val) = session_val {
+        if let Some(s) = val.as_str() {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        } else if let Some(i) = val.as_i64() {
+            return i.to_string();
+        } else if let Some(u) = val.as_u64() {
+            return u.to_string();
+        }
+    }
+    "default".to_string()
+}
+
 fn make_error_reply(
     id: &str,
+    op_id: &str,
     session_id: &str,
     runtime: Option<&str>,
     error_msg: impl Into<String>,
@@ -406,7 +434,9 @@ fn make_error_reply(
         "type": MSG_TYPE_EXEC_OP_RESULT,
         "op": MSG_TYPE_EXEC_OP_RESULT,
         "id": id,
+        "op_id": op_id,
         "session_id": session_id,
+        "session": session_id,
         "runtime": runtime.unwrap_or(RUNTIME_TERMINAL),
         "status": "error",
         "success": false,
@@ -427,18 +457,8 @@ pub async fn handle_exec_op_streaming(
     envelope: &Value,
     chunk_tx: Option<mpsc::Sender<String>>,
 ) -> String {
-    let id = envelope
-        .get("id")
-        .or_else(|| envelope.get("request_id"))
-        .or_else(|| envelope.get("call_id"))
-        .and_then(Value::as_str)
-        .unwrap_or("exec-op-auto");
-
-    let session_id = envelope
-        .get("session_id")
-        .or_else(|| envelope.get("session"))
-        .and_then(Value::as_str)
-        .unwrap_or("default");
+    let (id, op_id) = extract_id_and_op_id(envelope, "exec-op-auto");
+    let session_id = extract_session_id(envelope);
 
     let action = envelope
         .get("action")
@@ -449,8 +469,9 @@ pub async fn handle_exec_op_streaming(
     #[cfg(target_os = "android")]
     {
         return make_error_reply(
-            id,
-            session_id,
+            &id,
+            &op_id,
+            &session_id,
             None,
             "pty code execution is not supported on Android",
         );
@@ -471,12 +492,14 @@ pub async fn handle_exec_op_streaming(
             .and_then(Value::as_str);
 
         if is_reset && command_opt.is_none() {
-            reset_session(session_id);
+            reset_session(&session_id);
             return json!({
                 "type": MSG_TYPE_EXEC_OP_RESULT,
                 "op": MSG_TYPE_EXEC_OP_RESULT,
                 "id": id,
+                "op_id": op_id,
                 "session_id": session_id,
+                "session": session_id,
                 "action": "reset",
                 "status": "ok",
                 "success": true,
@@ -486,7 +509,7 @@ pub async fn handle_exec_op_streaming(
         }
 
         if is_reset {
-            reset_session(session_id);
+            reset_session(&session_id);
         }
 
         // Validate runtime
@@ -498,8 +521,9 @@ pub async fn handle_exec_op_streaming(
         if runtime != RUNTIME_TERMINAL && runtime != "bash" && runtime != "sh" && runtime != "shell"
         {
             return make_error_reply(
-                id,
-                session_id,
+                &id,
+                &op_id,
+                &session_id,
                 Some(runtime),
                 format!("unsupported runtime: {runtime}. Expected 'terminal'"),
             );
@@ -507,8 +531,9 @@ pub async fn handle_exec_op_streaming(
 
         let Some(command) = command_opt else {
             return make_error_reply(
-                id,
-                session_id,
+                &id,
+                &op_id,
+                &session_id,
                 Some(runtime),
                 "missing 'command' or 'code' parameter in connector_exec_op",
             );
@@ -546,23 +571,32 @@ pub async fn handle_exec_op_streaming(
             .and_then(Value::as_u64)
             .unwrap_or(30_000);
 
-        let session_arc = match get_or_create_session(session_id, &cwd, cols, rows).await {
+        let session_arc = match get_or_create_session(&session_id, &cwd, cols, rows).await {
             Ok(s) => s,
             Err(e) => {
-                return make_error_reply(id, session_id, Some(runtime), e);
+                return make_error_reply(&id, &op_id, &session_id, Some(runtime), e);
             }
         };
 
         let mut session = session_arc.lock().await;
         match session
-            .execute(command, timeout_ms, chunk_tx.as_ref(), id, session_id)
+            .execute(
+                command,
+                timeout_ms,
+                chunk_tx.as_ref(),
+                &id,
+                &op_id,
+                &session_id,
+            )
             .await
         {
             Ok((output, exit_code)) => json!({
                 "type": MSG_TYPE_EXEC_OP_RESULT,
                 "op": MSG_TYPE_EXEC_OP_RESULT,
                 "id": id,
+                "op_id": op_id,
                 "session_id": session_id,
+                "session": session_id,
                 "runtime": runtime,
                 "status": "completed",
                 "success": exit_code == 0,
@@ -571,7 +605,7 @@ pub async fn handle_exec_op_streaming(
                 "done": true,
             })
             .to_string(),
-            Err(e) => make_error_reply(id, session_id, Some(runtime), e),
+            Err(e) => make_error_reply(&id, &op_id, &session_id, Some(runtime), e),
         }
     }
 }

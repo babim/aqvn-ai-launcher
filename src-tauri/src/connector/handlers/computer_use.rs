@@ -3,7 +3,9 @@
 //! Handles `connector_computer_use_op` actions for desktop screen capture,
 //! active window capture, and native mouse/keyboard event injection.
 
-use crate::connector::protocol::MSG_TYPE_COMPUTER_USE_OP_RESULT;
+use crate::connector::protocol::{
+    attach_id_and_op_id, extract_id_and_op_id, MSG_TYPE_COMPUTER_USE_OP_RESULT,
+};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use serde_json::{json, Value};
@@ -346,6 +348,7 @@ fn make_ok_reply(id: &str, action: &str, data: Value, screenshot_opt: Option<Str
         "type": MSG_TYPE_COMPUTER_USE_OP_RESULT,
         "op": MSG_TYPE_COMPUTER_USE_OP_RESULT,
         "id": id,
+        "op_id": id,
         "success": true,
         "status": "ok",
         "action": action,
@@ -364,6 +367,7 @@ fn make_error_reply(id: &str, action: &str, error_msg: impl Into<String>) -> Str
         "type": MSG_TYPE_COMPUTER_USE_OP_RESULT,
         "op": MSG_TYPE_COMPUTER_USE_OP_RESULT,
         "id": id,
+        "op_id": id,
         "success": false,
         "status": "error",
         "action": action,
@@ -376,12 +380,9 @@ fn make_error_reply(id: &str, action: &str, error_msg: impl Into<String>) -> Str
 
 /// Dispatches an incoming `connector_computer_use_op` envelope.
 pub async fn handle_computer_use_op(envelope: &Value) -> String {
-    let id = envelope
-        .get("id")
-        .or_else(|| envelope.get("request_id"))
-        .or_else(|| envelope.get("call_id"))
-        .and_then(Value::as_str)
-        .unwrap_or("cu-op-req");
+    let (id_str, op_id_str) = extract_id_and_op_id(envelope, "cu-op-req");
+    let id = id_str.as_str();
+    let op_id = op_id_str.as_str();
 
     let params_obj = envelope.get("params");
 
@@ -393,7 +394,7 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default();
 
-    match action {
+    let raw_reply = match action {
         "capture" | "screenshot" | "screen" | "capture_screen" | "capture_window" => {
             let format = envelope
                 .get("format")
@@ -894,5 +895,6 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
             other,
             format!("unknown or unsupported computer use action: {other}"),
         ),
-    }
+    };
+    attach_id_and_op_id(raw_reply, id, op_id)
 }

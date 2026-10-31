@@ -702,6 +702,8 @@ pub struct ConnectorFileOpResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_size: Option<usize>,

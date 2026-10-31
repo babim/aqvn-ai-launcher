@@ -863,3 +863,108 @@ async fn test_streamed_file_reading_with_seek() {
     set_test_sandbox(None);
     let _ = std::fs::remove_dir_all(&sandbox_dir);
 }
+
+#[tokio::test]
+async fn test_chunked_file_write_with_offset() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (sandbox_dir, sandbox) = create_temp_sandbox();
+    set_test_sandbox(Some(sandbox.clone()));
+
+    let target_filename = "chunked_write_target.dat";
+
+    // 1. Initial write chunk 1 at offset 0
+    let chunk1_data = "START_CHUNK_0000";
+    let write_chunk1 = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-chunk-1",
+        "action": "write",
+        "path": target_filename,
+        "offset": 0,
+        "content": chunk1_data,
+        "encoding": "utf-8"
+    });
+    let reply1_str = files::handle_file_op_with_sandbox(&write_chunk1, &sandbox).await;
+    let reply1: Value = serde_json::from_str(&reply1_str).expect("parse reply1");
+
+    assert_eq!(reply1["success"], true);
+    assert_eq!(reply1["status"], "ok");
+    assert_eq!(reply1["action"], "write");
+    assert_eq!(reply1["offset"], 0);
+    assert_eq!(reply1["bytes_written"], chunk1_data.len());
+    assert_eq!(reply1["total_size"], chunk1_data.len());
+    assert_eq!(reply1["transfer_protocol"], TRANSFER_PROTOCOL_V1);
+    assert_eq!(reply1["protocol_version"], "v1");
+
+    // 2. Write chunk 3 at offset 32 (gap at 16..32)
+    let chunk3_data = "FINAL_CHUNK_0002";
+    let write_chunk3 = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-chunk-3",
+        "action": "write",
+        "path": target_filename,
+        "offset": 32,
+        "content": chunk3_data,
+        "encoding": "utf-8"
+    });
+    let reply3_str = files::handle_file_op_with_sandbox(&write_chunk3, &sandbox).await;
+    let reply3: Value = serde_json::from_str(&reply3_str).expect("parse reply3");
+
+    assert_eq!(reply3["success"], true);
+    assert_eq!(reply3["offset"], 32);
+    assert_eq!(reply3["bytes_written"], chunk3_data.len());
+    assert_eq!(reply3["total_size"], 48);
+
+    // 3. Write chunk 2 at offset 16 with binary base64 to fill gap
+    // 16 bytes: [0x01, 0x02, ..., 0x10]
+    // Base64 of 16 bytes: "AQIDBAUGBwgJCgsMDQ4PEA=="
+    let write_chunk2 = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-chunk-2",
+        "action": "write",
+        "path": target_filename,
+        "offset": 16,
+        "content": "AQIDBAUGBwgJCgsMDQ4PEA==",
+        "encoding": "base64"
+    });
+    let reply2_str = files::handle_file_op_with_sandbox(&write_chunk2, &sandbox).await;
+    let reply2: Value = serde_json::from_str(&reply2_str).expect("parse reply2");
+
+    assert_eq!(reply2["success"], true);
+    assert_eq!(reply2["offset"], 16);
+    assert_eq!(reply2["bytes_written"], 16);
+    assert_eq!(reply2["total_size"], 48);
+
+    // 4. Verify disk content
+    let on_disk = sandbox_dir.join(target_filename);
+    assert!(on_disk.is_file(), "assembled file must exist");
+    let disk_bytes = std::fs::read(&on_disk).expect("read assembled file");
+    assert_eq!(disk_bytes.len(), 48);
+    assert_eq!(&disk_bytes[0..16], chunk1_data.as_bytes());
+    assert_eq!(
+        &disk_bytes[16..32],
+        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    );
+    assert_eq!(&disk_bytes[32..48], chunk3_data.as_bytes());
+
+    // 5. Read back slice via op_read with offset and length
+    let read_mid = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-read-mid",
+        "action": "read",
+        "path": target_filename,
+        "offset": 16,
+        "length": 16,
+        "encoding": "base64"
+    });
+    let read_reply_str = files::handle_file_op_with_sandbox(&read_mid, &sandbox).await;
+    let read_reply: Value = serde_json::from_str(&read_reply_str).expect("parse read reply");
+
+    assert_eq!(read_reply["success"], true);
+    assert_eq!(read_reply["offset"], 16);
+    assert_eq!(read_reply["size"], 16);
+    assert_eq!(read_reply["total_size"], 48);
+    assert_eq!(read_reply["content"], "AQIDBAUGBwgJCgsMDQ4PEA==");
+
+    set_test_sandbox(None);
+    let _ = std::fs::remove_dir_all(&sandbox_dir);
+}

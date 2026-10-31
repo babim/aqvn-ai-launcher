@@ -14,7 +14,7 @@ use crate::rfc::util::{count_content_lines, decode_base64, encode_base64, epoch_
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::RwLock;
 
@@ -372,15 +372,54 @@ fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
         .unwrap_or("overwrite")
         .to_lowercase();
 
-    let write_res = if mode == "append" {
-        use std::io::Write;
-        fs::OpenOptions::new()
+    let maybe_offset = envelope.get("offset").and_then(|v| {
+        v.as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+    });
+
+    let (write_res, final_total_size) = if let Some(offset) = maybe_offset {
+        let res = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&jailed)
+            .and_then(|mut f| {
+                f.seek(SeekFrom::Start(offset))?;
+                f.write_all(&bytes)?;
+                f.flush()?;
+                let len = f
+                    .metadata()
+                    .map(|m| m.len() as usize)
+                    .unwrap_or((offset as usize) + bytes.len());
+                Ok(len)
+            });
+        match res {
+            Ok(len) => (Ok(()), Some(len)),
+            Err(e) => (Err(e), None),
+        }
+    } else if mode == "append" {
+        let res = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&jailed)
-            .and_then(|mut f| f.write_all(&bytes))
+            .and_then(|mut f| {
+                f.write_all(&bytes)?;
+                f.flush()?;
+                let len = f
+                    .metadata()
+                    .map(|m| m.len() as usize)
+                    .unwrap_or(bytes.len());
+                Ok(len)
+            });
+        match res {
+            Ok(len) => (Ok(()), Some(len)),
+            Err(e) => (Err(e), None),
+        }
     } else {
-        fs::write(&jailed, &bytes)
+        match fs::write(&jailed, &bytes) {
+            Ok(()) => (Ok(()), Some(bytes.len())),
+            Err(e) => (Err(e), None),
+        }
     };
 
     if let Err(err) = write_res {
@@ -417,11 +456,19 @@ fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
         "total_lines": total_lines,
     });
 
-    let data_payload = json!({
+    let mut data_payload = json!({
         "bytes_written": bytes_written,
         "checksum": checksum,
         "total_lines": total_lines,
     });
+    if let Some(offset) = maybe_offset {
+        res["offset"] = json!(offset);
+        data_payload["offset"] = json!(offset);
+        if let Some(total_size) = final_total_size {
+            res["total_size"] = json!(total_size);
+            data_payload["total_size"] = json!(total_size);
+        }
+    }
     res["data"] = data_payload.clone();
     res["result"] = data_payload;
 

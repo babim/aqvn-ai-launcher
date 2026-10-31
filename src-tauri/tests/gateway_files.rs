@@ -706,3 +706,160 @@ async fn test_remote_tree_snapshot_generation() {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[tokio::test]
+async fn test_streamed_file_reading_with_seek() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (sandbox_dir, sandbox) = create_temp_sandbox();
+    set_test_sandbox(Some(sandbox.clone()));
+
+    // Create a 256KB structured file directly on disk inside sandbox
+    let file_size: usize = 256 * 1024;
+    let mut file_data = vec![b'.'; file_size];
+
+    // Seed distinctive markers at specific byte boundaries
+    let header = b"START_HEADER_SEEK_000\n";
+    file_data[0..header.len()].copy_from_slice(header);
+
+    let middle_offset: usize = 65536; // 64KB offset
+    let middle_slice = b"MIDDLE_SEEK_WINDOW_64K";
+    file_data[middle_offset..middle_offset + middle_slice.len()].copy_from_slice(middle_slice);
+
+    let second_offset: usize = 131072; // 128KB offset
+    let second_slice = b"SECOND_SEEK_WINDOW_128K\n";
+    file_data[second_offset..second_offset + second_slice.len()].copy_from_slice(second_slice);
+
+    let bin_offset: usize = 196608; // 192KB offset
+    let bin_slice: [u8; 6] = [0x00, 0xDE, 0xAD, 0xBE, 0xEF, 0x00];
+    file_data[bin_offset..bin_offset + bin_slice.len()].copy_from_slice(&bin_slice);
+
+    let tail_offset: usize = file_size - 32;
+    let tail_slice = b"END_OF_FILE_SEEK_BUFFER_32_BYTES";
+    file_data[tail_offset..tail_offset + tail_slice.len()].copy_from_slice(tail_slice);
+
+    let target_filename = "streamed_large_file.dat";
+    std::fs::write(sandbox_dir.join(target_filename), &file_data).expect("write large test file");
+
+    // 1. Stream middle slice with Seek offset 64KB
+    let read_mid = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-seek-mid",
+        "action": "read",
+        "path": target_filename,
+        "offset": middle_offset,
+        "length": middle_slice.len(),
+        "encoding": "utf-8"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&read_mid, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse reply");
+
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["status"], "ok");
+    assert_eq!(reply["content"], "MIDDLE_SEEK_WINDOW_64K");
+    assert_eq!(reply["offset"], middle_offset);
+    assert_eq!(reply["size"], middle_slice.len());
+    assert_eq!(reply["total_size"], file_size);
+    assert_eq!(reply["transfer_protocol"], TRANSFER_PROTOCOL_V1);
+    assert_eq!(reply["protocol_version"], "v1");
+
+    // Chunk checksum must match the streamed window slice (not entire file)
+    let expected_chunk_checksum = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(middle_slice);
+        format!("{:x}", hasher.finalize())
+    };
+    assert_eq!(reply["checksum"], expected_chunk_checksum);
+
+    // 2. Stream second slice with Seek offset 128KB
+    let read_second = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-seek-second",
+        "action": "read",
+        "path": target_filename,
+        "offset": second_offset,
+        "length": second_slice.len(),
+        "encoding": "utf-8"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&read_second, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse reply");
+
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["content"], "SECOND_SEEK_WINDOW_128K\n");
+    assert_eq!(reply["size"], second_slice.len());
+    assert_eq!(reply["total_size"], file_size);
+    assert_eq!(reply["offset"], second_offset);
+
+    // 3. Binary slice with base64 encoding using seek
+    let read_bin = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-seek-bin",
+        "action": "read",
+        "path": target_filename,
+        "offset": bin_offset,
+        "length": bin_slice.len(),
+        "encoding": "base64"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&read_bin, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse reply");
+
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["encoding"], "base64");
+    assert_eq!(reply["size"], bin_slice.len());
+    assert_eq!(reply["total_size"], file_size);
+    assert_eq!(reply["content"], "AN6tvu8A");
+
+    // 4. Seek to start (offset 0, length of header)
+    let read_start = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-seek-start",
+        "action": "read",
+        "path": target_filename,
+        "offset": 0,
+        "length": header.len(),
+        "encoding": "utf-8"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&read_start, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse reply");
+
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["content"], "START_HEADER_SEEK_000\n");
+    assert_eq!(reply["size"], header.len());
+    assert_eq!(reply["offset"], 0);
+
+    // 5. Seek to tail
+    let read_tail = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-seek-tail",
+        "action": "read",
+        "path": target_filename,
+        "offset": tail_offset,
+        "length": tail_slice.len(),
+        "encoding": "utf-8"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&read_tail, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse reply");
+
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["content"], "END_OF_FILE_SEEK_BUFFER_32_BYTES");
+    assert_eq!(reply["size"], tail_slice.len());
+
+    // 6. Seek beyond EOF returns empty bounded buffer
+    let read_eof = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-seek-eof",
+        "action": "read",
+        "path": target_filename,
+        "offset": file_size + 1024,
+        "length": 64
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&read_eof, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse reply");
+
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["size"], 0);
+    assert_eq!(reply["content"], "");
+
+    set_test_sandbox(None);
+    let _ = std::fs::remove_dir_all(&sandbox_dir);
+}

@@ -13,7 +13,8 @@ use crate::rfc::text_editor::{apply_context_patch, apply_parsed_edits, parse_edi
 use crate::rfc::util::{count_content_lines, decode_base64, encode_base64, epoch_secs};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::RwLock;
 
@@ -190,21 +191,31 @@ fn op_read(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sa
         );
     }
 
-    let all_bytes = match fs::read(&jailed) {
-        Ok(b) => b,
+    let mut file = match File::open(&jailed) {
+        Ok(f) => f,
         Err(err) => {
             return make_error_reply(
                 id,
                 op_id,
                 "read",
                 Some(raw_path),
-                format!("failed to read file: {err}"),
+                format!("failed to open file: {err}"),
             )
         }
     };
 
-    let total_size = all_bytes.len();
-    let checksum = calculate_checksum(&all_bytes);
+    let total_size = match file.metadata() {
+        Ok(m) => m.len() as usize,
+        Err(err) => {
+            return make_error_reply(
+                id,
+                op_id,
+                "read",
+                Some(raw_path),
+                format!("failed to read file metadata: {err}"),
+            )
+        }
+    };
 
     let offset = envelope.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
     let length = envelope
@@ -215,7 +226,35 @@ fn op_read(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sa
 
     let start = offset.min(total_size);
     let end = (start + length).min(total_size);
-    let chunk_bytes = &all_bytes[start..end];
+    let read_len = end.saturating_sub(start);
+
+    if let Err(err) = file.seek(SeekFrom::Start(start as u64)) {
+        return make_error_reply(
+            id,
+            op_id,
+            "read",
+            Some(raw_path),
+            format!("failed to seek file: {err}"),
+        );
+    }
+
+    let mut chunk_bytes = Vec::with_capacity(read_len);
+    if read_len > 0 {
+        if let Err(err) = (&mut file)
+            .take(read_len as u64)
+            .read_to_end(&mut chunk_bytes)
+        {
+            return make_error_reply(
+                id,
+                op_id,
+                "read",
+                Some(raw_path),
+                format!("failed to read file chunk: {err}"),
+            );
+        }
+    }
+
+    let checksum = calculate_checksum(&chunk_bytes);
 
     let requested_encoding = envelope
         .get("encoding")
@@ -224,13 +263,15 @@ fn op_read(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sa
 
     let is_binary = chunk_bytes.iter().take(8192).any(|&b| b == 0);
     let (content, encoding) = match requested_encoding.as_deref() {
-        Some("base64") | Some("binary") => (encode_base64(chunk_bytes), "base64"),
-        Some("utf-8") | Some("text") => (String::from_utf8_lossy(chunk_bytes).to_string(), "utf-8"),
+        Some("base64") | Some("binary") => (encode_base64(&chunk_bytes), "base64"),
+        Some("utf-8") | Some("text") => {
+            (String::from_utf8_lossy(&chunk_bytes).to_string(), "utf-8")
+        }
         _ => {
             if is_binary {
-                (encode_base64(chunk_bytes), "base64")
+                (encode_base64(&chunk_bytes), "base64")
             } else {
-                (String::from_utf8_lossy(chunk_bytes).to_string(), "utf-8")
+                (String::from_utf8_lossy(&chunk_bytes).to_string(), "utf-8")
             }
         }
     };

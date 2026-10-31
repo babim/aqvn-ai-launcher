@@ -76,20 +76,28 @@ fn test_context_menu_action_resolution() {
 fn test_context_menu_action_scripts() {
     let zoom_in_js = ContextMenuAction::ZoomIn.js_action().unwrap();
     assert!(
-        zoom_in_js.contains("zoomIn"),
-        "ZoomIn action must call zoomIn on container bridge"
+        zoom_in_js.contains("applyZoom"),
+        "ZoomIn action must call applyZoom on container bridge"
+    );
+    assert!(
+        !zoom_in_js.contains("zoomIn()"),
+        "ZoomIn action must not call relative zoomIn()"
     );
 
     let zoom_out_js = ContextMenuAction::ZoomOut.js_action().unwrap();
     assert!(
-        zoom_out_js.contains("zoomOut"),
-        "ZoomOut action must call zoomOut on container bridge"
+        zoom_out_js.contains("applyZoom"),
+        "ZoomOut action must call applyZoom on container bridge"
+    );
+    assert!(
+        !zoom_out_js.contains("zoomOut()"),
+        "ZoomOut action must not call relative zoomOut()"
     );
 
     let reset_zoom_js = ContextMenuAction::ResetZoom.js_action().unwrap();
     assert!(
-        reset_zoom_js.contains("resetZoom"),
-        "ResetZoom action must call resetZoom on container bridge"
+        reset_zoom_js.contains("applyZoom"),
+        "ResetZoom action must call applyZoom on container bridge"
     );
 
     let reload_js = ContextMenuAction::Reload.js_action().unwrap();
@@ -366,13 +374,62 @@ fn test_end_to_end_zoom_scale_synchronization() {
 
 #[test]
 fn test_native_zoom_hotkeys_configured() {
-    // VAL-HOTKEY-001: Native zoom hotkeys configuration
+    // VAL-WIN-002: Native zoom hotkeys disabled to eliminate WebView2 engine shortcut collision
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
     assert!(
-        lib_rs.contains("zoom_hotkeys_enabled(true)"),
-        "src-tauri/src/lib.rs must invoke .zoom_hotkeys_enabled(true) on WebviewWindowBuilder"
+        lib_rs.contains("zoom_hotkeys_enabled(false)"),
+        "src-tauri/src/lib.rs must invoke .zoom_hotkeys_enabled(false) on WebviewWindowBuilder"
     );
+}
+
+#[test]
+fn test_dispatch_action_absolute_scale_sync() {
+    // VAL-WIN-002: Webview builder native engine hotkeys disabled and absolute scale dispatch
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib_rs.contains("zoom_hotkeys_enabled(false)"),
+        "src-tauri/src/lib.rs must set zoom_hotkeys_enabled(false)"
+    );
+
+    reset_zoom_scale();
+    let s = zoom_in_scale();
+    let js_in = ContextMenuAction::ZoomIn.js_action_for_scale(s).unwrap();
+    assert!(
+        js_in.contains(&format!("applyZoom({s})")),
+        "ZoomIn js_action must synchronize absolute scale via applyZoom({s})"
+    );
+    assert!(
+        !js_in.contains("zoomIn()"),
+        "ZoomIn must not call relative zoomIn()"
+    );
+
+    let s_out = zoom_out_scale();
+    let js_out = ContextMenuAction::ZoomOut
+        .js_action_for_scale(s_out)
+        .unwrap();
+    assert!(
+        js_out.contains(&format!("applyZoom({s_out})")),
+        "ZoomOut js_action must synchronize absolute scale via applyZoom({s_out})"
+    );
+    assert!(
+        !js_out.contains("zoomOut()"),
+        "ZoomOut must not call relative zoomOut()"
+    );
+
+    let s_reset = reset_zoom_scale();
+    let js_reset = ContextMenuAction::ResetZoom
+        .js_action_for_scale(s_reset)
+        .unwrap();
+    assert!(
+        js_reset.contains(&format!("applyZoom({s_reset})")),
+        "ResetZoom js_action must synchronize absolute scale via applyZoom({s_reset})"
+    );
+
+    // Also verify default js_action() uses current zoom scale
+    let default_js = ContextMenuAction::ZoomIn.js_action().unwrap();
+    assert!(default_js.contains("applyZoom"));
 }
 
 #[test]

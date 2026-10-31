@@ -174,7 +174,7 @@ pub fn run() {
             let nav_handle = app.handle().clone();
             let main_window = WebviewWindowBuilder::from_config(app.handle(), &container_config)?
                 .initialization_script(proxy::server::init_script(proxy_info.port))
-                .zoom_hotkeys_enabled(true)
+                .zoom_hotkeys_enabled(false)
                 .on_navigation(move |url| app::links::handle_navigation(&nav_handle, url))
                 .on_document_title_changed(|window, title| {
                     // Rust-side sync needs no `core:window:allow-set-title`.

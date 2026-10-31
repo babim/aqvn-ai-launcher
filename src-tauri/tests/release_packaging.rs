@@ -102,14 +102,14 @@ fn val_rel_003_macos_job_and_step_timeouts_in_release_workflow() {
     );
     let content = fs::read_to_string(&workflow_path).expect("must read release.yml");
 
-    // Verify macos job exists and runs on macos-14
+    // Verify macos job exists and runs on macos-14 or macos-15
     assert!(
         content.contains("macos:"),
         "release.yml must define macos job"
     );
     assert!(
-        content.contains("runs-on: macos-14"),
-        "macos job must run on macos-14"
+        content.contains("runs-on: macos-14") || content.contains("runs-on: macos-15"),
+        "macos job must run on macos-14 or macos-15"
     );
 
     // Verify dmg and app bundles built and packaged

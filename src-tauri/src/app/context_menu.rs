@@ -147,24 +147,23 @@ impl ContextMenuAction {
         }
     }
 
-    /// Returns the JavaScript code evaluated in the webview for webview actions.
-    pub fn js_action(&self) -> Option<&'static str> {
+    /// Returns the JavaScript code evaluated in the webview for webview actions for a specific scale.
+    pub fn js_action_for_scale(&self, scale: f64) -> Option<String> {
         match self {
-            Self::ZoomIn => {
-                Some("if (window.__AQVN_CONTAINER__) window.__AQVN_CONTAINER__.zoomIn();")
-            }
-            Self::ZoomOut => {
-                Some("if (window.__AQVN_CONTAINER__) window.__AQVN_CONTAINER__.zoomOut();")
-            }
-            Self::ResetZoom => {
-                Some("if (window.__AQVN_CONTAINER__) window.__AQVN_CONTAINER__.resetZoom();")
-            }
-            Self::Reload => Some("window.location.reload();"),
+            Self::ZoomIn | Self::ZoomOut | Self::ResetZoom => Some(format!(
+                "if (window.__AQVN_CONTAINER__) window.__AQVN_CONTAINER__.applyZoom({scale});"
+            )),
+            Self::Reload => Some("window.location.reload();".to_string()),
             Self::HardRefresh => Some(
-                "if (window.__AQVN_CONTAINER__) window.__AQVN_CONTAINER__.hardRefresh(); else window.location.reload();",
+                "if (window.__AQVN_CONTAINER__) window.__AQVN_CONTAINER__.hardRefresh(); else window.location.reload();".to_string(),
             ),
             _ => None,
         }
+    }
+
+    /// Returns the JavaScript code evaluated in the webview for webview actions.
+    pub fn js_action(&self) -> Option<String> {
+        self.js_action_for_scale(get_zoom_scale())
     }
 }
 
@@ -200,9 +199,12 @@ pub fn dispatch_action(
                 let _ = w.set_zoom(scale);
             }
 
-            if let Some(js) = action.js_action() {
+            let js = native_scale
+                .and_then(|s| action.js_action_for_scale(s))
+                .or_else(|| action.js_action());
+            if let Some(js) = js {
                 if let Some(w) = &target_window {
-                    w.eval(js).map_err(|e| e.to_string())?;
+                    w.eval(&js).map_err(|e| e.to_string())?;
                 }
             }
             Ok(())
@@ -210,9 +212,9 @@ pub fn dispatch_action(
         ContextMenuAction::Reload | ContextMenuAction::HardRefresh => {
             if let Some(js) = action.js_action() {
                 if let Some(w) = window {
-                    w.eval(js).map_err(|e| e.to_string())?;
+                    w.eval(&js).map_err(|e| e.to_string())?;
                 } else if let Some(w) = app.get_webview_window("main") {
-                    w.eval(js).map_err(|e| e.to_string())?;
+                    w.eval(&js).map_err(|e| e.to_string())?;
                 }
             }
             Ok(())

@@ -7,10 +7,10 @@
 use crate::config::{AppConfig, ConfigWatcher};
 use crate::connector::handlers;
 use crate::connector::protocol::{
-    format_socketio_ack, format_socketio_event, parse_socketio_packet, ConnectorHello,
-    EIO_PACKET_OPEN, EIO_PACKET_PING, EIO_PACKET_PONG, MSG_TYPE_HELLO, MSG_TYPE_HELLO_ACK,
-    SCOPE_BROWSER, SCOPE_DESKTOP, SCOPE_EXEC, SCOPE_FILES, SIO_PACKET_ACK,
-    SIO_PACKET_CONNECT_ERROR, SIO_PACKET_DISCONNECT, SIO_PACKET_EVENT,
+    format_socketio_ack, format_socketio_connect, format_socketio_event, parse_socketio_packet,
+    ConnectorHello, SocketIoConnectAuth, EIO_PACKET_OPEN, EIO_PACKET_PING, EIO_PACKET_PONG,
+    MSG_TYPE_HELLO, MSG_TYPE_HELLO_ACK, SCOPE_BROWSER, SCOPE_DESKTOP, SCOPE_EXEC, SCOPE_FILES,
+    SIO_PACKET_ACK, SIO_PACKET_CONNECT_ERROR, SIO_PACKET_DISCONNECT, SIO_PACKET_EVENT,
 };
 use axum::http::header::{self, HeaderValue};
 use futures_util::{SinkExt, StreamExt};
@@ -128,7 +128,7 @@ impl Default for GatewayConfig {
         Self {
             enabled: true,
             server_url: "https://a0.matmagoc.com".to_string(),
-            gateway_id: format!("aqvn-gw-{:08x}", rand::random::<u32>()),
+            gateway_id: crate::config::default_gateway_id(),
             host_label: "AQVN-Workspace-Host".to_string(),
             session_cookie: None,
             scope_files: true,
@@ -146,6 +146,11 @@ impl GatewayConfig {
         Self {
             enabled: app_config.connector_enabled,
             server_url: app_config.server_url.clone(),
+            gateway_id: if app_config.gateway_id.trim().is_empty() {
+                crate::config::default_gateway_id()
+            } else {
+                app_config.gateway_id.clone()
+            },
             scope_files: app_config.scope_files,
             scope_exec: app_config.scope_exec,
             scope_browser: app_config.scope_browser,
@@ -426,9 +431,14 @@ impl GatewayClient {
             }
 
             if is_socketio {
-                // 2. Send namespace connect packet: 40/ws,
+                // 2. Send namespace connect packet with auth payload:
+                // 40/ws,{"handlers":["plugins/_a0_connector/ws_connector"],"client_type":"launcher"}
+                let connect_packet = format_socketio_connect(
+                    active_namespace.as_deref(),
+                    Some(&SocketIoConnectAuth::default()),
+                );
                 stream
-                    .send(Message::Text("40/ws,".into()))
+                    .send(Message::Text(connect_packet.into()))
                     .await
                     .map_err(|e| format!("failed to send namespace connect: {e}"))?;
 

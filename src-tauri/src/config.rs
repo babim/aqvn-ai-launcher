@@ -1,4 +1,3 @@
-//! Configuration module for AQVN Workspace.
 //!
 //! Exposes typed settings over tauri-plugin-store `settings.json`.
 //! Default values required by validation contract VAL-SCAF-010:
@@ -8,6 +7,7 @@
 //!   ssh_port = 55022
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
@@ -29,6 +29,48 @@ pub const DEFAULT_CLOSE_TO_TRAY: bool = true;
 pub const DEFAULT_APP_LANGUAGE: &str = "vi";
 pub const STORE_FILENAME: &str = "settings.json";
 
+/// Returns a stable, deterministic gateway identifier for this device/installation.
+pub fn default_gateway_id() -> String {
+    deterministic_gateway_id()
+}
+
+pub fn deterministic_gateway_id() -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"aqvn-workspace-gateway-seed:");
+
+    let mut found_seed = false;
+    for path in &["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+        if let Ok(id) = std::fs::read_to_string(path) {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() {
+                hasher.update(trimmed.as_bytes());
+                found_seed = true;
+                break;
+            }
+        }
+    }
+
+    if let Ok(hostname) = std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")) {
+        hasher.update(hostname.as_bytes());
+        found_seed = true;
+    }
+
+    if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("USERNAME")) {
+        hasher.update(user.as_bytes());
+    }
+
+    if !found_seed {
+        hasher.update(b"aqvn-default-deterministic-seed");
+    }
+
+    let hash = hasher.finalize();
+    let hex_part = format!(
+        "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        hash[0], hash[1], hash[2], hash[3], hash[4], hash[5]
+    );
+    format!("aqvn-gw-{hex_part}")
+}
+
 fn default_app_language() -> String {
     DEFAULT_APP_LANGUAGE.to_string()
 }
@@ -46,6 +88,8 @@ const fn default_true() -> bool {
 pub struct AppConfig {
     pub server_url: String,
     pub server_profiles: Vec<String>,
+    #[serde(default = "default_gateway_id")]
+    pub gateway_id: String,
     pub rfc_enabled: bool,
     pub rfc_password: String,
     pub ssh_password: String,
@@ -78,6 +122,7 @@ impl Default for AppConfig {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+            gateway_id: default_gateway_id(),
             rfc_enabled: DEFAULT_RFC_ENABLED,
             rfc_password: String::new(),
             ssh_password: String::new(),
@@ -124,6 +169,13 @@ impl AppConfig {
         }
         if config.server_profiles.is_empty() {
             config.server_profiles = vec![config.server_url.clone()];
+        }
+        if let Some(val) = store.get("gateway_id") {
+            if let Some(s) = val.as_str() {
+                if !s.trim().is_empty() {
+                    config.gateway_id = s.to_string();
+                }
+            }
         }
         if let Some(val) = store.get("rfc_enabled") {
             if let Some(b) = val.as_bool() {
@@ -216,6 +268,7 @@ impl AppConfig {
 
         store.set("server_url", serde_json::json!(self.server_url));
         store.set("server_profiles", serde_json::json!(self.server_profiles));
+        store.set("gateway_id", serde_json::json!(self.gateway_id));
         store.set("rfc_enabled", serde_json::json!(self.rfc_enabled));
         store.set("rfc_password", serde_json::json!(self.rfc_password));
         store.set("ssh_password", serde_json::json!(self.ssh_password));

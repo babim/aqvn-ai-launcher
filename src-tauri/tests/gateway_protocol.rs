@@ -150,3 +150,52 @@ fn test_socketio_framing_parsing_and_formatting() {
         "43456[{\"ok\":true}]"
     );
 }
+
+#[test]
+fn test_persistent_gateway_id() {
+    use aqvn_workspace_lib::config::{default_gateway_id, AppConfig};
+    use aqvn_workspace_lib::connector::client::GatewayConfig;
+
+    // 1. Deterministic default generation across multiple calls
+    let id1 = default_gateway_id();
+    let id2 = default_gateway_id();
+    assert_eq!(id1, id2, "default_gateway_id must be deterministic");
+    assert!(
+        id1.starts_with("aqvn-gw-"),
+        "gateway ID must start with prefix 'aqvn-gw-'"
+    );
+    assert!(id1.len() > 10, "gateway ID must have sufficient length");
+
+    // 2. Default AppConfig and GatewayConfig share the persistent ID
+    let app_cfg = AppConfig::default();
+    assert_eq!(app_cfg.gateway_id, id1);
+
+    let gw_cfg1 = GatewayConfig::from_app_config(&app_cfg);
+    let gw_cfg2 = GatewayConfig::from_app_config(&app_cfg);
+    assert_eq!(gw_cfg1.gateway_id, id1);
+    assert_eq!(gw_cfg2.gateway_id, id1);
+    assert_eq!(
+        gw_cfg1.gateway_id, gw_cfg2.gateway_id,
+        "gateway_id must not change on reconnect/re-instantiation"
+    );
+
+    // 3. Persisted custom gateway_id in AppConfig is preserved
+    let custom_cfg = AppConfig {
+        gateway_id: "persisted-custom-device-id".to_string(),
+        ..Default::default()
+    };
+    let gw_custom = GatewayConfig::from_app_config(&custom_cfg);
+    assert_eq!(gw_custom.gateway_id, "persisted-custom-device-id");
+
+    // 4. JSON serialization roundtrip preserves gateway_id
+    let json = serde_json::to_string(&custom_cfg).expect("serialize");
+    let parsed: AppConfig = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(parsed.gateway_id, "persisted-custom-device-id");
+
+    // 5. Missing gateway_id in JSON deserialization defaults to deterministic ID
+    let minimal_json = serde_json::json!({
+        "server_url": "https://a0.matmagoc.com"
+    });
+    let loaded: AppConfig = serde_json::from_value(minimal_json).expect("deserialize partial");
+    assert_eq!(loaded.gateway_id, id1);
+}

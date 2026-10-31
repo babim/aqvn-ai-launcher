@@ -34,6 +34,7 @@ struct StubGatewayServer {
     hello_count: AtomicUsize,
     last_hello: Mutex<Option<ConnectorHello>>,
     last_cookie: Mutex<Option<String>>,
+    last_connect_packet: Mutex<Option<String>>,
     ping_count: AtomicUsize,
     disconnect_first_client: AtomicBool,
 }
@@ -72,6 +73,7 @@ async fn handle_socket(mut socket: WebSocket, stub: Arc<StubGatewayServer>) {
         match msg {
             axum::extract::ws::Message::Text(text) => {
                 if text.starts_with("40/ws") {
+                    *stub.last_connect_packet.lock().await = Some(text.to_string());
                     // Send namespace connect confirmation
                     let _ = socket
                         .send(axum::extract::ws::Message::Text(
@@ -855,4 +857,61 @@ async fn test_socketio_interleaved_ping_pong() {
     handle.stop();
     let _ = join_handle.await;
     server_task.abort();
+}
+
+#[tokio::test]
+async fn test_namespace_connect_carries_auth_handlers() {
+    let (stub, port, _server) = spawn_stub_server().await;
+
+    let config = GatewayConfig {
+        enabled: true,
+        server_url: format!("http://127.0.0.1:{port}"),
+        gateway_id: "test-gw-auth".to_string(),
+        host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
+        scope_files: true,
+        scope_exec: true,
+        scope_browser: true,
+        scope_desktop: true,
+        ping_interval_secs: 25,
+        reconnect_delay_ms: 200,
+    };
+
+    let client = GatewayClient::new(config);
+    let (handle, join_handle) = client.start();
+
+    handle
+        .wait_for_handshake(Duration::from_secs(5))
+        .await
+        .expect("handshake should complete within 5s");
+
+    let connect_pkt = stub
+        .last_connect_packet
+        .lock()
+        .await
+        .clone()
+        .expect("must have received namespace connect packet");
+
+    // Verify Socket.IO namespace connect packet 40/ws, framing
+    assert!(
+        connect_pkt.starts_with("40/ws,"),
+        "packet must start with 40/ws,, but got: {connect_pkt}"
+    );
+
+    // Verify auth payload
+    let auth_str = connect_pkt.strip_prefix("40/ws,").expect("prefix");
+    let auth: Value = serde_json::from_str(auth_str).expect("parse auth json");
+
+    assert_eq!(auth["client_type"], "launcher");
+    let handlers = auth["handlers"].as_array().expect("handlers array");
+    assert!(
+        handlers.contains(&Value::String(
+            "plugins/_a0_connector/ws_connector".to_string()
+        )),
+        "handlers must contain plugins/_a0_connector/ws_connector, got: {:?}",
+        handlers
+    );
+
+    handle.stop();
+    let _ = join_handle.await;
 }

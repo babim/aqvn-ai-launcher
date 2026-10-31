@@ -37,6 +37,13 @@ fn default_config_matches_contract_requirements() {
     const { assert!(DEFAULT_CLOSE_TO_TRAY) };
     assert_eq!(conf.app_language, DEFAULT_APP_LANGUAGE);
     assert_eq!(DEFAULT_APP_LANGUAGE, "vi");
+
+    assert!(!conf.gateway_id.is_empty());
+    assert_eq!(
+        conf.gateway_id,
+        aqvn_workspace_lib::config::default_gateway_id()
+    );
+    assert!(conf.gateway_id.starts_with("aqvn-gw-"));
 }
 
 #[test]
@@ -64,6 +71,7 @@ fn config_json_serde_roundtrip() {
     let conf = AppConfig {
         server_url: "https://persist-check.example".to_string(),
         server_profiles: vec!["https://persist-check.example".to_string()],
+        gateway_id: "test-gw-roundtrip".to_string(),
         rfc_enabled: true,
         rfc_password: "secret-pass".to_string(),
         ssh_password: "ssh-pass".to_string(),

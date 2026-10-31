@@ -1,5 +1,3 @@
-//! Protocol definitions for outbound gateway connection.
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -112,6 +110,40 @@ pub fn format_socketio_ack(namespace: Option<&str>, ack_id: u64, payload: &str) 
         Some(ns) if ns != "/" => format!("43{ns},{ack_id}[{payload}]"),
         _ => format!("43{ack_id}[{payload}]"),
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SocketIoConnectAuth {
+    pub handlers: Vec<String>,
+    pub client_type: String,
+}
+
+impl Default for SocketIoConnectAuth {
+    fn default() -> Self {
+        Self {
+            handlers: vec!["plugins/_a0_connector/ws_connector".to_string()],
+            client_type: "launcher".to_string(),
+        }
+    }
+}
+
+/// Formats a Socket.IO CONNECT packet (`40[namespace,][payload]`).
+pub fn format_socketio_connect<T: Serialize>(namespace: Option<&str>, auth: Option<&T>) -> String {
+    let mut pkt = String::from("40");
+    if let Some(ns) = namespace {
+        if ns != "/" {
+            pkt.push_str(ns);
+        }
+    }
+    if let Some(auth_val) = auth {
+        pkt.push(',');
+        pkt.push_str(&serde_json::to_string(auth_val).unwrap_or_default());
+    } else if let Some(ns) = namespace {
+        if ns != "/" {
+            pkt.push(',');
+        }
+    }
+    pkt
 }
 
 fn default_true() -> bool {

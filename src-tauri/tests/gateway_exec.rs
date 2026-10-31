@@ -440,3 +440,156 @@ async fn test_flexible_session_parsing() {
     exec::reset_session("98766");
     exec::reset_session("0");
 }
+
+#[tokio::test]
+async fn test_pty_session_idle_reaper_and_ansi_strip() {
+    // Part 1: ANSI escape sequence stripping
+    // Test pure unit function
+    let colored = "\x1b[1;31mError:\x1b[0m \x1b[32mFile saved\x1b[0m\x1b]0;Title\x07";
+    let stripped = exec::strip_ansi(colored);
+    assert_eq!(stripped, "Error: File saved");
+
+    let session_ansi = "test-session-ansi-1";
+    exec::reset_session(session_ansi);
+
+    // 1a. Command output without ANSI stripping
+    let op_colored = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-ansi-1",
+        "runtime": RUNTIME_TERMINAL,
+        "command": "printf '\\033[31;1mRedText\\033[0m\\n'",
+        "session_id": session_ansi,
+        "strip_ansi": false,
+    });
+    let reply_colored_str = exec::handle_exec_op(&op_colored).await;
+    let reply_colored: Value =
+        serde_json::from_str(&reply_colored_str).expect("parse reply_colored");
+    assert_eq!(reply_colored["success"], true);
+    let output_colored = reply_colored["output"].as_str().unwrap();
+    assert!(
+        output_colored.contains("\x1b[31;1m") || output_colored.contains("\x1b["),
+        "raw output must retain ANSI escapes, got: {:?}",
+        output_colored
+    );
+
+    // 1b. Command output WITH ANSI stripping via op_execute
+    let op_stripped = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-ansi-2",
+        "runtime": RUNTIME_TERMINAL,
+        "command": "printf '\\033[32;1mGreenSuccess\\033[0m\\n'",
+        "session_id": session_ansi,
+        "strip_ansi": true,
+    });
+    let reply_stripped_str = exec::op_execute(&op_stripped).await;
+    let reply_stripped: Value =
+        serde_json::from_str(&reply_stripped_str).expect("parse reply_stripped");
+    assert_eq!(reply_stripped["success"], true);
+    let output_stripped = reply_stripped["output"].as_str().unwrap();
+    assert!(
+        output_stripped.contains("GreenSuccess"),
+        "stripped output must contain text, got: {:?}",
+        output_stripped
+    );
+    assert!(
+        !output_stripped.contains("\x1b[") && !output_stripped.contains("\x1b"),
+        "stripped output must NOT contain ANSI escapes, got: {:?}",
+        output_stripped
+    );
+
+    exec::reset_session(session_ansi);
+
+    // Part 2: Session last_accessed tracking and idle/dead session reaper
+    let sess_active = "test-sess-active";
+    let sess_idle = "test-sess-idle";
+    let sess_dead = "test-sess-dead";
+
+    exec::reset_session(sess_active);
+    exec::reset_session(sess_idle);
+    exec::reset_session(sess_dead);
+
+    // Initialize all 3 sessions with commands
+    let op_act = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-act",
+        "command": "echo active_ok",
+        "session_id": sess_active,
+    });
+    let _ = exec::handle_exec_op(&op_act).await;
+
+    let op_idl = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-idl",
+        "command": "echo idle_ok",
+        "session_id": sess_idle,
+    });
+    let _ = exec::handle_exec_op(&op_idl).await;
+
+    let op_ded = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-ded",
+        "command": "echo dead_init",
+        "session_id": sess_dead,
+    });
+    let _ = exec::handle_exec_op(&op_ded).await;
+
+    assert!(exec::has_session(sess_active), "active session must exist");
+    assert!(exec::has_session(sess_idle), "idle session must exist");
+    assert!(
+        exec::has_session(sess_dead),
+        "dead session candidate must exist"
+    );
+
+    // Make sess_dead exit / terminate child process
+    let op_kill = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-ded-exit",
+        "command": "exit 0",
+        "session_id": sess_dead,
+    });
+    let _ = exec::handle_exec_op(&op_kill).await;
+    // Brief sleep to allow process exit status to register
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // Age sess_idle beyond 30 minutes (35 minutes ago)
+    let thirty_five_mins_ago = std::time::Instant::now() - Duration::from_secs(35 * 60);
+    assert!(
+        exec::set_session_last_accessed(sess_idle, thirty_five_mins_ago).await,
+        "must be able to update last_accessed timestamp"
+    );
+
+    // Run reaper with 30-minute threshold
+    let max_idle = Duration::from_secs(30 * 60);
+    let reaped_count = exec::reap_idle_sessions(max_idle).await;
+    assert!(
+        reaped_count >= 2,
+        "reaper must have reaped at least idle and dead sessions, got: {reaped_count}"
+    );
+
+    assert!(
+        !exec::has_session(sess_idle),
+        "30-minute idle session must be reaped"
+    );
+    assert!(!exec::has_session(sess_dead), "dead session must be reaped");
+    assert!(
+        exec::has_session(sess_active),
+        "active recent session must NOT be reaped"
+    );
+
+    // Verify active session is still functional
+    let op_act_check = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-act-check",
+        "command": "echo still_alive",
+        "session_id": sess_active,
+    });
+    let rep_check_str = exec::handle_exec_op(&op_act_check).await;
+    let rep_check: Value = serde_json::from_str(&rep_check_str).unwrap();
+    assert_eq!(rep_check["success"], true);
+    assert!(rep_check["output"]
+        .as_str()
+        .unwrap()
+        .contains("still_alive"));
+
+    exec::reset_session(sess_active);
+}

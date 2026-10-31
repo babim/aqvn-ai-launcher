@@ -10,11 +10,11 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 
 #[cfg(not(target_os = "android"))]
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 #[cfg(not(target_os = "android"))]
 use std::io::{Read, Write};
 
@@ -35,9 +35,11 @@ fn clamp_dim(val: u16, default: u16) -> u16 {
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    child: Box<dyn Child + Send + Sync>,
     writer: Arc<StdMutex<Box<dyn Write + Send>>>,
     output_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     cwd: PathBuf,
+    last_accessed: Instant,
 }
 
 #[cfg(not(target_os = "android"))]
@@ -153,10 +155,36 @@ impl PtySession {
         Ok(Self {
             master: pair.master,
             killer,
+            child,
             writer,
             output_rx,
             cwd: cwd.to_path_buf(),
+            last_accessed: Instant::now(),
         })
+    }
+
+    /// Checks if child process has completed or died.
+    pub fn is_dead(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(Some(_status)) => true,
+            Ok(None) => false,
+            Err(_) => true,
+        }
+    }
+
+    /// Returns the last accessed timestamp.
+    pub fn last_accessed(&self) -> Instant {
+        self.last_accessed
+    }
+
+    /// Updates last accessed timestamp to now.
+    pub fn touch(&mut self) {
+        self.last_accessed = Instant::now();
+    }
+
+    /// Overrides last accessed timestamp (primarily for testing idle reaper).
+    pub fn set_last_accessed(&mut self, instant: Instant) {
+        self.last_accessed = instant;
     }
 
     /// Executes a shell command inside the session, streaming output chunks.
@@ -169,6 +197,23 @@ impl PtySession {
         op_id: &str,
         session_id: &str,
     ) -> Result<(String, i32), String> {
+        self.execute_with_options(command, timeout_ms, chunk_tx, id, op_id, session_id, false)
+            .await
+    }
+
+    /// Executes a shell command inside the session with options including optional ANSI stripping.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_with_options(
+        &mut self,
+        command: &str,
+        timeout_ms: u64,
+        chunk_tx: Option<&mpsc::Sender<String>>,
+        id: &str,
+        op_id: &str,
+        session_id: &str,
+        strip_ansi_flag: bool,
+    ) -> Result<(String, i32), String> {
+        self.touch();
         // Drain any stale bytes before executing the command
         while self.output_rx.try_recv().is_ok() {}
 
@@ -245,12 +290,22 @@ impl PtySession {
                                 };
 
                                 let clean_output = text[..pos].replace("\r\n", "\n");
+                                let output_to_return = if strip_ansi_flag {
+                                    strip_ansi(&clean_output)
+                                } else {
+                                    clean_output
+                                };
 
                                 // Stream any remaining unsent portion before end_marker
                                 if let Some(tx) = chunk_tx {
                                     if pos > streamed_bytes {
                                         let unsent = text[streamed_bytes..pos].replace("\r\n", "\n");
-                                        if !unsent.is_empty() {
+                                        let unsent_to_send = if strip_ansi_flag {
+                                            strip_ansi(&unsent)
+                                        } else {
+                                            unsent
+                                        };
+                                        if !unsent_to_send.is_empty() {
                                             let chunk_msg = json!({
                                                 "type": MSG_TYPE_EXEC_OP_RESULT,
                                                 "op": MSG_TYPE_EXEC_OP_RESULT,
@@ -259,7 +314,7 @@ impl PtySession {
                                                 "session_id": session_id,
                                                 "session": session_id,
                                                 "stream": "stdout",
-                                                "output": unsent,
+                                                "output": unsent_to_send,
                                                 "done": false
                                             });
                                             let _ = tx.send(chunk_msg.to_string()).await;
@@ -267,7 +322,8 @@ impl PtySession {
                                     }
                                 }
 
-                                return Ok((clean_output, exit_code));
+                                self.touch();
+                                return Ok((output_to_return, exit_code));
                             }
 
                             // Stream intermediate chunks safely
@@ -279,7 +335,12 @@ impl PtySession {
                                         stream_end -= 1;
                                     }
                                     let chunk_str = text[streamed_bytes..stream_end].replace("\r\n", "\n");
-                                    if !chunk_str.is_empty() {
+                                    let chunk_to_send = if strip_ansi_flag {
+                                        strip_ansi(&chunk_str)
+                                    } else {
+                                        chunk_str
+                                    };
+                                    if !chunk_to_send.is_empty() {
                                         let chunk_msg = json!({
                                             "type": MSG_TYPE_EXEC_OP_RESULT,
                                             "op": MSG_TYPE_EXEC_OP_RESULT,
@@ -288,7 +349,7 @@ impl PtySession {
                                             "session_id": session_id,
                                             "session": session_id,
                                             "stream": "stdout",
-                                            "output": chunk_str,
+                                            "output": chunk_to_send,
                                             "done": false
                                         });
                                         let _ = tx.send(chunk_msg.to_string()).await;
@@ -300,7 +361,13 @@ impl PtySession {
                         None => {
                             // Shell process closed
                             let text = String::from_utf8_lossy(&raw_buf).replace("\r\n", "\n");
-                            return Ok((text, 0));
+                            let output_to_return = if strip_ansi_flag {
+                                strip_ansi(&text)
+                            } else {
+                                text
+                            };
+                            self.touch();
+                            return Ok((output_to_return, 0));
                         }
                     }
                 }
@@ -316,6 +383,7 @@ impl PtySession {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.touch();
         let _ = self.master.resize(PtySize {
             cols: clamp_dim(cols, 80),
             rows: clamp_dim(rows, 24),
@@ -325,6 +393,7 @@ impl PtySession {
     }
 
     pub fn kill(&mut self) {
+        let _ = self.child.kill();
         let _ = self.killer.kill();
     }
 
@@ -340,18 +409,226 @@ type SessionMap = HashMap<String, Arc<TokioMutex<PtySession>>>;
 #[cfg(not(target_os = "android"))]
 static SESSIONS: StdMutex<Option<SessionMap>> = StdMutex::new(None);
 
+pub const DEFAULT_MAX_IDLE_DURATION: Duration = Duration::from_secs(30 * 60);
+
+/// Strips ANSI escape sequences (CSI, OSC, and basic ESC sequences) from a string slice.
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            match chars.peek() {
+                Some('[') => {
+                    // CSI sequence: ESC [ ... final byte (0x40..=0x7E)
+                    chars.next(); // consume '['
+                    while let Some(&next_c) = chars.peek() {
+                        chars.next();
+                        if (0x40..=0x7e).contains(&(next_c as u32)) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    // OSC sequence: ESC ] ... (BEL '\x07' or ST '\x1b\\')
+                    chars.next(); // consume ']'
+                    while let Some(next_c) = chars.next() {
+                        if next_c == '\x07' {
+                            break;
+                        }
+                        if next_c == '\x1b' && chars.peek() == Some(&'\\') {
+                            chars.next(); // consume '\\'
+                            break;
+                        }
+                    }
+                }
+                Some('(') | Some(')') | Some('*') | Some('+') => {
+                    chars.next();
+                    let _ = chars.next();
+                }
+                Some(&next_c) if (0x40..=0x5f).contains(&(next_c as u32)) => {
+                    chars.next();
+                }
+                _ => {}
+            }
+        } else {
+            out.push(c);
+        }
+    }
+
+    out
+}
+
+/// Reaps PTY sessions that are either dead or have been idle for longer than `max_idle_duration`.
+/// Returns the number of sessions reaped and removed.
+pub async fn reap_idle_sessions(max_idle_duration: Duration) -> usize {
+    #[cfg(target_os = "android")]
+    {
+        let _ = max_idle_duration;
+        0
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let sessions_to_check: Vec<(String, Arc<TokioMutex<PtySession>>)> = {
+            if let Ok(lock) = SESSIONS.lock() {
+                if let Some(map) = lock.as_ref() {
+                    map.iter()
+                        .map(|(k, v)| (k.clone(), Arc::clone(v)))
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            }
+        };
+
+        if sessions_to_check.is_empty() {
+            return 0;
+        }
+
+        let mut to_reap = Vec::new();
+        for (id, session_arc) in sessions_to_check {
+            if let Ok(mut s) = session_arc.try_lock() {
+                let dead = s.is_dead();
+                let idle = s.last_accessed().elapsed() >= max_idle_duration;
+                if dead || idle {
+                    s.kill();
+                    to_reap.push(id);
+                }
+            }
+        }
+
+        if !to_reap.is_empty() {
+            if let Ok(mut lock) = SESSIONS.lock() {
+                if let Some(map) = lock.as_mut() {
+                    for id in &to_reap {
+                        map.remove(id);
+                    }
+                }
+            }
+        }
+
+        to_reap.len()
+    }
+}
+
+pub async fn reap_default_idle_sessions() -> usize {
+    reap_idle_sessions(DEFAULT_MAX_IDLE_DURATION).await
+}
+
+pub fn has_session(session_id: &str) -> bool {
+    #[cfg(target_os = "android")]
+    {
+        let _ = session_id;
+        false
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Ok(lock) = SESSIONS.lock() {
+            if let Some(map) = lock.as_ref() {
+                return map.contains_key(session_id);
+            }
+        }
+        false
+    }
+}
+
+pub fn session_count() -> usize {
+    #[cfg(target_os = "android")]
+    {
+        0
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Ok(lock) = SESSIONS.lock() {
+            if let Some(map) = lock.as_ref() {
+                return map.len();
+            }
+        }
+        0
+    }
+}
+
+pub async fn set_session_last_accessed(session_id: &str, instant: Instant) -> bool {
+    #[cfg(target_os = "android")]
+    {
+        let _ = session_id;
+        let _ = instant;
+        false
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let session_arc = {
+            if let Ok(lock) = SESSIONS.lock() {
+                lock.as_ref().and_then(|m| m.get(session_id).cloned())
+            } else {
+                None
+            }
+        };
+        if let Some(arc) = session_arc {
+            let mut s = arc.lock().await;
+            s.set_last_accessed(instant);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+pub async fn get_session_last_accessed(session_id: &str) -> Option<Instant> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = session_id;
+        None
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let session_arc = {
+            if let Ok(lock) = SESSIONS.lock() {
+                lock.as_ref().and_then(|m| m.get(session_id).cloned())
+            } else {
+                None
+            }
+        };
+        if let Some(arc) = session_arc {
+            let s = arc.lock().await;
+            Some(s.last_accessed())
+        } else {
+            None
+        }
+    }
+}
+
 #[cfg(not(target_os = "android"))]
-async fn get_or_create_session(
+pub async fn get_or_create_session(
     session_id: &str,
     cwd: &Path,
     cols: u16,
     rows: u16,
 ) -> Result<Arc<TokioMutex<PtySession>>, String> {
-    {
+    let existing_arc = {
         let mut lock = SESSIONS.lock().map_err(|e| e.to_string())?;
         let map = lock.get_or_insert_with(HashMap::new);
-        if let Some(session) = map.get(session_id) {
-            return Ok(Arc::clone(session));
+        map.get(session_id).cloned()
+    };
+
+    if let Some(arc) = existing_arc {
+        let is_dead = {
+            if let Ok(mut s) = arc.try_lock() {
+                s.is_dead()
+            } else {
+                false
+            }
+        };
+        if !is_dead {
+            return Ok(arc);
+        }
+        // Dead session: remove from map and spawn a fresh one
+        if let Ok(mut lock) = SESSIONS.lock() {
+            if let Some(map) = lock.as_mut() {
+                map.remove(session_id);
+            }
         }
     }
 
@@ -447,6 +724,19 @@ fn make_error_reply(
     .to_string()
 }
 
+/// Operation alias for handle_exec_op.
+pub async fn op_execute(envelope: &Value) -> String {
+    handle_exec_op(envelope).await
+}
+
+/// Operation alias for handle_exec_op_streaming.
+pub async fn op_execute_streaming(
+    envelope: &Value,
+    chunk_tx: Option<mpsc::Sender<String>>,
+) -> String {
+    handle_exec_op_streaming(envelope, chunk_tx).await
+}
+
 /// Handles incoming `connector_exec_op` without streaming callback.
 pub async fn handle_exec_op(envelope: &Value) -> String {
     handle_exec_op_streaming(envelope, None).await
@@ -479,6 +769,34 @@ pub async fn handle_exec_op_streaming(
 
     #[cfg(not(target_os = "android"))]
     {
+        // Automatically reap idle / dead sessions periodically or on requests
+        let _ = reap_idle_sessions(DEFAULT_MAX_IDLE_DURATION).await;
+
+        if action == "reap" || action == "reap_idle" || action == "cleanup" {
+            let max_idle = envelope
+                .get("max_idle_seconds")
+                .or_else(|| envelope.get("max_idle_secs"))
+                .or_else(|| envelope.get("idle_timeout"))
+                .and_then(Value::as_u64)
+                .map(Duration::from_secs)
+                .unwrap_or(DEFAULT_MAX_IDLE_DURATION);
+            let count = reap_idle_sessions(max_idle).await;
+            return json!({
+                "type": MSG_TYPE_EXEC_OP_RESULT,
+                "op": MSG_TYPE_EXEC_OP_RESULT,
+                "id": id,
+                "op_id": op_id,
+                "session_id": session_id,
+                "session": session_id,
+                "action": action,
+                "reaped": count,
+                "status": "ok",
+                "success": true,
+                "done": true,
+            })
+            .to_string();
+        }
+
         let is_reset = action == "reset"
             || envelope
                 .get("reset")
@@ -539,6 +857,17 @@ pub async fn handle_exec_op_streaming(
             );
         };
 
+        let strip_ansi_enabled = envelope
+            .get("strip_ansi")
+            .or_else(|| envelope.get("stripAnsi"))
+            .map(|v| match v {
+                Value::Bool(b) => *b,
+                Value::String(s) => s.eq_ignore_ascii_case("true") || s == "1",
+                Value::Number(n) => n.as_i64() == Some(1),
+                _ => false,
+            })
+            .unwrap_or(false);
+
         // Determine working directory
         let sandbox = current_sandbox();
         let default_cwd = sandbox
@@ -580,31 +909,37 @@ pub async fn handle_exec_op_streaming(
 
         let mut session = session_arc.lock().await;
         match session
-            .execute(
+            .execute_with_options(
                 command,
                 timeout_ms,
                 chunk_tx.as_ref(),
                 &id,
                 &op_id,
                 &session_id,
+                strip_ansi_enabled,
             )
             .await
         {
-            Ok((output, exit_code)) => json!({
-                "type": MSG_TYPE_EXEC_OP_RESULT,
-                "op": MSG_TYPE_EXEC_OP_RESULT,
-                "id": id,
-                "op_id": op_id,
-                "session_id": session_id,
-                "session": session_id,
-                "runtime": runtime,
-                "status": "completed",
-                "success": exit_code == 0,
-                "exit_code": exit_code,
-                "output": output,
-                "done": true,
-            })
-            .to_string(),
+            Ok((output, exit_code)) => {
+                let mut reply = json!({
+                    "type": MSG_TYPE_EXEC_OP_RESULT,
+                    "op": MSG_TYPE_EXEC_OP_RESULT,
+                    "id": id,
+                    "op_id": op_id,
+                    "session_id": session_id,
+                    "session": session_id,
+                    "runtime": runtime,
+                    "status": "completed",
+                    "success": exit_code == 0,
+                    "exit_code": exit_code,
+                    "output": output,
+                    "done": true,
+                });
+                if strip_ansi_enabled {
+                    reply["strip_ansi"] = Value::Bool(true);
+                }
+                reply.to_string()
+            }
             Err(e) => make_error_reply(&id, &op_id, &session_id, Some(runtime), e),
         }
     }

@@ -7,7 +7,11 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tokio::sync::RwLock;
+
+/// Default maximum memory limit for AssetCache in RAM (32MB).
+pub const MAX_MEMORY_CACHE_BYTES: usize = 32 * 1024 * 1024;
 
 /// In-memory cached asset representation.
 #[derive(Clone, Debug)]
@@ -16,10 +20,19 @@ pub struct CachedAsset {
     pub body: Vec<u8>,
 }
 
-/// Asset caching engine: dual-layer (RAM + persistent disk).
+#[derive(Debug)]
+struct CacheEntry {
+    asset: CachedAsset,
+    last_accessed: AtomicU64,
+}
+
+/// Asset caching engine: dual-layer (RAM + persistent disk) with bounded LRU memory eviction.
 pub struct AssetCache {
     base_dir: PathBuf,
-    memory: RwLock<HashMap<(String, String), CachedAsset>>,
+    max_memory_bytes: usize,
+    memory: RwLock<HashMap<(String, String), CacheEntry>>,
+    current_memory_bytes: AtomicUsize,
+    access_counter: AtomicU64,
 }
 
 impl Default for AssetCache {
@@ -30,9 +43,16 @@ impl Default for AssetCache {
 
 impl AssetCache {
     pub fn new(base_dir: PathBuf) -> Self {
+        Self::with_max_memory(base_dir, MAX_MEMORY_CACHE_BYTES)
+    }
+
+    pub fn with_max_memory(base_dir: PathBuf, max_memory_bytes: usize) -> Self {
         Self {
             base_dir,
+            max_memory_bytes,
             memory: RwLock::new(HashMap::new()),
+            current_memory_bytes: AtomicUsize::new(0),
+            access_counter: AtomicU64::new(1),
         }
     }
 
@@ -73,6 +93,36 @@ impl AssetCache {
         &self.base_dir
     }
 
+    /// Maximum in-memory byte capacity.
+    pub fn max_memory_bytes(&self) -> usize {
+        self.max_memory_bytes
+    }
+
+    /// Current in-memory byte consumption.
+    pub fn current_memory_bytes(&self) -> usize {
+        self.current_memory_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Checks whether an asset is currently present in in-memory RAM cache.
+    pub async fn contains_in_memory(&self, origin: &str, path: &str) -> bool {
+        let key = (origin.to_string(), path.to_string());
+        let mem = self.memory.read().await;
+        mem.contains_key(&key)
+    }
+
+    /// Retrieves an asset strictly from the in-memory RAM cache, updating LRU access sequence.
+    pub async fn get_from_memory(&self, origin: &str, path: &str) -> Option<CachedAsset> {
+        let key = (origin.to_string(), path.to_string());
+        let mem = self.memory.read().await;
+        if let Some(entry) = mem.get(&key) {
+            let seq = self.access_counter.fetch_add(1, Ordering::Relaxed);
+            entry.last_accessed.store(seq, Ordering::Relaxed);
+            Some(entry.asset.clone())
+        } else {
+            None
+        }
+    }
+
     /// Determines whether a request path qualifies for static asset caching.
     pub fn is_cacheable(&self, path: &str) -> bool {
         is_cacheable(path)
@@ -92,8 +142,10 @@ impl AssetCache {
         // 1. Memory cache check
         {
             let mem = self.memory.read().await;
-            if let Some(asset) = mem.get(&key) {
-                return Some(asset.clone());
+            if let Some(entry) = mem.get(&key) {
+                let seq = self.access_counter.fetch_add(1, Ordering::Relaxed);
+                entry.last_accessed.store(seq, Ordering::Relaxed);
+                return Some(entry.asset.clone());
             }
         }
 
@@ -119,16 +171,13 @@ impl AssetCache {
 
         let asset = CachedAsset { content_type, body };
 
-        // Populate in-memory cache
-        {
-            let mut mem = self.memory.write().await;
-            mem.insert(key, asset.clone());
-        }
+        // Populate in-memory cache with bounded LRU eviction
+        self.put_memory(key, asset.clone()).await;
 
         Some(asset)
     }
 
-    /// Stores an asset into both memory and persistent disk cache.
+    /// Stores an asset into both memory (bounded LRU) and persistent disk cache.
     pub async fn put(&self, origin: &str, path: &str, content_type: Option<&str>, body: &[u8]) {
         let key = (origin.to_string(), path.to_string());
         let asset = CachedAsset {
@@ -136,11 +185,8 @@ impl AssetCache {
             body: body.to_vec(),
         };
 
-        // 1. Store in memory
-        {
-            let mut mem = self.memory.write().await;
-            mem.insert(key, asset);
-        }
+        // 1. Store in memory with bounded LRU eviction
+        self.put_memory(key, asset).await;
 
         // 2. Store on disk
         if let Some(disk_path) = self.disk_path(origin, path) {
@@ -156,11 +202,69 @@ impl AssetCache {
         }
     }
 
+    async fn put_memory(&self, key: (String, String), asset: CachedAsset) {
+        let asset_size = asset.body.len();
+        if asset_size > self.max_memory_bytes {
+            // Oversized asset cannot fit into the memory cache.
+            // If it already existed in memory, remove it to prevent stale data.
+            let mut mem = self.memory.write().await;
+            if let Some(removed) = mem.remove(&key) {
+                let current = self.current_memory_bytes.load(Ordering::Relaxed);
+                self.current_memory_bytes.store(
+                    current.saturating_sub(removed.asset.body.len()),
+                    Ordering::Relaxed,
+                );
+            }
+            return;
+        }
+
+        let mut mem = self.memory.write().await;
+        let mut current = self.current_memory_bytes.load(Ordering::Relaxed);
+
+        // Deduct old size if updating an existing key
+        if let Some(old) = mem.remove(&key) {
+            current = current.saturating_sub(old.asset.body.len());
+        }
+
+        // Evict least-recently accessed entries until new asset fits
+        while current + asset_size > self.max_memory_bytes && !mem.is_empty() {
+            let oldest_key = mem
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_accessed.load(Ordering::Relaxed))
+                .map(|(k, _)| k.clone());
+
+            if let Some(k) = oldest_key {
+                if let Some(evicted) = mem.remove(&k) {
+                    current = current.saturating_sub(evicted.asset.body.len());
+                }
+            } else {
+                break;
+            }
+        }
+
+        let seq = self.access_counter.fetch_add(1, Ordering::Relaxed);
+        current += asset_size;
+        mem.insert(
+            key,
+            CacheEntry {
+                asset,
+                last_accessed: AtomicU64::new(seq),
+            },
+        );
+        self.current_memory_bytes.store(current, Ordering::Relaxed);
+    }
+
     /// Clears both memory and disk caches.
     pub async fn clear(&self) {
+        self.clear_memory().await;
+        let _ = tokio::fs::remove_dir_all(&self.base_dir).await;
+    }
+
+    /// Clears only the in-memory cache, keeping the disk cache intact.
+    pub async fn clear_memory(&self) {
         let mut mem = self.memory.write().await;
         mem.clear();
-        let _ = tokio::fs::remove_dir_all(&self.base_dir).await;
+        self.current_memory_bytes.store(0, Ordering::Relaxed);
     }
 }
 
@@ -277,5 +381,76 @@ mod tests {
         assert!(!is_cacheable("/ui/asset-bundle?v=1"));
         assert!(!is_cacheable("/ui/asset-bundle/bundle.js"));
         assert!(!is_cacheable("/some/future/page.html"));
+    }
+
+    #[tokio::test]
+    async fn test_asset_cache_memory_lru_eviction() {
+        let temp_dir = std::env::temp_dir().join(format!("aqvn-unit-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let cache = AssetCache::with_max_memory(temp_dir.clone(), 100);
+        let origin = "http://localhost:55088";
+
+        // Insert /a.css (40 bytes)
+        cache.put(origin, "/a.css", None, &[1u8; 40]).await;
+        assert_eq!(cache.current_memory_bytes(), 40);
+        assert!(cache.contains_in_memory(origin, "/a.css").await);
+
+        // Insert /b.css (40 bytes)
+        cache.put(origin, "/b.css", None, &[2u8; 40]).await;
+        assert_eq!(cache.current_memory_bytes(), 80);
+        assert!(cache.contains_in_memory(origin, "/b.css").await);
+
+        // Insert /c.css (30 bytes) -> total 110 > 100 -> /a.css evicted
+        cache.put(origin, "/c.css", None, &[3u8; 30]).await;
+        assert_eq!(cache.current_memory_bytes(), 70);
+        assert!(!cache.contains_in_memory(origin, "/a.css").await);
+        assert!(cache.contains_in_memory(origin, "/b.css").await);
+        assert!(cache.contains_in_memory(origin, "/c.css").await);
+
+        // Touch /b.css via get -> updates its LRU recency
+        assert!(cache.get(origin, "/b.css").await.is_some());
+
+        // Insert /d.css (30 bytes) -> total 70 + 30 = 100. Exactly fits!
+        cache.put(origin, "/d.css", None, &[4u8; 30]).await;
+        assert_eq!(cache.current_memory_bytes(), 100);
+        assert!(cache.contains_in_memory(origin, "/b.css").await);
+        assert!(cache.contains_in_memory(origin, "/c.css").await);
+        assert!(cache.contains_in_memory(origin, "/d.css").await);
+
+        // Insert /e.css (10 bytes) -> total 110 > 100.
+        // /c.css was accessed before /d.css and /b.css, so /c.css is evicted!
+        cache.put(origin, "/e.css", None, &[5u8; 10]).await;
+        assert_eq!(cache.current_memory_bytes(), 80);
+        assert!(!cache.contains_in_memory(origin, "/c.css").await);
+        assert!(cache.contains_in_memory(origin, "/b.css").await);
+        assert!(cache.contains_in_memory(origin, "/d.css").await);
+        assert!(cache.contains_in_memory(origin, "/e.css").await);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_asset_cache_update_existing_and_oversized() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("aqvn-unit-cache-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let cache = AssetCache::with_max_memory(temp_dir.clone(), 100);
+        let origin = "http://localhost:55088";
+
+        cache.put(origin, "/a.css", None, &[1u8; 40]).await;
+        assert_eq!(cache.current_memory_bytes(), 40);
+
+        // Update /a.css to 60 bytes
+        cache.put(origin, "/a.css", None, &[1u8; 60]).await;
+        assert_eq!(cache.current_memory_bytes(), 60);
+
+        // Try inserting oversized asset of 105 bytes
+        cache.put(origin, "/oversized.bin", None, &[9u8; 105]).await;
+        assert_eq!(cache.current_memory_bytes(), 60);
+        assert!(!cache.contains_in_memory(origin, "/oversized.bin").await);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

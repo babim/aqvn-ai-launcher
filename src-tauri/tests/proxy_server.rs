@@ -1417,3 +1417,106 @@ async fn test_html_response_injects_container_bridge() {
         "root HTML response must contain injected container bridge"
     );
 }
+
+// ---------------------- bounded LRU asset cache (VAL-CACHE-001)
+
+#[tokio::test]
+async fn test_bounded_memory_cache_lru_eviction() {
+    use aqvn_workspace_lib::proxy::cache::{AssetCache, MAX_MEMORY_CACHE_BYTES};
+
+    let test_dir = std::env::temp_dir().join(format!("aqvn-lru-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&test_dir);
+
+    // 1. Verify default capacity is 32MB
+    let cache = AssetCache::new(test_dir.clone());
+    assert_eq!(cache.max_memory_bytes(), MAX_MEMORY_CACHE_BYTES);
+    assert_eq!(cache.max_memory_bytes(), 32 * 1024 * 1024);
+    assert_eq!(cache.current_memory_bytes(), 0);
+
+    let origin = "http://[IP]:55088";
+
+    // 2. Insert two 12MB assets (total 24MB <= 32MB)
+    let chunk_12mb = vec![0xAA; 12 * 1024 * 1024];
+    cache
+        .put(origin, "/css/style1.css", Some("text/css"), &chunk_12mb)
+        .await;
+    assert_eq!(cache.current_memory_bytes(), 12 * 1024 * 1024);
+    assert!(cache.contains_in_memory(origin, "/css/style1.css").await);
+
+    cache
+        .put(origin, "/css/style2.css", Some("text/css"), &chunk_12mb)
+        .await;
+    assert_eq!(cache.current_memory_bytes(), 24 * 1024 * 1024);
+    assert!(cache.contains_in_memory(origin, "/css/style1.css").await);
+    assert!(cache.contains_in_memory(origin, "/css/style2.css").await);
+
+    // 3. Insert a third 12MB asset -> Total 36MB > 32MB.
+    // style1.css is oldest accessed, so it must be evicted from RAM!
+    cache
+        .put(origin, "/css/style3.css", Some("text/css"), &chunk_12mb)
+        .await;
+    assert_eq!(cache.current_memory_bytes(), 24 * 1024 * 1024);
+    assert!(
+        !cache.contains_in_memory(origin, "/css/style1.css").await,
+        "style1 must be evicted from memory"
+    );
+    assert!(cache.contains_in_memory(origin, "/css/style2.css").await);
+    assert!(cache.contains_in_memory(origin, "/css/style3.css").await);
+
+    // style1 is still on disk though!
+    assert!(cache
+        .disk_path(origin, "/css/style1.css")
+        .expect("disk path")
+        .is_file());
+
+    // 4. Test LRU access touch:
+    // Currently style2 was accessed before style3.
+    // Calling get on style2 makes style2 MRU, leaving style3 as the oldest!
+    let got2 = cache.get(origin, "/css/style2.css").await;
+    assert!(got2.is_some());
+
+    // Now insert a fourth 12MB asset.
+    // Since style2 was touched, style3 is oldest and must be evicted!
+    cache
+        .put(origin, "/css/style4.css", Some("text/css"), &chunk_12mb)
+        .await;
+    assert_eq!(cache.current_memory_bytes(), 24 * 1024 * 1024);
+    assert!(
+        cache.contains_in_memory(origin, "/css/style2.css").await,
+        "style2 was touched and should remain in memory"
+    );
+    assert!(
+        !cache.contains_in_memory(origin, "/css/style3.css").await,
+        "style3 was least-recently used and must be evicted"
+    );
+    assert!(cache.contains_in_memory(origin, "/css/style4.css").await);
+
+    // 5. Test fetching evicted asset from disk brings it back to memory (evicting oldest in memory)
+    // Currently memory has style2 and style4. style2 is oldest.
+    // Fetching style1 reads from disk and inserts into memory -> evicts style2!
+    let got1 = cache.get(origin, "/css/style1.css").await;
+    assert!(got1.is_some());
+    assert!(cache.contains_in_memory(origin, "/css/style1.css").await);
+    assert!(
+        !cache.contains_in_memory(origin, "/css/style2.css").await,
+        "style2 evicted when style1 reloaded from disk"
+    );
+    assert!(cache.contains_in_memory(origin, "/css/style4.css").await);
+
+    // 6. Test oversized asset (>32MB) cannot blow up memory
+    let chunk_35mb = vec![0xBB; 35 * 1024 * 1024];
+    cache.put(origin, "/large.bin", None, &chunk_35mb).await;
+    assert!(
+        !cache.contains_in_memory(origin, "/large.bin").await,
+        "asset > 32MB must not be cached in memory"
+    );
+    assert!(cache.current_memory_bytes() <= 32 * 1024 * 1024);
+
+    // 7. Test clear_memory
+    cache.clear_memory().await;
+    assert_eq!(cache.current_memory_bytes(), 0);
+    assert!(!cache.contains_in_memory(origin, "/css/style1.css").await);
+    assert!(!cache.contains_in_memory(origin, "/css/style4.css").await);
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}

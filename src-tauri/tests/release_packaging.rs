@@ -1,4 +1,4 @@
-//! Release packaging and whitelabel compliance tests (VAL-REL-001, VAL-REL-002).
+//! Release packaging and whitelabel compliance tests (VAL-REL-001, VAL-REL-002, VAL-REL-003).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -91,4 +91,49 @@ fn val_rel_002_whitelabel_zero_upstream_mentions_in_core_surfaces() {
             check_file(&surface);
         }
     }
+}
+
+#[test]
+fn val_rel_003_macos_job_and_step_timeouts_in_release_workflow() {
+    let workflow_path = repo_root().join(".github/workflows/release.yml");
+    assert!(
+        workflow_path.exists(),
+        ".github/workflows/release.yml must exist"
+    );
+    let content = fs::read_to_string(&workflow_path).expect("must read release.yml");
+
+    // Verify macos job exists and runs on macos-14
+    assert!(
+        content.contains("macos:"),
+        "release.yml must define macos job"
+    );
+    assert!(
+        content.contains("runs-on: macos-14"),
+        "macos job must run on macos-14"
+    );
+
+    // Verify dmg and app bundles built and packaged
+    assert!(
+        content.contains("--bundles dmg,app"),
+        "macos job must build dmg,app bundles via tauri-action"
+    );
+    assert!(
+        content.contains(".dmg"),
+        "macos job must reference .dmg artifact"
+    );
+    assert!(
+        content.contains(".app"),
+        "macos job must reference .app artifact"
+    );
+    assert!(
+        content.contains(".tar.gz"),
+        "macos job must package tarball"
+    );
+
+    // Verify timeout-minutes: 60 across all jobs
+    let timeout_matches = content.matches("timeout-minutes: 60").count();
+    assert!(
+        timeout_matches >= 4,
+        "release.yml must configure timeout-minutes: 60 across all runner jobs (linux, windows, macos, android)"
+    );
 }

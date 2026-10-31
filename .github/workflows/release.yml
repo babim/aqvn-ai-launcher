@@ -13,6 +13,7 @@ jobs:
   linux:
     name: Build Linux Bundles (deb, rpm)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -62,6 +63,7 @@ jobs:
   windows:
     name: Build Windows Installers (nsis, msi) & Portable
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -123,9 +125,54 @@ jobs:
             src-tauri/target/release/AQVN.Workspace_*_portable.exe
             src-tauri/target/release/AQVN.Workspace_*_windows_portable.zip
 
+  macos:
+    name: Build macOS Bundles (dmg, app) & Portable
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build macOS bundles (dmg, app)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --bundles dmg,app
+
+      - name: Package Portable macOS Tarball
+        run: |
+          VERSION=$(grep -m1 '^version = ' src-tauri/Cargo.toml | cut -d '"' -f2)
+          tar -czf "AQVN.Workspace_${VERSION}_macos.tar.gz" -C src-tauri/target/release/bundle/macos .
+          cp "AQVN.Workspace_${VERSION}_macos.tar.gz" "AQVN.Workspace_${VERSION}_macos_portable.tar.gz"
+
+      - name: Upload macOS bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aqvn-workspace-macos-bundles
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app
+            AQVN.Workspace_*_macos*.tar.gz
+
+      - name: Publish macOS bundles to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app
+            AQVN.Workspace_*_macos*.tar.gz
+
   android:
     name: Build Android APK (EXPERIMENTAL)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724

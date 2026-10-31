@@ -1578,3 +1578,144 @@ async fn test_ephemeral_port_binding() {
     let body: Value = resp.json().await.expect("health json");
     assert_eq!(body["ok"], true);
 }
+
+// ---------------------- cache ETag and 304 Not Modified (VAL-WIN-006)
+
+#[tokio::test]
+async fn test_cache_etag_and_304_not_modified() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    let asset_url = format!("{}/vendor/fonts/Inter-etag-test.woff2", proxy.base);
+
+    // 1. Initial request (cache MISS) - returns 200 OK with ETag header
+    let resp1 = client()
+        .get(&asset_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("initial request");
+    assert_eq!(resp1.status(), StatusCode::OK);
+    assert_eq!(
+        resp1.headers().get("x-cache").and_then(|v| v.to_str().ok()),
+        Some("MISS")
+    );
+    let etag = resp1
+        .headers()
+        .get(header::ETAG)
+        .and_then(|v| v.to_str().ok())
+        .expect("ETag header must be present on cached asset")
+        .to_string();
+    assert!(
+        etag.starts_with('"') && etag.ends_with('"'),
+        "ETag must be quoted: {etag}"
+    );
+    let body1 = resp1.bytes().await.expect("body1");
+    assert_eq!(body1.as_ref(), RAW_BODY);
+
+    *stub.last_raw_uri.lock().await = None;
+
+    // 2. Subsequent request without If-None-Match (cache HIT) - returns 200 OK with same ETag
+    let resp2 = client()
+        .get(&asset_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("repeat request");
+    assert_eq!(resp2.status(), StatusCode::OK);
+    assert_eq!(
+        resp2.headers().get("x-cache").and_then(|v| v.to_str().ok()),
+        Some("HIT")
+    );
+    assert_eq!(
+        resp2
+            .headers()
+            .get(header::ETAG)
+            .and_then(|v| v.to_str().ok()),
+        Some(etag.as_str()),
+        "ETag on HIT must match initial ETag"
+    );
+    let body2 = resp2.bytes().await.expect("body2");
+    assert_eq!(body2.as_ref(), RAW_BODY);
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        None,
+        "cache HIT must not contact upstream"
+    );
+
+    // 3. Conditional request with matching If-None-Match -> 304 Not Modified with empty body
+    let resp3 = client()
+        .get(&asset_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .header(header::IF_NONE_MATCH, &etag)
+        .send()
+        .await
+        .expect("conditional request");
+    assert_eq!(resp3.status(), StatusCode::NOT_MODIFIED);
+    assert_eq!(
+        resp3.headers().get("x-cache").and_then(|v| v.to_str().ok()),
+        Some("HIT")
+    );
+    assert_eq!(
+        resp3
+            .headers()
+            .get(header::ETAG)
+            .and_then(|v| v.to_str().ok()),
+        Some(etag.as_str())
+    );
+    let body3 = resp3.bytes().await.expect("body3");
+    assert!(
+        body3.is_empty(),
+        "304 Not Modified response body must be empty, got {} bytes",
+        body3.len()
+    );
+    assert_eq!(
+        stub.last_raw_uri.lock().await.as_deref(),
+        None,
+        "304 Not Modified must be served from local cache without contacting upstream"
+    );
+
+    // 4. Conditional request with weak validator (W/"...") -> 304 Not Modified
+    let weak_etag = format!("W/{etag}");
+    let resp_weak = client()
+        .get(&asset_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .header(header::IF_NONE_MATCH, &weak_etag)
+        .send()
+        .await
+        .expect("weak conditional request");
+    assert_eq!(resp_weak.status(), StatusCode::NOT_MODIFIED);
+    let body_weak = resp_weak.bytes().await.expect("body_weak");
+    assert!(body_weak.is_empty());
+
+    // 5. Conditional request with wildcard (*) -> 304 Not Modified
+    let resp_wildcard = client()
+        .get(&asset_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .header(header::IF_NONE_MATCH, "*")
+        .send()
+        .await
+        .expect("wildcard conditional request");
+    assert_eq!(resp_wildcard.status(), StatusCode::NOT_MODIFIED);
+    let body_wildcard = resp_wildcard.bytes().await.expect("body_wildcard");
+    assert!(body_wildcard.is_empty());
+
+    // 6. Conditional request with mismatched If-None-Match -> 200 OK with full body
+    let resp_mismatch = client()
+        .get(&asset_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .header(header::IF_NONE_MATCH, "\"unmatched-hash-value\"")
+        .send()
+        .await
+        .expect("mismatched conditional request");
+    assert_eq!(resp_mismatch.status(), StatusCode::OK);
+    assert_eq!(
+        resp_mismatch
+            .headers()
+            .get("x-cache")
+            .and_then(|v| v.to_str().ok()),
+        Some("HIT")
+    );
+    let body_mismatch = resp_mismatch.bytes().await.expect("body_mismatch");
+    assert_eq!(body_mismatch.as_ref(), RAW_BODY);
+}

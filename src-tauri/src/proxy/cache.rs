@@ -5,6 +5,7 @@
 //! (`$XDG_CACHE_HOME/net.aqvn.workspace/assets/`), serving them instantly
 //! (<100ms FCP) without upstream network roundtrips.
 
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -18,6 +19,30 @@ pub const MAX_MEMORY_CACHE_BYTES: usize = 32 * 1024 * 1024;
 pub struct CachedAsset {
     pub content_type: Option<String>,
     pub body: Vec<u8>,
+    pub etag: String,
+}
+
+impl CachedAsset {
+    pub fn new(content_type: Option<String>, body: Vec<u8>) -> Self {
+        let etag = compute_etag(&body);
+        Self {
+            content_type,
+            body,
+            etag,
+        }
+    }
+
+    pub fn with_etag(content_type: Option<String>, body: Vec<u8>, etag: String) -> Self {
+        Self {
+            content_type,
+            body,
+            etag,
+        }
+    }
+
+    pub fn etag(&self) -> &str {
+        &self.etag
+    }
 }
 
 #[derive(Debug)]
@@ -44,6 +69,11 @@ impl Default for AssetCache {
 impl AssetCache {
     pub fn new(base_dir: PathBuf) -> Self {
         Self::with_max_memory(base_dir, MAX_MEMORY_CACHE_BYTES)
+    }
+
+    /// Computes SHA-256 ETag for asset body bytes.
+    pub fn compute_etag(body: &[u8]) -> String {
+        compute_etag(body)
     }
 
     pub fn with_max_memory(base_dir: PathBuf, max_memory_bytes: usize) -> Self {
@@ -169,7 +199,22 @@ impl AssetCache {
         }
         .or_else(|| Some(mime_type_for_path(path).to_string()));
 
-        let asset = CachedAsset { content_type, body };
+        let etag_path = etag_file_path(&disk_path);
+        let etag = if etag_path.is_file() {
+            tokio::fs::read_to_string(&etag_path)
+                .await
+                .ok()
+                .map(|s| s.trim().to_string())
+        } else {
+            None
+        }
+        .unwrap_or_else(|| compute_etag(&body));
+
+        let asset = CachedAsset {
+            content_type,
+            body,
+            etag,
+        };
 
         // Populate in-memory cache with bounded LRU eviction
         self.put_memory(key, asset.clone()).await;
@@ -180,9 +225,11 @@ impl AssetCache {
     /// Stores an asset into both memory (bounded LRU) and persistent disk cache.
     pub async fn put(&self, origin: &str, path: &str, content_type: Option<&str>, body: &[u8]) {
         let key = (origin.to_string(), path.to_string());
+        let etag = compute_etag(body);
         let asset = CachedAsset {
             content_type: content_type.map(str::to_string),
             body: body.to_vec(),
+            etag: etag.clone(),
         };
 
         // 1. Store in memory with bounded LRU eviction
@@ -198,6 +245,8 @@ impl AssetCache {
                     let meta_path = meta_file_path(&disk_path);
                     let _ = tokio::fs::write(&meta_path, ct.as_bytes()).await;
                 }
+                let etag_path = etag_file_path(&disk_path);
+                let _ = tokio::fs::write(&etag_path, etag.as_bytes()).await;
             }
         }
     }
@@ -361,6 +410,41 @@ fn meta_file_path(path: &Path) -> PathBuf {
     PathBuf::from(os)
 }
 
+fn etag_file_path(path: &Path) -> PathBuf {
+    let mut os = path.as_os_str().to_os_string();
+    os.push(".etag");
+    PathBuf::from(os)
+}
+
+/// Computes an HTTP entity tag (ETag) for asset bytes using SHA-256.
+/// Output is a quoted string according to RFC 7232 (e.g. `"\"<sha256_hex>\""`).
+pub fn compute_etag(body: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(body);
+    format!("\"{:x}\"", hasher.finalize())
+}
+
+/// Evaluates whether an HTTP `If-None-Match` header value matches the given ETag.
+/// Supports wildcard `*`, comma-separated lists, weak tags (`W/`), and quoted or unquoted comparison.
+pub fn etag_matches(if_none_match: &str, etag: &str) -> bool {
+    let inm = if_none_match.trim();
+    if inm == "*" {
+        return true;
+    }
+    let target = etag.trim().trim_matches('"');
+    for part in inm.split(',') {
+        let candidate = part.trim();
+        if candidate == "*" {
+            return true;
+        }
+        let candidate_clean = candidate.trim_start_matches("W/").trim_matches('"');
+        if candidate_clean == target {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,6 +534,56 @@ mod tests {
         cache.put(origin, "/oversized.bin", None, &[9u8; 105]).await;
         assert_eq!(cache.current_memory_bytes(), 60);
         assert!(!cache.contains_in_memory(origin, "/oversized.bin").await);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_compute_etag_and_matching() {
+        let body = b"hello world cache asset content";
+        let etag = compute_etag(body);
+        assert!(etag.starts_with('"') && etag.ends_with('"'));
+        assert_eq!(AssetCache::compute_etag(body), etag);
+
+        // Strong match
+        assert!(etag_matches(&etag, &etag));
+        // Unquoted match
+        let raw = etag.trim_matches('"');
+        assert!(etag_matches(raw, &etag));
+        // Weak match
+        assert!(etag_matches(&format!("W/{etag}"), &etag));
+        // Wildcard match
+        assert!(etag_matches("*", &etag));
+        // List match
+        assert!(etag_matches(
+            &format!("\"other\", {etag}, \"something\""),
+            &etag
+        ));
+        // Non-match
+        assert!(!etag_matches("\"mismatched\"", &etag));
+    }
+
+    #[tokio::test]
+    async fn test_asset_cache_stores_and_returns_etag() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("aqvn-unit-cache-etag-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let cache = AssetCache::new(temp_dir.clone());
+        let origin = "http://localhost:55088";
+        let path = "/css/test.css";
+        let body = b"body { color: red; }";
+
+        cache.put(origin, path, Some("text/css"), body).await;
+
+        let asset = cache.get(origin, path).await.expect("cached asset");
+        assert_eq!(asset.etag, compute_etag(body));
+        assert_eq!(asset.etag(), compute_etag(body));
+
+        // Clear memory to force read from disk
+        cache.clear_memory().await;
+        let asset_from_disk = cache.get(origin, path).await.expect("asset from disk");
+        assert_eq!(asset_from_disk.etag, compute_etag(body));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

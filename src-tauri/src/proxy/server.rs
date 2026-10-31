@@ -567,6 +567,31 @@ async fn handle_forward_raw(
     // Check local asset cache for cacheable GET requests
     if upstream_method == reqwest::Method::GET && state.cache().is_cacheable(path) {
         if let Some(cached) = state.cache().get(target_origin, path).await {
+            let if_none_match = headers
+                .get(header::IF_NONE_MATCH)
+                .and_then(|val| val.to_str().ok());
+
+            if let Some(inm) = if_none_match {
+                if cache::etag_matches(inm, &cached.etag) {
+                    let mut response = Response::new(Body::empty());
+                    *response.status_mut() = StatusCode::NOT_MODIFIED;
+                    if let Ok(value) = HeaderValue::from_str(&cached.etag) {
+                        response.headers_mut().insert(header::ETAG, value);
+                    }
+                    response
+                        .headers_mut()
+                        .insert("x-cache", HeaderValue::from_static("HIT"));
+                    response
+                        .headers_mut()
+                        .insert("x-aqvn-cache", HeaderValue::from_static("HIT"));
+                    response.headers_mut().insert(
+                        header::CACHE_CONTROL,
+                        HeaderValue::from_static("public, max-age=31536000, immutable"),
+                    );
+                    return with_cors(response, origin.as_deref());
+                }
+            }
+
             let mut response = Response::new(Body::from(cached.body));
             *response.status_mut() = StatusCode::OK;
             let ct = cached
@@ -574,6 +599,9 @@ async fn handle_forward_raw(
                 .unwrap_or_else(|| cache::mime_type_for_path(path).to_string());
             if let Ok(value) = HeaderValue::from_str(&ct) {
                 response.headers_mut().insert(header::CONTENT_TYPE, value);
+            }
+            if let Ok(value) = HeaderValue::from_str(&cached.etag) {
+                response.headers_mut().insert(header::ETAG, value);
             }
             response
                 .headers_mut()
@@ -636,6 +664,10 @@ async fn handle_forward_raw(
                         &outcome.body,
                     )
                     .await;
+                let etag = cache::compute_etag(&outcome.body);
+                if let Ok(value) = HeaderValue::from_str(&etag) {
+                    response.headers_mut().insert(header::ETAG, value);
+                }
                 response
                     .headers_mut()
                     .insert("x-cache", HeaderValue::from_static("MISS"));

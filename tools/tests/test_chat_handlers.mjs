@@ -2083,6 +2083,29 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     assert.match(js, /SETTINGS_I18N/, 'settings.js must define SETTINGS_I18N');
   });
 
+  test('VAL-MENU-005: settings.html and settings.js support show_menu_bar toggle in General section', () => {
+    const htmlPath = new URL('../../ui/settings.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /id="show-menu-bar"/, 'settings.html must expose #show-menu-bar');
+    assert.match(html, /name="show_menu_bar"/, 'settings.html must set name="show_menu_bar"');
+    assert.match(html, /data-i18n="show_menu_bar_label"/, 'settings.html must have data-i18n="show_menu_bar_label"');
+    assert.match(html, /data-i18n="show_menu_bar_help"/, 'settings.html must have data-i18n="show_menu_bar_help"');
+
+    // Verify it is inside #general-section
+    const generalMatch = html.match(/<section[^>]*id="general-section"[^>]*>([\s\S]*?)<\/section>/);
+    assert.ok(generalMatch, 'settings.html must have #general-section');
+    assert.match(generalMatch[1], /id="show-menu-bar"/, '#general-section must contain #show-menu-bar');
+
+    const jsPath = new URL('../../ui/settings.js', import.meta.url);
+    const js = fs.readFileSync(jsPath, 'utf8');
+
+    assert.match(js, /show_menu_bar/, 'settings.js must reference show_menu_bar');
+    assert.match(js, /showMenuBarInput/, 'settings.js must bind showMenuBarInput');
+    assert.match(js, /show_menu_bar_label/, 'settings.js must define show_menu_bar_label in i18n');
+    assert.match(js, /show_menu_bar_help/, 'settings.js must define show_menu_bar_help in i18n');
+  });
+
   test('help.html supports close_current_window and language switcher', () => {
     const htmlPath = new URL('../../ui/help.html', import.meta.url);
     const html = fs.readFileSync(htmlPath, 'utf8');

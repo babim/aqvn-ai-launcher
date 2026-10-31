@@ -28,6 +28,7 @@ pub const DEFAULT_SCOPE_DESKTOP: bool = true;
 pub const DEFAULT_GLOBAL_HOTKEY: &str = "Alt+Space";
 pub const DEFAULT_CLOSE_TO_TRAY: bool = true;
 pub const DEFAULT_APP_LANGUAGE: &str = "vi";
+pub const DEFAULT_SHOW_MENU_BAR: bool = false;
 pub const STORE_FILENAME: &str = "settings.json";
 
 /// Returns a stable, deterministic gateway identifier for this device/installation.
@@ -119,6 +120,8 @@ pub struct AppConfig {
     pub close_to_tray: bool,
     #[serde(default = "default_app_language")]
     pub app_language: String,
+    #[serde(default)]
+    pub show_menu_bar: bool,
 }
 
 impl Default for AppConfig {
@@ -148,6 +151,7 @@ impl Default for AppConfig {
             global_hotkey: DEFAULT_GLOBAL_HOTKEY.to_string(),
             close_to_tray: DEFAULT_CLOSE_TO_TRAY,
             app_language: DEFAULT_APP_LANGUAGE.to_string(),
+            show_menu_bar: DEFAULT_SHOW_MENU_BAR,
         }
     }
 }
@@ -271,6 +275,11 @@ impl AppConfig {
                 config.app_language = s.to_string();
             }
         }
+        if let Some(val) = store.get("show_menu_bar") {
+            if let Some(b) = val.as_bool() {
+                config.show_menu_bar = b;
+            }
+        }
 
         Ok(config)
     }
@@ -302,6 +311,7 @@ impl AppConfig {
         store.set("global_hotkey", serde_json::json!(self.global_hotkey));
         store.set("close_to_tray", serde_json::json!(self.close_to_tray));
         store.set("app_language", serde_json::json!(self.app_language));
+        store.set("show_menu_bar", serde_json::json!(self.show_menu_bar));
 
         store
             .save()

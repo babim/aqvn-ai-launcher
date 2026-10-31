@@ -3,7 +3,7 @@
 use aqvn_workspace_lib::config::{
     AppConfig, ConfigWatcher, DEFAULT_ALLOWED_PATHS, DEFAULT_APP_LANGUAGE, DEFAULT_CLOSE_TO_TRAY,
     DEFAULT_GLOBAL_HOTKEY, DEFAULT_RFC_ENABLED, DEFAULT_RFC_PORT, DEFAULT_SERVER_URL,
-    DEFAULT_SSH_PORT, STORE_FILENAME,
+    DEFAULT_SHOW_MENU_BAR, DEFAULT_SSH_PORT, STORE_FILENAME,
 };
 use tauri::Manager;
 
@@ -37,6 +37,8 @@ fn default_config_matches_contract_requirements() {
     const { assert!(DEFAULT_CLOSE_TO_TRAY) };
     assert_eq!(conf.app_language, DEFAULT_APP_LANGUAGE);
     assert_eq!(DEFAULT_APP_LANGUAGE, "vi");
+    assert!(!conf.show_menu_bar);
+    const { assert!(!DEFAULT_SHOW_MENU_BAR) };
 
     assert!(!conf.gateway_id.is_empty());
     assert_eq!(
@@ -87,6 +89,7 @@ fn config_json_serde_roundtrip() {
         global_hotkey: "Alt+Space".to_string(),
         close_to_tray: false,
         app_language: "en".to_string(),
+        show_menu_bar: true,
     };
 
     let json = serde_json::to_string(&conf).expect("serialize config");
@@ -126,6 +129,7 @@ fn test_store_persistence_roundtrip() {
         connector_enabled: false,
         scope_files: false,
         close_to_tray: false,
+        show_menu_bar: true,
         ..Default::default()
     };
 
@@ -146,6 +150,7 @@ fn test_store_persistence_roundtrip() {
     assert_eq!(json["scope_files"], false);
     assert_eq!(json["scope_exec"], true);
     assert_eq!(json["close_to_tray"], false);
+    assert_eq!(json["show_menu_bar"], true);
 
     // Load from store
     let loaded = AppConfig::load_from_store(app.handle()).expect("load from store");
@@ -161,6 +166,7 @@ fn test_store_persistence_roundtrip() {
     assert!(!loaded.scope_files);
     assert!(loaded.scope_exec);
     assert!(!loaded.close_to_tray);
+    assert!(loaded.show_menu_bar);
 
     // Clean up
     let _ = std::fs::remove_file(store_path);
@@ -191,6 +197,7 @@ fn load_from_file_applies_partial_settings() {
     assert!(loaded.scope_exec);
     assert!(loaded.scope_browser);
     assert!(loaded.scope_desktop);
+    assert!(!loaded.show_menu_bar);
 
     let _ = std::fs::remove_file(path);
 
@@ -212,6 +219,20 @@ fn load_from_file_applies_partial_settings() {
     assert!(!loaded2.scope_exec);
     assert!(loaded2.scope_browser);
     assert!(!loaded2.scope_desktop);
+    assert!(!loaded2.show_menu_bar);
 
     let _ = std::fs::remove_file(path2);
+
+    // Test partial settings with show_menu_bar true
+    let path3 = std::env::temp_dir().join(format!(
+        "aqvn-settings-menu-{}-{unique}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path3, r#"{"show_menu_bar": true}"#).expect("write settings fixture 3");
+
+    let loaded3 =
+        aqvn_workspace_lib::config::load_from_file(&path3).expect("settings file 3 must parse");
+    assert!(loaded3.show_menu_bar);
+
+    let _ = std::fs::remove_file(path3);
 }

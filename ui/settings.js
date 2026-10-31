@@ -24,6 +24,7 @@
     scope_desktop: true,
     global_hotkey: 'Alt+Space',
     close_to_tray: true,
+    show_menu_bar: false,
     app_language: 'vi'
   };
 
@@ -35,6 +36,7 @@
   // DOM Elements
   const appLanguageSelect = document.getElementById('app-language');
   const closeToTrayInput = document.getElementById('close-to-tray');
+  const showMenuBarInput = document.getElementById('show-menu-bar');
   const langToggleBtn = document.getElementById('lang-toggle-btn');
   const currentLangText = document.getElementById('current-lang-text');
   const serverUrlInput = document.getElementById('server-url');
@@ -73,6 +75,8 @@
       language_help: 'Chọn ngôn ngữ hiển thị cho giao diện cài đặt và tài liệu.',
       close_to_tray_label: 'Chạy ngầm ở khay hệ thống (Close to Tray)',
       close_to_tray_help: 'Tiếp tục chạy ngầm trong khay hệ thống khi đóng cửa sổ thay vì tắt hoàn toàn ứng dụng.',
+      show_menu_bar_label: 'Hiển thị thanh menu (Show Menu Bar)',
+      show_menu_bar_help: 'Hiển thị thanh menu native dưới thanh tiêu đề cửa sổ (áp dụng ngay; chuột phải context menu luôn khả dụng).',
       server_title: 'Cấu hình máy chủ',
       server_url_label: 'Địa chỉ máy chủ (Server URL)',
       server_url_help: 'Địa chỉ máy chủ làm việc từ xa (upstream workspace server).',
@@ -125,6 +129,8 @@
       language_help: 'Select interface language for settings and help documentation.',
       close_to_tray_label: 'Close to Tray (Keep running in background)',
       close_to_tray_help: 'Keep the app running in the system tray when closing the window instead of exiting completely.',
+      show_menu_bar_label: 'Show Menu Bar (Top Window Menu)',
+      show_menu_bar_help: 'Display the native menu bar under the title bar (hot-reloaded immediately; right-click context menu is always available).',
       server_title: 'Server Configuration',
       server_url_label: 'Server URL',
       server_url_help: 'Upstream workspace server endpoint.',
@@ -405,6 +411,12 @@
           closeToTray !== undefined ? Boolean(closeToTray) : DEFAULTS.close_to_tray;
       }
 
+      const showMenuBar = await store.get('show_menu_bar');
+      if (showMenuBarInput) {
+        showMenuBarInput.checked =
+          showMenuBar !== undefined ? Boolean(showMenuBar) : DEFAULTS.show_menu_bar;
+      }
+
       const appLanguage = await store.get('app_language');
       let savedLocalLang = null;
       try {
@@ -432,6 +444,7 @@
       if (workspacePathInput) workspacePathInput.value = DEFAULTS.workspace_path;
       if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
       if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
+      if (showMenuBarInput) showMenuBarInput.checked = DEFAULTS.show_menu_bar;
       let fallbackLang = DEFAULTS.app_language;
       try {
         fallbackLang = localStorage.getItem('aqvn_lang') || DEFAULTS.app_language;
@@ -516,6 +529,9 @@
       const closeToTray = closeToTrayInput ? closeToTrayInput.checked : DEFAULTS.close_to_tray;
       await store.set('close_to_tray', closeToTray);
 
+      const showMenuBar = showMenuBarInput ? showMenuBarInput.checked : DEFAULTS.show_menu_bar;
+      await store.set('show_menu_bar', showMenuBar);
+
       const appLanguage = appLanguageSelect ? appLanguageSelect.value : currentLang;
       await store.set('app_language', appLanguage);
 
@@ -560,6 +576,7 @@
     if (workspacePathInput) workspacePathInput.value = DEFAULTS.workspace_path;
     if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
     if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
+    if (showMenuBarInput) showMenuBarInput.checked = DEFAULTS.show_menu_bar;
     setLanguage(DEFAULTS.app_language);
     showStatus((SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi).reset_status, 'success');
   }

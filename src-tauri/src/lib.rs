@@ -123,6 +123,20 @@ pub fn run() {
                         .or_else(|| config::AppConfig::load_from_store(&poll_handle).ok());
                     let Some(next) = next else { continue };
                     if next != last {
+                        #[cfg(not(target_os = "android"))]
+                        if next.show_menu_bar != last.show_menu_bar {
+                            if let Some(main_win) = poll_handle.get_webview_window("main") {
+                                if next.show_menu_bar {
+                                    if let Ok(menu) =
+                                        app::context_menu::build_context_menu(&poll_handle)
+                                    {
+                                        let _ = main_win.set_menu(menu);
+                                    }
+                                } else {
+                                    let _ = main_win.remove_menu();
+                                }
+                            }
+                        }
                         last = next.clone();
                         connector::handlers::files::set_workspace_path(Some(&last.workspace_path));
                         poll_watcher.update(next);
@@ -142,7 +156,7 @@ pub fn run() {
                 app::links::configure_container_window(window_config, proxy_info.port);
 
             let nav_handle = app.handle().clone();
-            WebviewWindowBuilder::from_config(app.handle(), &container_config)?
+            let main_window = WebviewWindowBuilder::from_config(app.handle(), &container_config)?
                 .initialization_script(proxy::server::init_script(proxy_info.port))
                 .zoom_hotkeys_enabled(true)
                 .on_navigation(move |url| app::links::handle_navigation(&nav_handle, url))
@@ -151,6 +165,11 @@ pub fn run() {
                     let _ = window.set_title(&title);
                 })
                 .build()?;
+
+            #[cfg(not(target_os = "android"))]
+            if !initial_config.show_menu_bar {
+                let _ = main_window.remove_menu();
+            }
 
             #[cfg(not(target_os = "android"))]
             {

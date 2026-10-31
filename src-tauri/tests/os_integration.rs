@@ -342,3 +342,21 @@ fn test_about_window_helper_exists() {
         "ui/container.js must expose openAbout in bridgeApi"
     );
 }
+
+#[test]
+fn test_menu_bar_toggle_in_lib_rs() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib_rs.contains("remove_menu"),
+        "lib.rs must invoke remove_menu when show_menu_bar is false"
+    );
+    assert!(
+        lib_rs.contains("show_menu_bar"),
+        "lib.rs must check show_menu_bar on startup and in polling loop"
+    );
+    assert!(
+        lib_rs.contains("set_menu"),
+        "lib.rs must invoke set_menu when show_menu_bar is toggled on"
+    );
+}

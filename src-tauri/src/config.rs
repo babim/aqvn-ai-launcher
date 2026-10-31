@@ -29,6 +29,7 @@ pub const DEFAULT_GLOBAL_HOTKEY: &str = "Alt+Space";
 pub const DEFAULT_CLOSE_TO_TRAY: bool = true;
 pub const DEFAULT_APP_LANGUAGE: &str = "vi";
 pub const DEFAULT_SHOW_MENU_BAR: bool = false;
+pub const DEFAULT_TASK_CHIME_ENABLED: bool = true;
 pub const STORE_FILENAME: &str = "settings.json";
 
 /// Returns a stable, deterministic gateway identifier for this device/installation.
@@ -122,6 +123,8 @@ pub struct AppConfig {
     pub app_language: String,
     #[serde(default)]
     pub show_menu_bar: bool,
+    #[serde(default = "default_true")]
+    pub task_chime_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -152,6 +155,7 @@ impl Default for AppConfig {
             close_to_tray: DEFAULT_CLOSE_TO_TRAY,
             app_language: DEFAULT_APP_LANGUAGE.to_string(),
             show_menu_bar: DEFAULT_SHOW_MENU_BAR,
+            task_chime_enabled: DEFAULT_TASK_CHIME_ENABLED,
         }
     }
 }
@@ -280,6 +284,11 @@ impl AppConfig {
                 config.show_menu_bar = b;
             }
         }
+        if let Some(val) = store.get("task_chime_enabled") {
+            if let Some(b) = val.as_bool() {
+                config.task_chime_enabled = b;
+            }
+        }
 
         Ok(config)
     }
@@ -312,6 +321,10 @@ impl AppConfig {
         store.set("close_to_tray", serde_json::json!(self.close_to_tray));
         store.set("app_language", serde_json::json!(self.app_language));
         store.set("show_menu_bar", serde_json::json!(self.show_menu_bar));
+        store.set(
+            "task_chime_enabled",
+            serde_json::json!(self.task_chime_enabled),
+        );
 
         store
             .save()

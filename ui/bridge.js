@@ -60,6 +60,13 @@
           } catch (e) {}
           return ['https://a0.matmagoc.com'];
         }
+        if (key === 'task_chime_enabled') {
+          try {
+            const raw = localStorage.getItem('aqvn_task_chime_enabled');
+            if (raw !== null) return raw === 'true' || raw === true;
+          } catch (e) {}
+          return true;
+        }
       }
       return undefined;
     }
@@ -73,6 +80,9 @@
             localStorage.setItem('aqvn_server_url', String(value));
           } else if (key === 'server_profiles' && Array.isArray(value)) {
             localStorage.setItem('aqvn_server_profiles', JSON.stringify(value));
+          }
+          if (key === 'task_chime_enabled') {
+            localStorage.setItem('aqvn_task_chime_enabled', String(value));
           }
         } catch (e) {}
       }

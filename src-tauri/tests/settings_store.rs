@@ -3,7 +3,7 @@
 use aqvn_workspace_lib::config::{
     AppConfig, ConfigWatcher, DEFAULT_ALLOWED_PATHS, DEFAULT_APP_LANGUAGE, DEFAULT_CLOSE_TO_TRAY,
     DEFAULT_GLOBAL_HOTKEY, DEFAULT_RFC_ENABLED, DEFAULT_RFC_PORT, DEFAULT_SERVER_URL,
-    DEFAULT_SHOW_MENU_BAR, DEFAULT_SSH_PORT, STORE_FILENAME,
+    DEFAULT_SHOW_MENU_BAR, DEFAULT_SSH_PORT, DEFAULT_TASK_CHIME_ENABLED, STORE_FILENAME,
 };
 use tauri::Manager;
 
@@ -39,6 +39,8 @@ fn default_config_matches_contract_requirements() {
     assert_eq!(DEFAULT_APP_LANGUAGE, "vi");
     assert!(!conf.show_menu_bar);
     const { assert!(!DEFAULT_SHOW_MENU_BAR) };
+    assert!(conf.task_chime_enabled);
+    const { assert!(DEFAULT_TASK_CHIME_ENABLED) };
 
     assert!(!conf.gateway_id.is_empty());
     assert_eq!(
@@ -90,6 +92,7 @@ fn config_json_serde_roundtrip() {
         close_to_tray: false,
         app_language: "en".to_string(),
         show_menu_bar: true,
+        task_chime_enabled: false,
     };
 
     let json = serde_json::to_string(&conf).expect("serialize config");
@@ -198,6 +201,7 @@ fn load_from_file_applies_partial_settings() {
     assert!(loaded.scope_browser);
     assert!(loaded.scope_desktop);
     assert!(!loaded.show_menu_bar);
+    assert!(loaded.task_chime_enabled);
 
     let _ = std::fs::remove_file(path);
 
@@ -235,4 +239,17 @@ fn load_from_file_applies_partial_settings() {
     assert!(loaded3.show_menu_bar);
 
     let _ = std::fs::remove_file(path3);
+
+    // Test partial settings with task_chime_enabled false
+    let path4 = std::env::temp_dir().join(format!(
+        "aqvn-settings-chime-{}-{unique}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path4, r#"{"task_chime_enabled": false}"#).expect("write settings fixture 4");
+
+    let loaded4 =
+        aqvn_workspace_lib::config::load_from_file(&path4).expect("settings file 4 must parse");
+    assert!(!loaded4.task_chime_enabled);
+
+    let _ = std::fs::remove_file(path4);
 }

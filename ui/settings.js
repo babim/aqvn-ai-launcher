@@ -25,6 +25,7 @@
     global_hotkey: 'Alt+Space',
     close_to_tray: true,
     show_menu_bar: false,
+    task_chime_enabled: true,
     app_language: 'vi'
   };
 
@@ -37,6 +38,7 @@
   const appLanguageSelect = document.getElementById('app-language');
   const closeToTrayInput = document.getElementById('close-to-tray');
   const showMenuBarInput = document.getElementById('show-menu-bar');
+  const taskChimeEnabledInput = document.getElementById('task-chime-enabled');
   const langToggleBtn = document.getElementById('lang-toggle-btn');
   const currentLangText = document.getElementById('current-lang-text');
   const serverUrlInput = document.getElementById('server-url');
@@ -77,6 +79,8 @@
       close_to_tray_help: 'Tiếp tục chạy ngầm trong khay hệ thống khi đóng cửa sổ thay vì tắt hoàn toàn ứng dụng.',
       show_menu_bar_label: 'Hiển thị thanh menu (Show Menu Bar)',
       show_menu_bar_help: 'Hiển thị thanh menu native dưới thanh tiêu đề cửa sổ (áp dụng ngay; chuột phải context menu luôn khả dụng).',
+      task_chime_enabled_label: 'Âm báo hoàn thành tác vụ (Task Completion Sound)',
+      task_chime_enabled_help: 'Phát âm thanh chuông báo khi trợ lý hoàn thành câu trả lời.',
       server_title: 'Cấu hình máy chủ',
       server_url_label: 'Địa chỉ máy chủ (Server URL)',
       server_url_help: 'Địa chỉ máy chủ làm việc từ xa (upstream workspace server).',
@@ -131,6 +135,8 @@
       close_to_tray_help: 'Keep the app running in the system tray when closing the window instead of exiting completely.',
       show_menu_bar_label: 'Show Menu Bar (Top Window Menu)',
       show_menu_bar_help: 'Display the native menu bar under the title bar (hot-reloaded immediately; right-click context menu is always available).',
+      task_chime_enabled_label: 'Task Completion Sound (Play Chime)',
+      task_chime_enabled_help: 'Play an audible synthesized chime when the assistant finishes responding.',
       server_title: 'Server Configuration',
       server_url_label: 'Server URL',
       server_url_help: 'Upstream workspace server endpoint.',
@@ -417,6 +423,12 @@
           showMenuBar !== undefined ? Boolean(showMenuBar) : DEFAULTS.show_menu_bar;
       }
 
+      const taskChimeEnabled = await store.get('task_chime_enabled');
+      if (taskChimeEnabledInput) {
+        taskChimeEnabledInput.checked =
+          taskChimeEnabled !== undefined ? Boolean(taskChimeEnabled) : DEFAULTS.task_chime_enabled;
+      }
+
       const appLanguage = await store.get('app_language');
       let savedLocalLang = null;
       try {
@@ -445,6 +457,7 @@
       if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
       if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
       if (showMenuBarInput) showMenuBarInput.checked = DEFAULTS.show_menu_bar;
+      if (taskChimeEnabledInput) taskChimeEnabledInput.checked = DEFAULTS.task_chime_enabled;
       let fallbackLang = DEFAULTS.app_language;
       try {
         fallbackLang = localStorage.getItem('aqvn_lang') || DEFAULTS.app_language;
@@ -532,6 +545,11 @@
       const showMenuBar = showMenuBarInput ? showMenuBarInput.checked : DEFAULTS.show_menu_bar;
       await store.set('show_menu_bar', showMenuBar);
 
+      const taskChimeEnabled = taskChimeEnabledInput
+        ? taskChimeEnabledInput.checked
+        : DEFAULTS.task_chime_enabled;
+      await store.set('task_chime_enabled', taskChimeEnabled);
+
       const appLanguage = appLanguageSelect ? appLanguageSelect.value : currentLang;
       await store.set('app_language', appLanguage);
 
@@ -544,6 +562,7 @@
         localStorage.setItem('aqvn_server_url', serverUrl);
         localStorage.setItem('aqvn_server_profiles', JSON.stringify(serverProfiles));
         localStorage.setItem('aqvn_global_hotkey', globalHotkey || DEFAULTS.global_hotkey);
+        localStorage.setItem('aqvn_task_chime_enabled', String(taskChimeEnabled));
         localStorage.setItem('aqvn_lang', appLanguage);
       } catch (e) {}
 
@@ -577,6 +596,7 @@
     if (globalHotkeyInput) globalHotkeyInput.value = DEFAULTS.global_hotkey;
     if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
     if (showMenuBarInput) showMenuBarInput.checked = DEFAULTS.show_menu_bar;
+    if (taskChimeEnabledInput) taskChimeEnabledInput.checked = DEFAULTS.task_chime_enabled;
     setLanguage(DEFAULTS.app_language);
     showStatus((SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi).reset_status, 'success');
   }

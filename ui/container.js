@@ -69,6 +69,105 @@
     return invokeIpc('set_tray_busy', { busy: Boolean(busy) });
   }
 
+  var TASK_CHIME_KEY = 'aqvn_task_chime_enabled';
+
+  function isTaskChimeEnabled() {
+    if (state.taskChimeEnabled !== undefined) {
+      return Boolean(state.taskChimeEnabled);
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        if (window.__AQVN_TASK_CHIME_ENABLED__ !== undefined) {
+          return Boolean(window.__AQVN_TASK_CHIME_ENABLED__);
+        }
+        if (window.localStorage) {
+          var val = window.localStorage.getItem(TASK_CHIME_KEY);
+          if (val !== null) {
+            return val === 'true' || val === true;
+          }
+        }
+      }
+    } catch (e) {}
+    return true;
+  }
+
+  function setTaskChimeEnabled(enabled) {
+    state.taskChimeEnabled = Boolean(enabled);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(TASK_CHIME_KEY, String(state.taskChimeEnabled));
+      }
+    } catch (e) {}
+    return state.taskChimeEnabled;
+  }
+
+  function playTaskChime() {
+    if (!isTaskChimeEnabled()) {
+      return null;
+    }
+    try {
+      var AudioCtx =
+        (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) ||
+        (typeof globalThis !== 'undefined' && (globalThis.AudioContext || globalThis.webkitAudioContext));
+      if (!AudioCtx) {
+        return null;
+      }
+
+      var ctx = new AudioCtx();
+      var now = (typeof ctx.currentTime === 'number') ? ctx.currentTime : 0;
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+
+      osc.type = 'sine';
+      if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.setValueAtTime(880, now + 0.1);
+      }
+
+      if (gain.gain && typeof gain.gain.setValueAtTime === 'function') {
+        gain.gain.setValueAtTime(0.1, now);
+        if (typeof gain.gain.exponentialRampToValueAtTime === 'function') {
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        } else if (typeof gain.gain.linearRampToValueAtTime === 'function') {
+          gain.gain.linearRampToValueAtTime(0.001, now + 0.2);
+        }
+      }
+
+      if (typeof osc.connect === 'function') {
+        osc.connect(gain);
+      }
+      if (gain && typeof gain.connect === 'function' && ctx.destination) {
+        gain.connect(ctx.destination);
+      }
+
+      if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+        ctx.resume().catch(function () {});
+      }
+
+      if (typeof osc.start === 'function') {
+        osc.start(now);
+      }
+      if (typeof osc.stop === 'function') {
+        osc.stop(now + 0.2);
+      }
+
+      setTimeout(function () {
+        try {
+          if (typeof ctx.close === 'function') {
+            ctx.close();
+          }
+        } catch (e) {}
+      }, 300);
+
+      return { ctx: ctx, osc: osc, gain: gain };
+    } catch (e) {
+      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn('[AQVN Container] Audio chime synthesis failed:', e);
+      }
+      return null;
+    }
+  }
+
   function setTaskState(busy, summary) {
     var wasBusy = state.busy;
     state.busy = Boolean(busy);
@@ -80,6 +179,9 @@
     if (state.busy !== wasBusy) {
       updateTrayBusy(state.busy);
       if (wasBusy && !state.busy) {
+        if (isTaskChimeEnabled()) {
+          playTaskChime();
+        }
         if (
           typeof document !== 'undefined' &&
           (document.hidden === true || (typeof document.hasFocus === 'function' && !document.hasFocus()))
@@ -722,11 +824,15 @@
     zoomOut: zoomOut,
     resetZoom: resetZoom,
     hardRefresh: hardRefresh,
+    playTaskChime: playTaskChime,
+    isTaskChimeEnabled: isTaskChimeEnabled,
+    setTaskChimeEnabled: setTaskChimeEnabled,
     getState: function () {
       return {
         busy: state.busy,
         lastProgress: state.lastProgress,
-        lastSummary: state.lastSummary
+        lastSummary: state.lastSummary,
+        taskChimeEnabled: isTaskChimeEnabled()
       };
     }
   };

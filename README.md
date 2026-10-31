@@ -19,6 +19,12 @@ AQVN Workspace combines three unified components into a single native binary:
    - **Remote Execution (`connector_exec_op`)**: Local PTY terminal session execution via `portable-pty`.
    - **Host Browser Automation (`connector_browser_op`)**: Chrome DevTools Protocol (CDP port 9222) bridge for web navigation, element clicks, typing, and screenshots.
    - **Host Desktop Control (`connector_computer_use_op`)**: Native screen capture and mouse/keyboard event injection.
+   - **A0 Workspace Remote Tools & Control**: Full compatibility with upstream workspace assistants:
+     - **Handshake Authentication**: Socket.IO namespace connect packet (`40/ws,`) carries explicit auth metadata (`plugins/_a0_connector/ws_connector`), activating remote tool definitions in agent system prompts.
+     - **Normalized Scopes & Write Permissions**: Advertises standard boolean scopes (`files`, `file_write`, `code_execution`, `browser`, `computer_use`) and `write_enabled: true` for remote editing and shell execution.
+     - **Operation Tracking (`op_id`)**: Dual-key propagation of `id` and `op_id` across all result envelopes (`connector_*_result`), eliminating server timeouts.
+     - **Configurable Workspace Sandbox**: Configurable `workspace_path` in Settings with dynamic directory tree snapshots (`connector_remote_tree_update`) sent to the agent.
+     - **Persistent Device Gateway ID**: Deterministic machine-bound gateway identifier prevents `multiple_hosts` safety lockouts across reconnects.
    - **Security Scopes**: Independent user controls to grant/revoke permissions for files, terminal, browser, and desktop.
 3. **Backend RFC Host Bridge (Legacy/Direct)**: High-performance HTTP daemon (`POST /api/rfc` on port `55080`) and embedded SSH terminal server (port `55022`, powered by `russh`) for direct local network control.
 

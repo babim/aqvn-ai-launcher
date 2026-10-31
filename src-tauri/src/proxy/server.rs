@@ -205,6 +205,7 @@ pub async fn watch_target(watcher: ConfigWatcher, state: ProxyState) {
                     "Bridge proxy: retargeted to {} (cookie jar reset)",
                     upstream.target().origin()
                 );
+                state.cache().clear().await;
                 state.replace(upstream).await;
                 current = config.server_url;
             }

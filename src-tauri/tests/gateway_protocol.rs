@@ -199,3 +199,48 @@ fn test_persistent_gateway_id() {
     let loaded: AppConfig = serde_json::from_value(minimal_json).expect("deserialize partial");
     assert_eq!(loaded.gateway_id, id1);
 }
+
+#[test]
+fn test_scopes_and_write_enabled_metadata() {
+    let scopes = vec![
+        SCOPE_FILES.to_string(),
+        SCOPE_EXEC.to_string(),
+        SCOPE_BROWSER.to_string(),
+        SCOPE_DESKTOP.to_string(),
+    ];
+    let hello = ConnectorHello::new("test-gw-id", "test-host", scopes);
+    let json_str = serde_json::to_string(&hello).expect("serialize hello");
+    let val: Value = serde_json::from_str(&json_str).expect("parse json");
+
+    // Scopes boolean map format matching Agent Zero requirements
+    let sc = &val["scopes"];
+    assert!(sc.is_object(), "scopes must be a boolean map");
+    assert_eq!(sc["files"], true);
+    assert_eq!(sc["file_write"], true);
+    assert_eq!(sc["code_execution"], true);
+    assert_eq!(sc["browser"], true);
+    assert_eq!(sc["computer_use"], true);
+
+    // remote_files carries write_enabled: true and mode: 'read_write'
+    let rf = &val["remote_files"];
+    assert!(rf.is_object(), "remote_files must be present");
+    assert_eq!(rf["supported"], true);
+    assert_eq!(rf["enabled"], true);
+    assert_eq!(rf["write_enabled"], true);
+    assert_eq!(rf["mode"], "read_write");
+
+    // Partial scopes: only browser enabled
+    let partial_hello =
+        ConnectorHello::new("test-gw-id", "test-host", vec![SCOPE_BROWSER.to_string()]);
+    let partial_val: Value =
+        serde_json::from_str(&serde_json::to_string(&partial_hello).unwrap()).unwrap();
+    assert_eq!(partial_val["scopes"]["files"], false);
+    assert_eq!(partial_val["scopes"]["file_write"], false);
+    assert_eq!(partial_val["scopes"]["code_execution"], false);
+    assert_eq!(partial_val["scopes"]["browser"], true);
+    assert_eq!(partial_val["scopes"]["computer_use"], false);
+
+    assert_eq!(partial_val["remote_files"]["enabled"], false);
+    assert_eq!(partial_val["remote_files"]["write_enabled"], false);
+    assert_eq!(partial_val["remote_files"]["mode"], "none");
+}

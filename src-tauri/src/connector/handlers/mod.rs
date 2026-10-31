@@ -12,7 +12,7 @@ use crate::connector::client::GatewayConfig;
 use crate::connector::protocol::{
     MSG_TYPE_BROWSER_OP, MSG_TYPE_BROWSER_OP_RESULT, MSG_TYPE_COMPUTER_USE_OP,
     MSG_TYPE_COMPUTER_USE_OP_RESULT, MSG_TYPE_EXEC_OP, MSG_TYPE_EXEC_OP_RESULT, MSG_TYPE_FILE_OP,
-    MSG_TYPE_FILE_OP_RESULT,
+    MSG_TYPE_FILE_OP_RESULT, MSG_TYPE_GATEWAY_CONTROL, MSG_TYPE_GATEWAY_CONTROL_RESULT,
 };
 use serde_json::Value;
 
@@ -35,6 +35,7 @@ pub async fn dispatch_message_scoped(
 
     let id = envelope
         .get("id")
+        .or_else(|| envelope.get("op_id"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
@@ -51,6 +52,46 @@ pub async fn dispatch_message_scoped(
             })
             .to_string(),
         ),
+        MSG_TYPE_GATEWAY_CONTROL | "gateway_control" => {
+            let op_id = envelope
+                .get("op_id")
+                .or_else(|| envelope.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(&id)
+                .to_string();
+
+            let mut scopes = serde_json::Map::new();
+            scopes.insert("files".to_string(), Value::Bool(config.scope_files));
+            scopes.insert("file_write".to_string(), Value::Bool(config.scope_files));
+            scopes.insert("code_execution".to_string(), Value::Bool(config.scope_exec));
+            scopes.insert("browser".to_string(), Value::Bool(config.scope_browser));
+            scopes.insert(
+                "computer_use".to_string(),
+                Value::Bool(config.scope_desktop),
+            );
+
+            let state = serde_json::json!({
+                "gateway_id": config.gateway_id,
+                "host_label": config.host_label,
+                "connected": true,
+                "master_enabled": config.enabled,
+                "scopes": Value::Object(scopes),
+            });
+
+            Some(
+                serde_json::json!({
+                    "type": MSG_TYPE_GATEWAY_CONTROL_RESULT,
+                    "op": MSG_TYPE_GATEWAY_CONTROL_RESULT,
+                    "id": id,
+                    "op_id": op_id,
+                    "ok": true,
+                    "success": true,
+                    "status": "ok",
+                    "state": state,
+                })
+                .to_string(),
+            )
+        }
         MSG_TYPE_FILE_OP | "file_op" => {
             if !config.scope_files {
                 return Some(

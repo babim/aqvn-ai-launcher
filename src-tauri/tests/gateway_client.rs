@@ -915,3 +915,188 @@ async fn test_namespace_connect_carries_auth_handlers() {
     handle.stop();
     let _ = join_handle.await;
 }
+
+#[tokio::test]
+async fn test_gateway_control_acknowledged() {
+    let (tx_event, rx_event) = tokio::sync::mpsc::channel::<String>(16);
+    let (tx_reply, mut rx_reply) = tokio::sync::mpsc::channel::<String>(16);
+    let rx_event = Arc::new(Mutex::new(rx_event));
+    let tx_reply = Arc::new(Mutex::new(tx_reply));
+
+    let router = Router::new().route(
+        "/socket.io/",
+        get({
+            let rx_event = Arc::clone(&rx_event);
+            let tx_reply = Arc::clone(&tx_reply);
+            move |ws: WebSocketUpgrade| {
+                let rx_event = Arc::clone(&rx_event);
+                let tx_reply = Arc::clone(&tx_reply);
+                async move {
+                    ws.on_upgrade(move |mut socket: WebSocket| async move {
+                        // 1. Send Engine.IO open packet
+                        let open_pkt = serde_json::json!({
+                            "sid": "mock-sio-ctrl-sid",
+                            "upgrades": [],
+                            "pingInterval": 25000,
+                            "pingTimeout": 20000
+                        });
+                        let _ = socket
+                            .send(axum::extract::ws::Message::Text(
+                                format!("0{open_pkt}").into(),
+                            ))
+                            .await;
+
+                        // 2. Wait for namespace /ws join packet
+                        while let Some(Ok(msg)) = socket.recv().await {
+                            if let axum::extract::ws::Message::Text(text) = msg {
+                                if text.starts_with("40/ws") {
+                                    let _ = socket
+                                        .send(axum::extract::ws::Message::Text(
+                                            "40/ws,{\"sid\":\"test-ctrl-sid\"}".into(),
+                                        ))
+                                        .await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 3. Receive connector_hello and reply with ack
+                        while let Some(Ok(msg)) = socket.recv().await {
+                            if let axum::extract::ws::Message::Text(text) = msg {
+                                if text.contains("connector_hello") {
+                                    let ack = format!(
+                                        "42/ws,[\"{MSG_TYPE_HELLO_ACK}\",{{\"status\":\"ok\"}}]"
+                                    );
+                                    let _ = socket
+                                        .send(axum::extract::ws::Message::Text(ack.into()))
+                                        .await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 4. Pump test events from rx_event and forward replies to tx_reply
+                        let mut rx_event_lock = rx_event.lock().await;
+                        while let Some(event_str) = rx_event_lock.recv().await {
+                            if socket
+                                .send(axum::extract::ws::Message::Text(event_str.into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                            // Wait for reply frame
+                            while let Some(Ok(msg)) = socket.recv().await {
+                                if let axum::extract::ws::Message::Text(reply_text) = msg {
+                                    if reply_text.starts_with("42") || reply_text.starts_with("43")
+                                    {
+                                        let tx = tx_reply.lock().await;
+                                        let _ = tx.send(reply_text.to_string()).await;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    })
+                }
+            }
+        }),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind listener");
+    let port = listener.local_addr().expect("port").port();
+    let server_task = tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+
+    let config = GatewayConfig {
+        enabled: true,
+        server_url: format!("http://127.0.0.1:{port}"),
+        gateway_id: "test-gw-ctrl-id".to_string(),
+        host_label: "AQVN-Test-Host".to_string(),
+        session_cookie: None,
+        scope_files: true,
+        scope_exec: true,
+        scope_browser: false,
+        scope_desktop: false,
+        ping_interval_secs: 25,
+        reconnect_delay_ms: 200,
+    };
+
+    let client = GatewayClient::new(config);
+    let (handle, join_handle) = client.start();
+
+    handle
+        .wait_for_handshake(Duration::from_secs(5))
+        .await
+        .expect("handshake");
+
+    // 1. Send connector_gateway_control request without ack id
+    let req = serde_json::json!({
+        "id": "req-ctrl-1",
+        "op_id": "op-ctrl-1",
+        "action": "status"
+    });
+    tx_event
+        .send(format!("42/ws,[\"connector_gateway_control\",{req}]"))
+        .await
+        .unwrap();
+
+    let reply = tokio::time::timeout(Duration::from_secs(3), rx_reply.recv())
+        .await
+        .expect("reply timeout")
+        .expect("reply recv");
+
+    assert!(
+        reply.starts_with("42/ws,[\"connector_gateway_control_result\""),
+        "expected connector_gateway_control_result, got: {reply}"
+    );
+
+    let stripped = reply.strip_prefix("42/ws,").expect("prefix");
+    let arr: Value = serde_json::from_str(stripped).expect("parse arr");
+    let payload = arr.get(1).expect("payload in arr");
+
+    assert_eq!(payload["ok"], true);
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["id"], "req-ctrl-1");
+    assert_eq!(payload["op_id"], "op-ctrl-1");
+    assert_eq!(payload["state"]["gateway_id"], "test-gw-ctrl-id");
+    assert_eq!(payload["state"]["connected"], true);
+    assert_eq!(payload["state"]["master_enabled"], true);
+    assert_eq!(payload["state"]["scopes"]["files"], true);
+    assert_eq!(payload["state"]["scopes"]["file_write"], true);
+    assert_eq!(payload["state"]["scopes"]["code_execution"], true);
+    assert_eq!(payload["state"]["scopes"]["browser"], false);
+    assert_eq!(payload["state"]["scopes"]["computer_use"], false);
+
+    // 2. Also send connector_gateway_control request WITH ack id 99
+    let req2 = serde_json::json!({
+        "id": "req-ctrl-2",
+        "action": "query"
+    });
+    tx_event
+        .send(format!("42/ws,99[\"connector_gateway_control\",{req2}]"))
+        .await
+        .unwrap();
+
+    let reply2 = tokio::time::timeout(Duration::from_secs(3), rx_reply.recv())
+        .await
+        .expect("reply2 timeout")
+        .expect("reply2 recv");
+
+    assert!(
+        reply2.starts_with("43/ws,99["),
+        "expected ack 43/ws,99, got: {reply2}"
+    );
+    let stripped2 = reply2.strip_prefix("43/ws,99").expect("prefix");
+    let arr2: Value = serde_json::from_str(stripped2).expect("parse arr2");
+    let payload2 = arr2.as_array().and_then(|a| a.first()).expect("payload2");
+    assert_eq!(payload2["ok"], true);
+    assert_eq!(payload2["id"], "req-ctrl-2");
+
+    handle.stop();
+    let _ = join_handle.await;
+    server_task.abort();
+}

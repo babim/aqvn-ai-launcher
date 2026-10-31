@@ -360,3 +360,80 @@ fn test_menu_bar_toggle_in_lib_rs() {
         "lib.rs must invoke set_menu when show_menu_bar is toggled on"
     );
 }
+
+#[test]
+fn test_tray_status_labels() {
+    // VAL-UX-003: Dynamic system tray status labels
+    // 1. Label formatters: active server URL and Gateway status
+    assert_eq!(
+        tray::format_server_url_label("https://a0.matmagoc.com"),
+        "Server: https://a0.matmagoc.com"
+    );
+    assert_eq!(
+        tray::format_server_url_label("http://localhost:3156"),
+        "Server: http://localhost:3156"
+    );
+    assert_eq!(
+        tray::format_server_label("https://a0.matmagoc.com"),
+        "Server: https://a0.matmagoc.com"
+    );
+    assert_eq!(
+        tray::format_server_status("https://a0.matmagoc.com"),
+        "Server: https://a0.matmagoc.com"
+    );
+
+    assert_eq!(
+        tray::format_gateway_status_label(true),
+        "Gateway: Connected"
+    );
+    assert_eq!(
+        tray::format_gateway_status_label(false),
+        "Gateway: Disconnected"
+    );
+    assert_eq!(tray::format_gateway_status(true), "Gateway: Connected");
+    assert_eq!(tray::format_gateway_status(false), "Gateway: Disconnected");
+
+    // 2. Constants for IDs
+    assert_eq!(tray::ID_SERVER_STATUS, "server_status");
+    assert_eq!(tray::ID_GATEWAY_STATUS, "gateway_status");
+
+    // 3. Dynamic status tracking helpers
+    tray::set_gateway_connected(true);
+    assert!(tray::is_gateway_connected());
+    tray::set_gateway_connected(false);
+    assert!(!tray::is_gateway_connected());
+
+    // 4. Verify helper wiring in tray.rs and lib.rs
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let tray_rs = std::fs::read_to_string(manifest_dir.join("src/app/tray.rs")).unwrap();
+    assert!(
+        tray_rs.contains("format_server_url_label"),
+        "tray.rs must define format_server_url_label"
+    );
+    assert!(
+        tray_rs.contains("format_gateway_status_label"),
+        "tray.rs must define format_gateway_status_label"
+    );
+    assert!(
+        tray_rs.contains("update_tray_status"),
+        "tray.rs must expose dynamic tray status helper"
+    );
+    assert!(
+        tray_rs.contains("ID_SERVER_STATUS") || tray_rs.contains("server_status"),
+        "tray.rs must include server status menu item"
+    );
+    assert!(
+        tray_rs.contains("ID_GATEWAY_STATUS") || tray_rs.contains("gateway_status"),
+        "tray.rs must include gateway status menu item"
+    );
+    assert!(
+        tray_rs.contains("build_tray_menu"),
+        "tray.rs must provide build_tray_menu helper"
+    );
+
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib_rs.contains("update_tray_status"),
+        "src/lib.rs must wire dynamic update_tray_status in polling loop"
+    );
+}

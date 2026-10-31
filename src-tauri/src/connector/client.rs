@@ -274,6 +274,8 @@ impl GatewayClient {
 
             connected.store(false, Ordering::SeqCst);
             let _ = handshake_tx.send(false);
+            #[cfg(not(target_os = "android"))]
+            crate::app::tray::set_gateway_connected(false);
 
             if *shutdown_rx.borrow() {
                 break;
@@ -376,6 +378,8 @@ impl GatewayClient {
         };
 
         connected.store(true, Ordering::SeqCst);
+        #[cfg(not(target_os = "android"))]
+        crate::app::tray::set_gateway_connected(true);
 
         let mut is_socketio = !is_legacy;
         let mut active_namespace: Option<String> = if is_socketio {

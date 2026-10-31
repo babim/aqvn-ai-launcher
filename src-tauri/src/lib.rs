@@ -115,6 +115,8 @@ pub fn run() {
             let store_file = config::store_path(&poll_handle).ok();
             tauri::async_runtime::spawn(async move {
                 let mut last = poll_initial;
+                #[cfg(not(target_os = "android"))]
+                let mut last_gateway_connected = app::tray::is_gateway_connected();
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     let next = store_file
@@ -122,6 +124,7 @@ pub fn run() {
                         .and_then(config::load_from_file)
                         .or_else(|| config::AppConfig::load_from_store(&poll_handle).ok());
                     let Some(next) = next else { continue };
+                    let server_url_changed = next.server_url != last.server_url;
                     if next != last {
                         #[cfg(not(target_os = "android"))]
                         if next.show_menu_bar != last.show_menu_bar {
@@ -140,6 +143,19 @@ pub fn run() {
                         last = next.clone();
                         connector::handlers::files::set_workspace_path(Some(&last.workspace_path));
                         poll_watcher.update(next);
+                    }
+
+                    #[cfg(not(target_os = "android"))]
+                    {
+                        let current_gw = app::tray::is_gateway_connected();
+                        if server_url_changed || current_gw != last_gateway_connected {
+                            last_gateway_connected = current_gw;
+                            let _ = app::tray::update_tray_status(
+                                &poll_handle,
+                                &last.server_url,
+                                current_gw,
+                            );
+                        }
                     }
                 }
             });

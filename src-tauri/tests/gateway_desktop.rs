@@ -22,8 +22,11 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
 
+static TEST_GATEWAY_MUTEX: Mutex<()> = Mutex::const_new(());
+
 #[tokio::test]
 async fn test_gateway_computer_use() {
+    let _lock = TEST_GATEWAY_MUTEX.lock().await;
     // ------------------------------------------------------------- 1. Screen capture action
     let capture_op = json!({
         "type": MSG_TYPE_COMPUTER_USE_OP,
@@ -393,6 +396,7 @@ async fn test_gateway_computer_use() {
 
 #[tokio::test]
 async fn test_screenshot_scaling_and_compression() {
+    let _lock = TEST_GATEWAY_MUTEX.lock().await;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use base64::Engine;
     use std::io::Cursor;
@@ -514,4 +518,164 @@ async fn test_screenshot_scaling_and_compression() {
     assert_eq!(act_reply["data"]["height"], 150);
 
     set_test_screen_capture(None);
+}
+
+#[tokio::test]
+async fn test_windows_sendinput_compiles_or_simulates() {
+    let _lock = TEST_GATEWAY_MUTEX.lock().await;
+    use aqvn_workspace_lib::connector::handlers::computer_use::{
+        clear_injected_events, clear_last_windows_inputs, get_last_windows_inputs,
+        handle_computer_use_op, normalize_screen_coordinates, simulate_windows_sendinput,
+        WIN_KEYEVENTF_KEYUP, WIN_KEYEVENTF_UNICODE, WIN_MOUSEEVENTF_ABSOLUTE,
+        WIN_MOUSEEVENTF_HWHEEL, WIN_MOUSEEVENTF_LEFTDOWN, WIN_MOUSEEVENTF_LEFTUP,
+        WIN_MOUSEEVENTF_MOVE, WIN_MOUSEEVENTF_RIGHTDOWN, WIN_MOUSEEVENTF_RIGHTUP,
+        WIN_MOUSEEVENTF_WHEEL, WIN_VK_ESCAPE, WIN_VK_RETURN,
+    };
+
+    clear_injected_events();
+    clear_last_windows_inputs();
+
+    // 1. Coordinate normalization (screen -> 0..65535)
+    let (nx, ny) = normalize_screen_coordinates(960.0, 540.0, 1920.0, 1080.0);
+    assert_eq!(nx, 32768);
+    assert_eq!(ny, 32768);
+
+    let (nx_zero, ny_zero) = normalize_screen_coordinates(0.0, 0.0, 1920.0, 1080.0);
+    assert_eq!(nx_zero, 0);
+    assert_eq!(ny_zero, 0);
+
+    let (nx_max, ny_max) = normalize_screen_coordinates(1920.0, 1080.0, 1920.0, 1080.0);
+    assert_eq!(nx_max, 65535);
+    assert_eq!(ny_max, 65535);
+
+    // 2. Mouse move action dispatch & Windows SendInput generation
+    let move_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "test-win-move",
+        "action": "mouse_move",
+        "x": 960.0,
+        "y": 540.0
+    });
+    let reply_str = handle_computer_use_op(&move_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("valid json reply");
+    assert_eq!(reply["success"], true);
+
+    let win_inputs = get_last_windows_inputs();
+    assert!(!win_inputs.is_empty(), "must record windows inputs");
+    let last_move = win_inputs.last().unwrap();
+    assert_eq!(last_move.input_type, "mouse");
+    assert_eq!(
+        last_move.flags & (WIN_MOUSEEVENTF_MOVE | WIN_MOUSEEVENTF_ABSOLUTE),
+        WIN_MOUSEEVENTF_MOVE | WIN_MOUSEEVENTF_ABSOLUTE
+    );
+    assert_eq!(last_move.dx, 32768);
+    assert_eq!(last_move.dy, 32768);
+
+    // 3. Mouse click (left and right)
+    clear_last_windows_inputs();
+    let click_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "test-win-click",
+        "action": "click",
+        "button": "left"
+    });
+    let reply_str = handle_computer_use_op(&click_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("valid reply");
+    assert_eq!(reply["success"], true);
+
+    let win_clicks = get_last_windows_inputs();
+    assert_eq!(win_clicks.len(), 2, "left click produces down + up");
+    assert_eq!(win_clicks[0].flags, WIN_MOUSEEVENTF_LEFTDOWN);
+    assert_eq!(win_clicks[1].flags, WIN_MOUSEEVENTF_LEFTUP);
+
+    // Right double click
+    clear_last_windows_inputs();
+    let rclick_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "test-win-rclick",
+        "action": "double_click",
+        "button": "right"
+    });
+    let reply_str = handle_computer_use_op(&rclick_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("valid reply");
+    assert_eq!(reply["success"], true);
+
+    let win_rclicks = get_last_windows_inputs();
+    assert_eq!(win_rclicks.len(), 4, "right double click produces 4 events");
+    assert_eq!(win_rclicks[0].flags, WIN_MOUSEEVENTF_RIGHTDOWN);
+    assert_eq!(win_rclicks[1].flags, WIN_MOUSEEVENTF_RIGHTUP);
+    assert_eq!(win_rclicks[2].flags, WIN_MOUSEEVENTF_RIGHTDOWN);
+    assert_eq!(win_rclicks[3].flags, WIN_MOUSEEVENTF_RIGHTUP);
+
+    // 4. Mouse wheel scroll (vertical & horizontal)
+    clear_last_windows_inputs();
+    let scroll_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "test-win-scroll",
+        "action": "scroll",
+        "delta_x": 1.0,
+        "delta_y": -2.0
+    });
+    let reply_str = handle_computer_use_op(&scroll_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("valid reply");
+    assert_eq!(reply["success"], true);
+
+    let win_scrolls = get_last_windows_inputs();
+    assert_eq!(win_scrolls.len(), 2, "vertical + horizontal scroll events");
+    let vert_scroll = &win_scrolls[0];
+    assert_eq!(vert_scroll.flags, WIN_MOUSEEVENTF_WHEEL);
+    assert_eq!(vert_scroll.mouse_data as i32, -240); // -2.0 * 120
+    let horiz_scroll = &win_scrolls[1];
+    assert_eq!(horiz_scroll.flags, WIN_MOUSEEVENTF_HWHEEL);
+    assert_eq!(horiz_scroll.mouse_data as i32, 120); // 1.0 * 120
+
+    // 5. Text typing via SendInput KEYEVENTF_UNICODE
+    clear_last_windows_inputs();
+    let type_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "test-win-type",
+        "action": "type",
+        "text": "AQVN"
+    });
+    let reply_str = handle_computer_use_op(&type_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("valid reply");
+    assert_eq!(reply["success"], true);
+
+    let win_types = get_last_windows_inputs();
+    assert_eq!(win_types.len(), 8, "4 chars * 2 (down + up)");
+    assert_eq!(win_types[0].scan, 'A' as u16);
+    assert_eq!(win_types[0].flags, WIN_KEYEVENTF_UNICODE);
+    assert_eq!(win_types[1].scan, 'A' as u16);
+    assert_eq!(
+        win_types[1].flags,
+        WIN_KEYEVENTF_UNICODE | WIN_KEYEVENTF_KEYUP
+    );
+
+    // 6. Key press (Virtual Key mapping: Return, Escape)
+    clear_last_windows_inputs();
+    let key_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "test-win-key",
+        "action": "key",
+        "key": "Return"
+    });
+    let reply_str = handle_computer_use_op(&key_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("valid reply");
+    assert_eq!(reply["success"], true);
+
+    let win_keys = get_last_windows_inputs();
+    assert_eq!(win_keys.len(), 2);
+    assert_eq!(win_keys[0].vk, WIN_VK_RETURN);
+    assert_eq!(win_keys[0].flags, 0);
+    assert_eq!(win_keys[1].vk, WIN_VK_RETURN);
+    assert_eq!(win_keys[1].flags, WIN_KEYEVENTF_KEYUP);
+
+    // 7. Direct simulate_windows_sendinput verification
+    let sim_esc = simulate_windows_sendinput("key", &json!({"key": "Escape"})).expect("sim esc");
+    assert_eq!(sim_esc.len(), 2);
+    assert_eq!(sim_esc[0].vk, WIN_VK_ESCAPE);
+
+    let sim_hk =
+        simulate_windows_sendinput("hotkey", &json!({"keys": ["Ctrl", "C"]})).expect("sim hotkey");
+    assert_eq!(sim_hk.len(), 4, "Ctrl down, C down, C up, Ctrl up");
 }

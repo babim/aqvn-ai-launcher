@@ -32,6 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dedicated About Modal Dialog**:
   - Dedicated `About AQVN Workspace` modal dialog (`ui/about.html`) showing system info, runtime engine, gateway connector status, and copyright.
   - Added About menu item in both System Tray menu and native context menu.
+- **Gateway Automation & Reliability Upgrades**:
+  - Auto-launch local Chrome/Edge on port 9222 when browser automation encounters a closed CDP port.
+  - PTY session reaper automatically terminating sessions inactive for over 30 minutes, with optional ANSI sequence stripping.
+  - Streamed file reading using `File::seek` offsets, preventing full-file heap allocations for large files.
+  - Resolution scaling and downsampling for Computer Use screenshots prior to base64 encoding.
+  - Bounded in-memory `AssetCache` capped at 32MB with LRU eviction of oldest entries, plus automatic cache purge on server retarget.
+  - Ephemeral test proxy port binding (port `0`) eliminating test collisions on fixed port `55088`.
+- **Desktop UX & Notification Polish**:
+  - Unfocused window task completion alerts triggering when `!document.hasFocus()` or when window is hidden.
+  - Synthesized Web Audio dual-frequency task completion chime with toggle in General Settings (`task_chime_enabled`).
+  - Dynamic System Tray status menu items displaying Gateway connection state and active server URL.
+- **Cross-Platform Release Enhancements**:
+  - Added macOS runner job on `macos-14` building `.dmg` and `.app` bundles in `.github/workflows/release.yml`.
+  - Configured 60-minute job timeouts across all CI runner jobs.
 
 ### Changed
 - Refactored outbound connector WebSocket to use Socket.IO protocol framing (`/socket.io/?EIO=4&transport=websocket`).

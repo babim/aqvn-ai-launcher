@@ -235,8 +235,7 @@ pub async fn get_page_targets(cdp_url: &str) -> Result<Vec<Value>, String> {
     Ok(targets)
 }
 
-/// Retrieves or creates an active page target's WebSocket debugger URL.
-pub async fn get_or_create_page_ws_url(
+async fn query_or_create_page_target(
     cdp_url: &str,
     fallback_url: Option<&str>,
 ) -> Result<String, String> {
@@ -282,6 +281,42 @@ pub async fn get_or_create_page_ws_url(
         .ok_or_else(|| "CDP new target response missing webSocketDebuggerUrl".to_string())?;
 
     Ok(resolve_ws_url(ws_raw, cdp_url))
+}
+
+/// Retrieves or creates an active page target's WebSocket debugger URL.
+///
+/// If connection to CDP port 9222 fails, attempts automatic local browser launch
+/// and retries target discovery transparently.
+pub async fn get_or_create_page_ws_url(
+    cdp_url: &str,
+    fallback_url: Option<&str>,
+) -> Result<String, String> {
+    match query_or_create_page_target(cdp_url, fallback_url).await {
+        Ok(ws_url) => Ok(ws_url),
+        Err(initial_err) => {
+            let port = url::Url::parse(cdp_url)
+                .ok()
+                .and_then(|u| u.port())
+                .unwrap_or(DEFAULT_CDP_PORT);
+
+            if port == DEFAULT_CDP_PORT {
+                if let Ok(_launch) =
+                    launch_browser_with_remote_debugging(port, fallback_url, None, None)
+                {
+                    // Retries target discovery after short sleep when auto-launch succeeds
+                    for _ in 0..10 {
+                        tokio::time::sleep(Duration::from_millis(150)).await;
+                        if let Ok(ws_url) = query_or_create_page_target(cdp_url, fallback_url).await
+                        {
+                            return Ok(ws_url);
+                        }
+                    }
+                }
+            }
+
+            Err(initial_err)
+        }
+    }
 }
 
 /// Sends a JSON-RPC command over WebSocket to CDP and waits for the matching result.

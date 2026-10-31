@@ -528,3 +528,158 @@ async fn test_gateway_client_browser_op_dispatch() {
     handle.stop();
     set_test_cdp_endpoint(None);
 }
+
+#[tokio::test]
+async fn test_browser_auto_launch_on_demand() {
+    let _guard = TEST_LOCK.lock().await;
+
+    // Ensure test endpoints are clean and points to offline port 9222
+    set_test_cdp_endpoint(None);
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp_dir = std::env::temp_dir();
+    let marker_path = temp_dir.join(format!("mock-cdp-auto-launch-{unique}.marker"));
+    let bin_path = temp_dir.join(format!("mock-browser-auto-{unique}.sh"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script = format!(
+            "#!/bin/sh\necho \"launched\" > {}\nexit 0\n",
+            marker_path.display()
+        );
+        std::fs::write(&bin_path, script).expect("write mock script");
+        let mut perms = std::fs::metadata(&bin_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&bin_path, perms).expect("set executable perms");
+    }
+
+    #[cfg(not(unix))]
+    {
+        let script = format!(
+            "@echo off\necho launched > {}\nexit 0\n",
+            marker_path.display()
+        );
+        std::fs::write(&bin_path, script).expect("write mock script");
+    }
+
+    set_test_browser_binary(Some(bin_path.clone()));
+
+    // Spawn background task to detect auto-launch and bind mock CDP server on port 9222
+    let marker_check = marker_path.clone();
+    let server_task = tokio::spawn(async move {
+        let mut detected = false;
+        for _ in 0..100 {
+            if marker_check.exists() {
+                detected = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        if !detected {
+            return None;
+        }
+
+        let ip = Ipv4Addr::LOCALHOST;
+        let listener = match TcpListener::bind((ip, 9222)).await {
+            Ok(l) => l,
+            Err(_) => return None,
+        };
+
+        let app = Router::new()
+            .route(
+                "/json/version",
+                get(move || async move {
+                    axum::Json(json!({
+                        "Browser": "Chrome/130.0.0.0",
+                        "Protocol-Version": "1.3",
+                        "webSocketDebuggerUrl": format!("ws://{ip}:9222/devtools/browser")
+                    }))
+                }),
+            )
+            .route(
+                "/json/list",
+                get(move || async move {
+                    axum::Json(json!([
+                        {
+                            "id": "auto-target-page-1",
+                            "type": "page",
+                            "title": "Auto Page",
+                            "url": format!("http://{ip}:9222/test"),
+                            "webSocketDebuggerUrl": format!("ws://{ip}:9222/devtools/page/auto-target-page-1")
+                        }
+                    ]))
+                }),
+            )
+            .route(
+                "/json",
+                get(move || async move {
+                    axum::Json(json!([
+                        {
+                            "id": "auto-target-page-1",
+                            "type": "page",
+                            "title": "Auto Page",
+                            "url": format!("http://{ip}:9222/test"),
+                            "webSocketDebuggerUrl": format!("ws://{ip}:9222/devtools/page/auto-target-page-1")
+                        }
+                    ]))
+                }),
+            )
+            .route(
+                "/json/new",
+                put(move || async move {
+                    axum::Json(json!({
+                        "id": "auto-target-new",
+                        "type": "page",
+                        "url": "http://example.com/opened",
+                        "webSocketDebuggerUrl": format!("ws://{ip}:9222/devtools/page/auto-target-new")
+                    }))
+                }),
+            )
+            .route(
+                "/devtools/page/{target_id}",
+                get(handle_cdp_ws_upgrade),
+            );
+
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        Some(handle)
+    });
+
+    // Send a navigate browser operation while port 9222 is closed
+    let nav_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-auto-nav-1",
+        "action": "navigate",
+        "url": "http://example.com/dashboard"
+    });
+
+    let reply_str = browser::handle_browser_op(&nav_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse reply");
+
+    // Must have launched the browser
+    assert!(
+        marker_path.exists(),
+        "mock browser binary was not auto-launched on demand"
+    );
+    assert_eq!(
+        reply["success"], true,
+        "expected successful navigation after auto-launch: {:?}",
+        reply
+    );
+    assert_eq!(reply["action"], "navigate");
+    assert_eq!(reply["data"]["navigated"], true);
+
+    // Clean up
+    if let Ok(Some(handle)) = server_task.await {
+        handle.abort();
+    }
+    let _ = std::fs::remove_file(marker_path);
+    let _ = std::fs::remove_file(bin_path);
+    set_test_browser_binary(None);
+    set_test_cdp_endpoint(None);
+}

@@ -1,11 +1,11 @@
 use aqvn_workspace_lib::config::{AppConfig, ConfigWatcher};
-use aqvn_workspace_lib::proxy::server::{bind, watch_target};
+use aqvn_workspace_lib::proxy::server::{bind_ephemeral, watch_target};
 use std::time::Duration;
 
 #[tokio::test]
 async fn test_proxy_retargets_on_server_url_change() {
     let initial_url = "https://a0.matmagoc.com";
-    let (listener, state, _info) = bind(initial_url).await.expect("bind proxy");
+    let (listener, state, _info) = bind_ephemeral(initial_url).await.expect("bind proxy");
     drop(listener);
 
     let initial_upstream = state.upstream().await;
@@ -59,7 +59,7 @@ async fn test_proxy_retargets_on_server_url_change() {
 #[tokio::test]
 async fn test_cache_invalidation_on_retarget() {
     let initial_url = "https://a0.matmagoc.com";
-    let (listener, state, _info) = bind(initial_url).await.expect("bind proxy");
+    let (listener, state, _info) = bind_ephemeral(initial_url).await.expect("bind proxy");
     drop(listener);
 
     let origin = "https://a0.matmagoc.com";

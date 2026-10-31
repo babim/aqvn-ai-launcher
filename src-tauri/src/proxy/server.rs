@@ -98,16 +98,79 @@ impl ProxyState {
     }
 }
 
-/// Binds loopback on an ephemeral port with default cache and prints the resolved port.
+/// Binds loopback on an ephemeral port (port 0) directly without checking fixed port range.
+pub async fn bind_ephemeral(
+    server_url: &str,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_port_with_cache(server_url, 0, Arc::new(AssetCache::default())).await
+}
+
+/// Binds loopback on an ephemeral port (port 0) with specified asset cache without checking fixed port range.
+pub async fn bind_ephemeral_with_cache(
+    server_url: &str,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_port_with_cache(server_url, 0, cache).await
+}
+
+/// Binds loopback on a specific port (0 for ephemeral) with default cache.
+pub async fn bind_port(
+    server_url: &str,
+    port: u16,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_port_with_cache(server_url, port, Arc::new(AssetCache::default())).await
+}
+
+/// Binds loopback on a specific port (0 for ephemeral) with specified asset cache.
+pub async fn bind_port_with_cache(
+    server_url: &str,
+    port: u16,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    let upstream = Upstream::new(server_url)?;
+    let address = SocketAddr::new(BIND_ADDRESS, port);
+    let listener = TcpListener::bind(address)
+        .await
+        .map_err(|err| format!("bridge proxy failed to bind to {address}: {err}"))?;
+    let local = listener
+        .local_addr()
+        .map_err(|err| format!("bridge proxy has no local address: {err}"))?;
+    println!(
+        "Bridge proxy listening on http://{local} (target {})",
+        upstream.target().origin()
+    );
+    Ok((
+        listener,
+        ProxyState::with_cache_and_port(upstream, cache, local.port()),
+        ProxyInfo::from_addr(local),
+    ))
+}
+
+/// Binds loopback preferring the fixed port range (55088..=55099) or ephemeral fallback.
+/// If `AQVN_PROXY_PORT` or `AQVN_PROXY_EPHEMERAL` is set, binds to that port or port 0 directly.
 pub async fn bind(server_url: &str) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
     bind_with_cache(server_url, Arc::new(AssetCache::default())).await
 }
 
-/// Binds loopback on an ephemeral port with specified asset cache and prints the resolved port.
+/// Binds loopback on a port in the preferred range with specified asset cache.
+/// Checks `AQVN_PROXY_PORT` or `AQVN_PROXY_EPHEMERAL` first, then probes PROXY_PORT_RANGE,
+/// falling back to ephemeral port 0.
 pub async fn bind_with_cache(
     server_url: &str,
     cache: Arc<AssetCache>,
 ) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    if let Ok(val) = std::env::var("AQVN_PROXY_PORT") {
+        if let Ok(port) = val.parse::<u16>() {
+            return bind_port_with_cache(server_url, port, cache).await;
+        }
+    }
+    if std::env::var("AQVN_PROXY_EPHEMERAL")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return bind_port_with_cache(server_url, 0, cache).await;
+    }
+
     let upstream = Upstream::new(server_url)?;
     let mut bound_listener = None;
     for port in PROXY_PORT_RANGE {

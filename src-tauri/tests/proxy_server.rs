@@ -114,7 +114,7 @@ async fn start_stub() -> (Arc<Stub>, Running) {
 }
 
 async fn start_proxy(target: &str) -> Running {
-    let (listener, state, info) = server::bind(target).await.expect("bind proxy");
+    let (listener, state, info) = server::bind_ephemeral(target).await.expect("bind proxy");
     let task = tokio::spawn(async move {
         server::serve(listener, state).await.expect("proxy serve");
     });
@@ -1072,9 +1072,10 @@ async fn test_asset_caching_layer() {
         std::env::temp_dir().join(format!("aqvn-test-cache-{}", std::process::id()));
     let cache_engine = std::sync::Arc::new(AssetCache::new(custom_cache_dir.clone()));
 
-    let (listener, state, info) = server::bind_with_cache(&stub_guard.base, cache_engine.clone())
-        .await
-        .expect("bind proxy with custom cache");
+    let (listener, state, info) =
+        server::bind_ephemeral_with_cache(&stub_guard.base, cache_engine.clone())
+            .await
+            .expect("bind proxy with custom cache");
     let task = tokio::spawn(async move {
         server::serve(listener, state).await.expect("proxy serve");
     });
@@ -1110,9 +1111,10 @@ async fn test_asset_caching_layer() {
 
     // Create a brand new proxy instance with a fresh in-memory cache pointing to the same disk directory
     let fresh_cache_engine = std::sync::Arc::new(AssetCache::new(custom_cache_dir.clone()));
-    let (listener2, state2, info2) = server::bind_with_cache(&stub_guard.base, fresh_cache_engine)
-        .await
-        .expect("bind 2nd proxy with same disk cache");
+    let (listener2, state2, info2) =
+        server::bind_ephemeral_with_cache(&stub_guard.base, fresh_cache_engine)
+            .await
+            .expect("bind 2nd proxy with same disk cache");
     let task2 = tokio::spawn(async move {
         server::serve(listener2, state2)
             .await
@@ -1519,4 +1521,60 @@ async fn test_bounded_memory_cache_lru_eviction() {
     assert!(!cache.contains_in_memory(origin, "/css/style4.css").await);
 
     let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------- ephemeral port binding (VAL-CACHE-003)
+
+#[tokio::test]
+async fn test_ephemeral_port_binding() {
+    let (_stub, stub_guard) = start_stub().await;
+
+    // 1. Direct bind_ephemeral binds to loopback with a valid dynamic port
+    let (listener, _state, info) = server::bind_ephemeral(&stub_guard.base)
+        .await
+        .expect("bind_ephemeral");
+    let address = listener.local_addr().expect("local addr");
+    assert!(
+        address.ip().is_loopback(),
+        "proxy must bind loopback: {address}"
+    );
+    assert_ne!(address.port(), 0, "ephemeral port must be non-zero");
+    assert_eq!(info.port, address.port());
+    assert_eq!(info.url, format!("http://{address}"));
+    drop(listener);
+
+    // 2. Direct bind_port with port 0 also binds cleanly
+    let (listener2, _state2, info2) = server::bind_port(&stub_guard.base, 0)
+        .await
+        .expect("bind_port 0");
+    assert_ne!(info2.port, 0);
+    drop(listener2);
+
+    // 3. Concurrent ephemeral bindings succeed without colliding on 55088
+    let mut listeners = Vec::new();
+    let mut ports = std::collections::HashSet::new();
+    for _ in 0..5 {
+        let (l, _s, inf) = server::bind_ephemeral(&stub_guard.base)
+            .await
+            .expect("concurrent bind_ephemeral");
+        assert_ne!(inf.port, 0);
+        assert!(
+            ports.insert(inf.port),
+            "ephemeral ports must be distinct across active listeners"
+        );
+        listeners.push(l);
+    }
+    drop(listeners);
+
+    // 4. Running ephemeral proxy can serve requests cleanly
+    let proxy = start_proxy(&stub_guard.base).await;
+    let resp = client()
+        .get(format!("{}/health", proxy.base))
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("health check on ephemeral proxy");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: Value = resp.json().await.expect("health json");
+    assert_eq!(body["ok"], true);
 }

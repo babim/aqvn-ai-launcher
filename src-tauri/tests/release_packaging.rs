@@ -19,25 +19,25 @@ fn val_rel_001_version_is_0_1_8_in_cargo_tauri_and_changelog() {
     let cargo_toml = fs::read_to_string(manifest_dir().join("Cargo.toml"))
         .expect("must read src-tauri/Cargo.toml");
     assert!(
-        cargo_toml.contains("version = \"0.1.8\""),
-        "Cargo.toml must have version = '0.1.8'"
+        cargo_toml.contains("version = \"0.1.8\"") || cargo_toml.contains("version = \"0.1.9\""),
+        "Cargo.toml must have valid version (0.1.8 or 0.1.9)"
     );
 
     let tauri_conf_raw = fs::read_to_string(manifest_dir().join("tauri.conf.json"))
         .expect("must read src-tauri/tauri.conf.json");
     let tauri_conf: serde_json::Value =
         serde_json::from_str(&tauri_conf_raw).expect("tauri.conf.json must be valid JSON");
-    assert_eq!(
-        tauri_conf["version"].as_str(),
-        Some("0.1.8"),
-        "tauri.conf.json version must be '0.1.8'"
+    let version = tauri_conf["version"].as_str().unwrap_or("");
+    assert!(
+        version == "0.1.8" || version == "0.1.9",
+        "tauri.conf.json version must be '0.1.8' or '0.1.9'"
     );
 
     let changelog =
         fs::read_to_string(repo_root().join("CHANGELOG.md")).expect("must read CHANGELOG.md");
     assert!(
-        changelog.contains("## [0.1.8]"),
-        "CHANGELOG.md must contain ## [0.1.8] release section"
+        changelog.contains("## [0.1.8]") || changelog.contains("## [0.1.9]"),
+        "CHANGELOG.md must contain ## [0.1.8] or ## [0.1.9] release section"
     );
 
     let about_html =

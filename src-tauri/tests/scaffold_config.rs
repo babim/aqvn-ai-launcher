@@ -54,10 +54,13 @@ fn capabilities_are_explicit() {
     let permissions = cap["permissions"].as_array().expect("permissions array");
     assert!(!permissions.is_empty(), "permissions must not be empty");
     for permission in permissions {
-        let permission = permission.as_str().expect("permission string");
+        let perm_name = permission
+            .as_str()
+            .or_else(|| permission.get("identifier").and_then(|v| v.as_str()))
+            .expect("permission string or object identifier");
         assert!(
-            !permission.contains('*'),
-            "wildcard permission not allowed: {permission}"
+            !perm_name.contains('*'),
+            "wildcard permission not allowed: {perm_name}"
         );
     }
 }

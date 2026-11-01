@@ -16,7 +16,19 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
     "core:webview:allow-set-webview-zoom",
-    "shell:allow-open",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        {
+          "href": "^https?://.*",
+          "validator": "^https?://"
+        },
+        {
+          "href": "^mailto:.*",
+          "validator": "^mailto:"
+        }
+      ]
+    },
     "notification:allow-notify",
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",

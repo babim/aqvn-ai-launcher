@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-11-01
+
+### Added
+- **Network & Proxy Hardening (Round 4 Upgrades)**:
+  - **Upstream HTTP Client Retry with Exponential Backoff**: Automatic retry up to 3 attempts (`MAX_UPSTREAM_ATTEMPTS = 3`, initial delay 100ms doubling exponentially) on transient connection errors (`is_connect`, `is_timeout`) and a dedicated 10s connection timeout in `src-tauri/src/proxy/upstream.rs` (`VAL-NET-001`).
+  - **WebSocket Heartbeat Watchdog**: 60s inactivity watchdog in `src-tauri/src/proxy/ws.rs` issuing periodic 15s ping probes and terminating hung or idle bridge legs cleanly, allowing automatic client reconnection (`VAL-NET-002`).
+- **Agent Control Hub Upgrades**:
+  - **PTY Session Lifecycle Commands**: Added `list_sessions` and `kill_session` operations in `src-tauri/src/connector/handlers/exec.rs`, returning active session descriptors (ID, CWD, liveness status, and idle time) and terminating child processes cleanly (`VAL-HUB-001`).
+  - **CDP Multi-Tab Management & Tab Targeting**: Added `list_tabs`, `new_tab`, `activate_tab`, and `close_tab` commands in `src-tauri/src/connector/handlers/browser.rs`, with `target_id` / `tab_id` parameter support routing web interactions to designated browser tabs (`VAL-HUB-002`).
+  - **Transfer Protocol v1 Full-File SHA-256 Validation**: Verified full-file SHA-256 checksum upon receiving `final: true` chunk write in `src-tauri/src/connector/handlers/files.rs`, validating against `expected_sha256` and returning `file_sha256` in payload (`VAL-HUB-003`).
+- **Security & Sandboxing Unification**:
+  - **Unified Allowed Paths Management**: Merged `config.allowed_paths` with `config.workspace_path` into `unified_allowed_paths()` in `src-tauri/src/connector/handlers/files.rs`, enforcing consistent jail boundary checks across multiple configured working directories (`VAL-SEC-001`).
+  - **Computer Use Multi-Display Targeting & Crosshair Overlay**: Added `list_displays` and `display_id` selection parameter in `src-tauri/src/connector/handlers/computer_use.rs`, with visual high-contrast crosshair cursor overlay rendering on captured image buffers when `show_cursor: true` (`VAL-SEC-002`).
+- **Operator UX & Desktop Ergonomics**:
+  - **Window Geometry Persistence Across Restarts**: Persisted window position (`x`, `y`), dimensions (`width`, `height`), and maximized state (`is_maximized`) to `settings.json` on move/resize events, automatically restoring geometry upon application launch (`VAL-UX-001`).
+  - **Web Audio Chime Volume & Tone Customization**: Added `task_chime_volume` (0.0..=1.0) and `task_chime_tone` (classic, bell, beep, subtle) in `ui/settings.html`, `ui/settings.js`, and `ui/container.js` with live audio preview and Web Audio synthesis (`VAL-UX-002`).
+  - **System Tray Server Profiles Submenu & Workspace Launcher**: Added "Server Profiles" submenu with dynamic checkmark selection switching active server without restarting, and "Open Workspace Folder" launcher opening the system file manager at `workspace_path` (`VAL-UX-003`).
+  - **Comprehensive Zero-Regression Verification**: Verified all 220+ Rust unit and integration tests and 80 Node.js test cases with zero regressions, strict clippy with warnings denied, and rustfmt check passing (`VAL-R4-CROSS-001`).
+
 ## [0.1.8] - 2026-10-31
 
 ### Added

@@ -9,12 +9,85 @@ use crate::proxy::upstream::Upstream;
 use axum::extract::ws::{CloseFrame as ClientCloseFrame, Message as ClientMessage, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_tungstenite::tungstenite::{
     protocol::CloseFrame as ServerCloseFrame, Message as ServerMessage, Utf8Bytes,
 };
 
-/// Runs until either leg closes, then closes the other side.
+pub const HEARTBEAT_INTERVAL_SECS: u64 = 15;
+pub const INACTIVITY_TIMEOUT_SECS: u64 = 60;
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(HEARTBEAT_INTERVAL_SECS);
+pub const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(INACTIVITY_TIMEOUT_SECS);
+pub const WATCHDOG_PROBE: &[u8] = b"aqvn-heartbeat";
+
+/// Parses heartbeat interval and inactivity timeout overrides from query parameters
+/// or environment variables, returning (heartbeat_interval, inactivity_timeout, clean_path_and_query).
+pub fn parse_watchdog_config(path_and_query: &str) -> (Duration, Duration, String) {
+    let mut heartbeat = std::env::var("AQVN_WS_HEARTBEAT_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(HEARTBEAT_INTERVAL);
+
+    let mut timeout = std::env::var("AQVN_WS_INACTIVITY_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(INACTIVITY_TIMEOUT);
+
+    let (path, query) = match path_and_query.split_once('?') {
+        Some((p, q)) => (p, Some(q)),
+        None => (path_and_query, None),
+    };
+
+    let clean_path = if let Some(q) = query {
+        let mut clean_pairs = Vec::new();
+        for (k, v) in url::form_urlencoded::parse(q.as_bytes()) {
+            match k.as_ref() {
+                "inactivity_timeout_ms" | "watchdog_timeout_ms" => {
+                    if let Ok(ms) = v.parse::<u64>() {
+                        timeout = Duration::from_millis(ms);
+                    }
+                }
+                "heartbeat_interval_ms" | "watchdog_interval_ms" => {
+                    if let Ok(ms) = v.parse::<u64>() {
+                        heartbeat = Duration::from_millis(ms);
+                    }
+                }
+                _ => clean_pairs.push((k, v)),
+            }
+        }
+        if clean_pairs.is_empty() {
+            path.to_string()
+        } else {
+            let mut encoded = String::new();
+            let mut serializer = url::form_urlencoded::Serializer::new(&mut encoded);
+            for (k, v) in clean_pairs {
+                serializer.append_pair(&k, &v);
+            }
+            format!("{path}?{encoded}")
+        }
+    } else {
+        path_and_query.to_string()
+    };
+
+    (heartbeat, timeout, clean_path)
+}
+
+/// Runs until either leg closes or watchdog timeout expires, then closes the other side.
 pub async fn bridge(socket: WebSocket, upstream: Arc<Upstream>, path_and_query: String) {
+    let (heartbeat, timeout, clean_path) = parse_watchdog_config(&path_and_query);
+    bridge_with_watchdog(socket, upstream, clean_path, heartbeat, timeout).await;
+}
+
+/// Runs WebSocket bridge with explicit watchdog heartbeat and inactivity timeout.
+pub async fn bridge_with_watchdog(
+    socket: WebSocket,
+    upstream: Arc<Upstream>,
+    path_and_query: String,
+    heartbeat_interval: Duration,
+    inactivity_timeout: Duration,
+) {
     let server = match upstream.connect_ws(&path_and_query).await {
         Ok(stream) => stream,
         Err(err) => {
@@ -30,11 +103,45 @@ pub async fn bridge(socket: WebSocket, upstream: Arc<Upstream>, path_and_query: 
     let (mut client_sink, mut client_stream) = socket.split();
     let (mut server_sink, mut server_stream) = server.split();
 
+    let mut last_client_activity = tokio::time::Instant::now();
+    let mut last_server_activity = tokio::time::Instant::now();
+    let mut interval = tokio::time::interval(heartbeat_interval);
+    interval.tick().await;
+
     loop {
         tokio::select! {
+            _ = interval.tick() => {
+                let now = tokio::time::Instant::now();
+                let client_elapsed = now.duration_since(last_client_activity);
+                let server_elapsed = now.duration_since(last_server_activity);
+
+                if client_elapsed >= inactivity_timeout || server_elapsed >= inactivity_timeout {
+                    println!(
+                        "Bridge proxy: websocket inactivity timeout (client: {:.1}s, server: {:.1}s >= {:.1}s), terminating bridge",
+                        client_elapsed.as_secs_f64(),
+                        server_elapsed.as_secs_f64(),
+                        inactivity_timeout.as_secs_f64()
+                    );
+                    break;
+                }
+
+                let probe = axum::body::Bytes::from_static(WATCHDOG_PROBE);
+                if client_sink.send(ClientMessage::Ping(probe.clone())).await.is_err() {
+                    println!("Bridge proxy: failed to send ping probe to client, terminating bridge");
+                    break;
+                }
+                if server_sink.send(ServerMessage::Ping(probe)).await.is_err() {
+                    println!("Bridge proxy: failed to send ping probe to server, terminating bridge");
+                    break;
+                }
+            }
             message = client_stream.next() => {
                 let Some(message) = message else { break };
                 let Ok(message) = message else { break };
+                last_client_activity = tokio::time::Instant::now();
+                if is_watchdog_pong(&message) {
+                    continue;
+                }
                 let Some(message) = to_server(message) else { continue };
                 log_engineio("browser->server", &message);
                 if server_sink.send(message).await.is_err() {
@@ -44,6 +151,10 @@ pub async fn bridge(socket: WebSocket, upstream: Arc<Upstream>, path_and_query: 
             message = server_stream.next() => {
                 let Some(message) = message else { break };
                 let Ok(message) = message else { break };
+                last_server_activity = tokio::time::Instant::now();
+                if is_server_watchdog_pong(&message) {
+                    continue;
+                }
                 log_engineio("server->browser", &message);
                 let Some(message) = to_client(message) else { continue };
                 if client_sink.send(message).await.is_err() {
@@ -55,6 +166,14 @@ pub async fn bridge(socket: WebSocket, upstream: Arc<Upstream>, path_and_query: 
 
     let _ = server_sink.send(ServerMessage::Close(None)).await;
     let _ = client_sink.send(ClientMessage::Close(None)).await;
+}
+
+fn is_watchdog_pong(message: &ClientMessage) -> bool {
+    matches!(message, ClientMessage::Pong(bytes) if bytes.as_ref() == WATCHDOG_PROBE)
+}
+
+fn is_server_watchdog_pong(message: &ServerMessage) -> bool {
+    matches!(message, ServerMessage::Pong(bytes) if bytes.as_ref() == WATCHDOG_PROBE)
 }
 
 /// Engine.IO pings are text frames `"2"`; the client answers `"3"`.

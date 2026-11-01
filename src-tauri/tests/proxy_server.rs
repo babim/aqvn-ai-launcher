@@ -1843,3 +1843,143 @@ async fn test_upstream_retry_exponential_backoff() {
     );
     server_task.abort();
 }
+
+// --------------------------------- WebSocket Watchdog & Idle Termination (VAL-NET-002)
+
+#[tokio::test]
+async fn test_websocket_watchdog_timeout() {
+    use aqvn_workspace_lib::proxy::ws;
+
+    // 1. Verify contract constants
+    assert_eq!(ws::HEARTBEAT_INTERVAL_SECS, 15);
+    assert_eq!(ws::INACTIVITY_TIMEOUT_SECS, 60);
+    assert_eq!(ws::HEARTBEAT_INTERVAL, std::time::Duration::from_secs(15));
+    assert_eq!(ws::INACTIVITY_TIMEOUT, std::time::Duration::from_secs(60));
+
+    // 2. Verify config parser defaults and parameter overrides
+    let (h_def, t_def, clean_def) =
+        ws::parse_watchdog_config("/socket.io/?EIO=4&transport=websocket");
+    assert_eq!(h_def, std::time::Duration::from_secs(15));
+    assert_eq!(t_def, std::time::Duration::from_secs(60));
+    assert_eq!(clean_def, "/socket.io/?EIO=4&transport=websocket");
+
+    let (h_custom, t_custom, clean_custom) = ws::parse_watchdog_config(
+        "/socket.io/?EIO=4&transport=websocket&heartbeat_interval_ms=50&inactivity_timeout_ms=250",
+    );
+    assert_eq!(h_custom, std::time::Duration::from_millis(50));
+    assert_eq!(t_custom, std::time::Duration::from_millis(250));
+    assert_eq!(clean_custom, "/socket.io/?EIO=4&transport=websocket");
+
+    // 3. Live WebSocket bridge: heartbeat watchdog sends ping probes and terminates hung/idle session
+    let (_stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    // Connect WebSocket client to proxy with fast watchdog intervals: 50ms heartbeat probe, 250ms inactivity timeout
+    let mut request = websocket_request(&proxy.base);
+    let custom_ws_url = format!(
+        "{}/socket.io/?EIO=4&transport=websocket&heartbeat_interval_ms=50&inactivity_timeout_ms=250",
+        proxy.base.replacen("http://", "ws://", 1)
+    );
+    *request.uri_mut() = custom_ws_url.parse().expect("valid websocket uri");
+
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("websocket connect");
+    assert_eq!(response.status().as_u16(), 101);
+
+    // Watchdog sends ping probes every 50ms to verify liveness
+    let probe_frame = tokio::time::timeout(std::time::Duration::from_millis(200), socket.next())
+        .await
+        .expect("watchdog must send heartbeat ping probe within 200ms")
+        .expect("socket stream message")
+        .expect("valid message frame");
+    assert!(
+        matches!(probe_frame, tokio_tungstenite::tungstenite::Message::Ping(ref bytes) if bytes.as_ref() == ws::WATCHDOG_PROBE),
+        "expected heartbeat ping probe from proxy watchdog, got: {probe_frame:?}"
+    );
+
+    // Now simulate an idle/hung client: client freezes and stops reading/responding for 300ms
+    // Watchdog must detect inactivity without response and terminate the bridge (timeout is 250ms)
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    // After inactivity timeout, drain any queued probe and verify close frame or EOF
+    let mut terminated = false;
+    while let Ok(Some(msg)) =
+        tokio::time::timeout(std::time::Duration::from_millis(200), socket.next()).await
+    {
+        match msg {
+            Ok(tokio_tungstenite::tungstenite::Message::Close(_)) => {
+                terminated = true;
+                break;
+            }
+            Ok(tokio_tungstenite::tungstenite::Message::Ping(_)) => {
+                // Inactive client didn't read probes; ignore queued probes before termination
+            }
+            Err(_) => {
+                terminated = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        terminated,
+        "bridge must terminate hung or idle session after timeout"
+    );
+
+    // 4. Live WebSocket bridge: active frame exchanges keep the bridge alive
+    let mut req_active = websocket_request(&proxy.base);
+    let active_ws_url = format!(
+        "{}/socket.io/?EIO=4&transport=websocket&heartbeat_interval_ms=50&inactivity_timeout_ms=200",
+        proxy.base.replacen("http://", "ws://", 1)
+    );
+    *req_active.uri_mut() = active_ws_url.parse().expect("valid uri");
+    let (mut active_socket, _resp) = tokio_tungstenite::connect_async(req_active)
+        .await
+        .expect("active ws connect");
+
+    // Send active frames every 40ms for 280ms (longer than the 200ms timeout)
+    for _ in 0..7 {
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        active_socket
+            .send(tokio_tungstenite::tungstenite::Message::Text("2".into()))
+            .await
+            .expect("send frame to active bridge");
+        // Drain any incoming ping or echo frame
+        let _ =
+            tokio::time::timeout(std::time::Duration::from_millis(20), active_socket.next()).await;
+    }
+
+    // Connection must still be open because traffic was active
+    let send_res = active_socket
+        .send(tokio_tungstenite::tungstenite::Message::Text("3".into()))
+        .await;
+    assert!(
+        send_res.is_ok(),
+        "active bridge must remain alive while traffic flows"
+    );
+
+    // Once activity stops for >200ms, bridge terminates
+    tokio::time::sleep(std::time::Duration::from_millis(260)).await;
+    let mut post_idle_terminated = false;
+    while let Ok(Some(msg)) =
+        tokio::time::timeout(std::time::Duration::from_millis(200), active_socket.next()).await
+    {
+        match msg {
+            Ok(tokio_tungstenite::tungstenite::Message::Close(_)) => {
+                post_idle_terminated = true;
+                break;
+            }
+            Ok(tokio_tungstenite::tungstenite::Message::Ping(_)) => {}
+            Err(_) => {
+                post_idle_terminated = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        post_idle_terminated,
+        "active bridge must terminate once activity ceases"
+    );
+}

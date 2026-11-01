@@ -1398,3 +1398,140 @@ async fn test_unified_sandbox_in_rfc_and_ssh() {
 
     let _ = std::fs::remove_dir_all(&ws_dir);
 }
+
+#[tokio::test]
+async fn test_chunked_write_rollback_on_sha256_mismatch() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (sandbox_dir, sandbox) = create_temp_sandbox();
+    set_test_sandbox(Some(sandbox.clone()));
+
+    let target_filename = "chunked_rollback_target.dat";
+
+    // 1. Chunk 1 at offset 0 (16 bytes)
+    let chunk1_data = "CHUNK_AAA_16BYTE";
+    let write_chunk1 = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-rb-c1",
+        "action": "write",
+        "path": target_filename,
+        "offset": 0,
+        "content": chunk1_data,
+        "encoding": "utf-8",
+        "final": false
+    });
+    let reply1_str = files::handle_file_op_with_sandbox(&write_chunk1, &sandbox).await;
+    let reply1: Value = serde_json::from_str(&reply1_str).expect("parse reply1");
+    assert_eq!(reply1["success"], true);
+
+    // 2. Chunk 2 at offset 16 (16 bytes)
+    let chunk2_data = "CHUNK_BBB_16BYTE";
+    let write_chunk2 = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-rb-c2",
+        "action": "write",
+        "path": target_filename,
+        "offset": 16,
+        "content": chunk2_data,
+        "encoding": "utf-8",
+        "final": false
+    });
+    let reply2_str = files::handle_file_op_with_sandbox(&write_chunk2, &sandbox).await;
+    let reply2: Value = serde_json::from_str(&reply2_str).expect("parse reply2");
+    assert_eq!(reply2["success"], true);
+
+    // Verify file size is 32 bytes before final chunk
+    let on_disk = sandbox_dir.join(target_filename);
+    assert_eq!(std::fs::metadata(&on_disk).unwrap().len(), 32);
+
+    // Full 3 chunks assembled content
+    let chunk3_data = "CHUNK_CCC_16BYTE";
+    let full_content = format!("{chunk1_data}{chunk2_data}{chunk3_data}");
+    let expected_full_sha256 = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(full_content.as_bytes());
+        format!("{:x}", hasher.finalize())
+    };
+
+    // 3. Final chunk at offset 32 with mismatching expected_sha256 -> rollback expected
+    let write_chunk3_bad = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-rb-c3-bad",
+        "action": "write",
+        "path": target_filename,
+        "offset": 32,
+        "content": chunk3_data,
+        "encoding": "utf-8",
+        "final": true,
+        "expected_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    });
+    let reply3_bad_str = files::handle_file_op_with_sandbox(&write_chunk3_bad, &sandbox).await;
+    let reply3_bad: Value = serde_json::from_str(&reply3_bad_str).expect("parse reply3_bad");
+    assert_eq!(reply3_bad["success"], false);
+    assert_eq!(reply3_bad["status"], "error");
+    assert_eq!(reply3_bad["rollback"], true);
+    assert!(reply3_bad["error"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .contains("mismatch"));
+
+    // Verify on-disk file was truncated back to offset 32 (corrupted chunk 3 rolled back)
+    assert_eq!(
+        std::fs::metadata(&on_disk).unwrap().len(),
+        32,
+        "corrupted final chunk must be truncated on mismatch"
+    );
+    let disk_content = std::fs::read_to_string(&on_disk).unwrap();
+    assert_eq!(disk_content, format!("{chunk1_data}{chunk2_data}"));
+
+    // 4. Retry final chunk with valid expected_sha256 -> successfully completes
+    let write_chunk3_good = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-rb-c3-good",
+        "action": "write",
+        "path": target_filename,
+        "offset": 32,
+        "content": chunk3_data,
+        "encoding": "utf-8",
+        "final": true,
+        "expected_sha256": expected_full_sha256.clone()
+    });
+    let reply3_good_str = files::handle_file_op_with_sandbox(&write_chunk3_good, &sandbox).await;
+    let reply3_good: Value = serde_json::from_str(&reply3_good_str).expect("parse reply3_good");
+    assert_eq!(reply3_good["success"], true);
+    assert_eq!(reply3_good["status"], "ok");
+    assert_eq!(reply3_good["final"], true);
+    assert_eq!(reply3_good["file_sha256"], expected_full_sha256);
+    assert_eq!(std::fs::metadata(&on_disk).unwrap().len(), 48);
+    assert_eq!(std::fs::read_to_string(&on_disk).unwrap(), full_content);
+
+    // 5. Single write with mismatching expected_sha256 -> file removed or truncated to 0
+    let write_single_bad = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-rb-single-bad",
+        "action": "write",
+        "path": "single_bad.txt",
+        "content": "corrupted single file content",
+        "final": true,
+        "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    });
+    let reply_single_str = files::handle_file_op_with_sandbox(&write_single_bad, &sandbox).await;
+    let reply_single: Value = serde_json::from_str(&reply_single_str).expect("parse reply_single");
+    assert_eq!(reply_single["success"], false);
+    assert_eq!(reply_single["status"], "error");
+    assert_eq!(reply_single["rollback"], true);
+
+    let on_disk_single = sandbox_dir.join("single_bad.txt");
+    assert!(
+        !on_disk_single.exists()
+            || std::fs::metadata(&on_disk_single)
+                .map(|m| m.len())
+                .unwrap_or(0)
+                == 0,
+        "corrupted single write file must be removed or truncated to 0"
+    );
+
+    set_test_sandbox(None);
+    let _ = std::fs::remove_dir_all(&sandbox_dir);
+}

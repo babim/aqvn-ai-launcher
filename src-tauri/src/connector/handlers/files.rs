@@ -573,6 +573,24 @@ fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
                 .strip_prefix("sha256:")
                 .unwrap_or(expected.trim());
             if !clean_expected.is_empty() && !clean_expected.eq_ignore_ascii_case(&computed) {
+                // Rollback corrupted file: truncate back to previous offset for chunked writes,
+                // or remove the corrupted file (with 0-byte truncation fallback) for initial/single writes.
+                if let Some(offset) = maybe_offset {
+                    if offset > 0 {
+                        if let Ok(file) = fs::OpenOptions::new().write(true).open(&jailed) {
+                            let _ = file.set_len(offset);
+                        }
+                    } else if fs::remove_file(&jailed).is_err() {
+                        if let Ok(file) = fs::OpenOptions::new().write(true).open(&jailed) {
+                            let _ = file.set_len(0);
+                        }
+                    }
+                } else if fs::remove_file(&jailed).is_err() {
+                    if let Ok(file) = fs::OpenOptions::new().write(true).open(&jailed) {
+                        let _ = file.set_len(0);
+                    }
+                }
+
                 let mut err_reply: Value = serde_json::from_str(&make_error_reply(
                     id,
                     op_id,
@@ -585,6 +603,14 @@ fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
                 .unwrap_or_default();
                 err_reply["file_sha256"] = json!(&computed);
                 err_reply["expected_sha256"] = json!(clean_expected);
+                err_reply["rollback"] = json!(true);
+                let rollback_data = json!({
+                    "rollback": true,
+                    "file_sha256": &computed,
+                    "expected_sha256": clean_expected,
+                });
+                err_reply["data"] = rollback_data.clone();
+                err_reply["result"] = rollback_data;
                 return err_reply.to_string();
             }
         }

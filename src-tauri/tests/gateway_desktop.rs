@@ -956,3 +956,224 @@ async fn test_computer_use_multi_display_and_cursor_overlay() {
     set_test_screen_capture(None);
     clear_test_display_captures();
 }
+
+#[tokio::test]
+async fn test_wayland_capture_and_input_support() {
+    let _lock = TEST_GATEWAY_MUTEX.lock().await;
+    use aqvn_workspace_lib::connector::handlers::computer_use::{
+        clear_injected_events, clear_last_wayland_inputs, clear_test_wayland_tools,
+        get_last_wayland_inputs, handle_computer_use_op, is_wayland, set_test_screen_capture,
+        set_test_wayland_cmd_handler, set_test_wayland_display, set_test_wayland_tool,
+    };
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    // Reset initial test state
+    set_test_screen_capture(None);
+    set_test_wayland_display(None);
+    set_test_wayland_cmd_handler(None);
+    clear_test_wayland_tools();
+    clear_last_wayland_inputs();
+    clear_injected_events();
+
+    // 1. Wayland detection
+    assert!(!is_wayland(), "Initially not wayland");
+    set_test_wayland_display(Some("wayland-0"));
+    assert!(
+        is_wayland(),
+        "is_wayland() returns true under WAYLAND_DISPLAY"
+    );
+
+    // 2. Capture under Wayland when grim is NOT found -> explicit descriptive error
+    let capture_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-wayland-cap-missing",
+        "action": "capture",
+        "format": "png",
+    });
+    let reply_str = handle_computer_use_op(&capture_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("valid json reply");
+    assert_eq!(reply["success"], false);
+    assert_eq!(reply["status"], "error");
+    let err_msg = reply["error"].as_str().unwrap_or_default();
+    assert!(
+        err_msg.to_lowercase().contains("grim"),
+        "error must explicitly mention grim: {err_msg}"
+    );
+    assert!(
+        reply.get("screenshot").is_none() || reply["screenshot"].is_null(),
+        "must not return silent 1x1 screenshot fallback on failure"
+    );
+
+    // 3. Capture under Wayland with grim present (simulated)
+    let mut test_png_buf = Vec::new();
+    let img_rgba = image::RgbaImage::from_pixel(100, 100, image::Rgba([200, 100, 50, 255]));
+    img_rgba
+        .write_to(
+            &mut std::io::Cursor::new(&mut test_png_buf),
+            image::ImageFormat::Png,
+        )
+        .expect("write test png");
+    let test_png_bytes = test_png_buf.clone();
+
+    set_test_wayland_tool("grim", Some(PathBuf::from("/usr/bin/grim")));
+    set_test_wayland_cmd_handler(Some(Arc::new(move |tool, _args| {
+        if tool == "grim" {
+            Ok(test_png_bytes.clone())
+        } else {
+            Ok(Vec::new())
+        }
+    })));
+
+    let cap_op_success = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-wayland-cap-ok",
+        "action": "capture",
+        "format": "png",
+    });
+    let reply_ok_str = handle_computer_use_op(&cap_op_success).await;
+    let reply_ok: Value = serde_json::from_str(&reply_ok_str).expect("valid json reply");
+    assert_eq!(reply_ok["success"], true);
+    assert_eq!(reply_ok["status"], "ok");
+    assert_eq!(reply_ok["data"]["width"], 100);
+    assert_eq!(reply_ok["data"]["height"], 100);
+    let screenshot_b64 = reply_ok["screenshot"].as_str().unwrap();
+    assert!(!screenshot_b64.is_empty());
+
+    let wayland_inputs = get_last_wayland_inputs();
+    let grim_call = wayland_inputs.iter().find(|i| i.tool == "grim");
+    assert!(grim_call.is_some(), "must record grim command execution");
+    let grim_args = &grim_call.unwrap().args;
+    assert!(grim_args.contains(&"-t".to_string()));
+    assert!(grim_args.contains(&"png".to_string()));
+    assert!(grim_args.contains(&"-".to_string()));
+
+    // 4. Capture under Wayland when grim fails -> explicit error
+    set_test_wayland_cmd_handler(Some(Arc::new(|tool, _args| {
+        if tool == "grim" {
+            Err("failed to connect to Wayland display socket".to_string())
+        } else {
+            Ok(Vec::new())
+        }
+    })));
+    let reply_fail_str = handle_computer_use_op(&capture_op).await;
+    let reply_fail: Value = serde_json::from_str(&reply_fail_str).expect("valid json reply");
+    assert_eq!(reply_fail["success"], false);
+    assert_eq!(reply_fail["status"], "error");
+    assert!(reply_fail["error"]
+        .as_str()
+        .unwrap()
+        .contains("failed to connect to Wayland"));
+
+    // 5. Wayland Input injection when tools missing -> explicit error
+    clear_test_wayland_tools();
+    set_test_wayland_cmd_handler(None);
+    clear_last_wayland_inputs();
+
+    let move_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-wayland-move-fail",
+        "action": "mouse_move",
+        "x": 250.0,
+        "y": 350.0,
+    });
+    let move_fail_str = handle_computer_use_op(&move_op).await;
+    let move_fail: Value = serde_json::from_str(&move_fail_str).expect("valid reply");
+    assert_eq!(move_fail["success"], false);
+    assert_eq!(move_fail["status"], "error");
+    assert!(move_fail["error"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .contains("ydotool"));
+
+    let type_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-wayland-type-fail",
+        "action": "type",
+        "text": "test",
+    });
+    let type_fail_str = handle_computer_use_op(&type_op).await;
+    let type_fail: Value = serde_json::from_str(&type_fail_str).expect("valid reply");
+    assert_eq!(type_fail["success"], false);
+    assert_eq!(type_fail["status"], "error");
+    assert!(
+        type_fail["error"].as_str().unwrap().contains("wtype")
+            || type_fail["error"].as_str().unwrap().contains("ydotool")
+    );
+
+    // 6. Wayland Input injection when tools present -> successful execution
+    set_test_wayland_tool("ydotool", Some(PathBuf::from("/usr/bin/ydotool")));
+    set_test_wayland_tool("wtype", Some(PathBuf::from("/usr/bin/wtype")));
+    set_test_wayland_cmd_handler(Some(Arc::new(|_tool, _args| Ok(Vec::new()))));
+    clear_last_wayland_inputs();
+
+    // 6a. Mouse move via ydotool
+    let move_ok_str = handle_computer_use_op(&move_op).await;
+    let move_ok: Value = serde_json::from_str(&move_ok_str).expect("valid reply");
+    assert_eq!(move_ok["success"], true);
+    assert_eq!(move_ok["status"], "ok");
+
+    let wayland_inputs = get_last_wayland_inputs();
+    let move_call = wayland_inputs
+        .iter()
+        .find(|i| i.tool == "ydotool" && i.action == "mousemove");
+    assert!(move_call.is_some(), "must invoke ydotool mousemove");
+    assert!(move_call.unwrap().args.contains(&"--absolute".to_string()));
+    assert!(move_call.unwrap().args.contains(&"250".to_string()));
+    assert!(move_call.unwrap().args.contains(&"350".to_string()));
+
+    // 6b. Mouse click via ydotool
+    clear_last_wayland_inputs();
+    let click_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-wayland-click",
+        "action": "click",
+        "button": "left",
+    });
+    let click_ok_str = handle_computer_use_op(&click_op).await;
+    let click_ok: Value = serde_json::from_str(&click_ok_str).expect("valid reply");
+    assert_eq!(click_ok["success"], true);
+    assert_eq!(click_ok["status"], "ok");
+    let click_call = get_last_wayland_inputs()
+        .into_iter()
+        .find(|i| i.tool == "ydotool" && i.action == "click");
+    assert!(click_call.is_some(), "must invoke ydotool click");
+
+    // 6c. Type text via wtype
+    clear_last_wayland_inputs();
+    let type_ok_str = handle_computer_use_op(&type_op).await;
+    let type_ok: Value = serde_json::from_str(&type_ok_str).expect("valid reply");
+    assert_eq!(type_ok["success"], true);
+    assert_eq!(type_ok["status"], "ok");
+    let type_call = get_last_wayland_inputs()
+        .into_iter()
+        .find(|i| i.tool == "wtype" && i.action == "type");
+    assert!(type_call.is_some(), "must invoke wtype type");
+    assert!(type_call.unwrap().args.contains(&"test".to_string()));
+
+    // 6d. Key press via wtype
+    clear_last_wayland_inputs();
+    let key_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-wayland-key",
+        "action": "key",
+        "key": "Return",
+    });
+    let key_ok_str = handle_computer_use_op(&key_op).await;
+    let key_ok: Value = serde_json::from_str(&key_ok_str).expect("valid reply");
+    assert_eq!(key_ok["success"], true);
+    assert_eq!(key_ok["status"], "ok");
+    let key_call = get_last_wayland_inputs()
+        .into_iter()
+        .find(|i| i.tool == "wtype" && i.action == "key");
+    assert!(key_call.is_some(), "must invoke wtype key");
+    assert!(key_call.unwrap().args.contains(&"Return".to_string()));
+
+    // Cleanup
+    set_test_wayland_display(None);
+    set_test_wayland_cmd_handler(None);
+    clear_test_wayland_tools();
+    clear_last_wayland_inputs();
+    clear_injected_events();
+}

@@ -18,6 +18,17 @@ use std::sync::RwLock;
 const FALLBACK_PNG_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
+/// Simulated Wayland tool command invocation record.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SimulatedWaylandInput {
+    pub tool: String,
+    pub action: String,
+    pub args: Vec<String>,
+}
+
+pub type WaylandCmdHandler =
+    std::sync::Arc<dyn Fn(&str, &[String]) -> Result<Vec<u8>, String> + Send + Sync>;
+
 static TEST_SCREEN_CAPTURE: RwLock<Option<Value>> = RwLock::new(None);
 static TEST_SCREEN_DIMS: RwLock<Option<(f64, f64)>> = RwLock::new(None);
 static SIMULATED_CURSOR: RwLock<(f64, f64)> = RwLock::new((0.0, 0.0));
@@ -26,6 +37,11 @@ static LAST_WINDOWS_INPUTS: RwLock<Vec<SimulatedWindowsInput>> = RwLock::new(Vec
 static TEST_DISPLAYS: RwLock<Option<Vec<DisplayInfo>>> = RwLock::new(None);
 static TEST_PER_DISPLAY_CAPTURE: RwLock<Option<std::collections::HashMap<u32, Value>>> =
     RwLock::new(None);
+static TEST_WAYLAND_DISPLAY: RwLock<Option<String>> = RwLock::new(None);
+static LAST_WAYLAND_INPUTS: RwLock<Vec<SimulatedWaylandInput>> = RwLock::new(Vec::new());
+static TEST_WAYLAND_TOOLS: RwLock<Option<std::collections::HashMap<String, Option<PathBuf>>>> =
+    RwLock::new(None);
+static TEST_WAYLAND_CMD_HANDLER: RwLock<Option<WaylandCmdHandler>> = RwLock::new(None);
 
 /// Display monitor information.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -138,6 +154,126 @@ pub fn get_last_windows_inputs() -> Vec<SimulatedWindowsInput> {
 pub fn clear_last_windows_inputs() {
     if let Ok(mut lock) = LAST_WINDOWS_INPUTS.write() {
         lock.clear();
+    }
+}
+
+/// Sets the test Wayland display override (e.g. `Some("wayland-0")` or `None`).
+pub fn set_test_wayland_display(display: Option<&str>) {
+    if let Ok(mut lock) = TEST_WAYLAND_DISPLAY.write() {
+        *lock = display.map(String::from);
+    }
+}
+
+/// Returns the test Wayland display override if set.
+pub fn get_test_wayland_display() -> Option<String> {
+    TEST_WAYLAND_DISPLAY.read().ok().and_then(|l| l.clone())
+}
+
+/// Checks whether the current session is running under Wayland.
+pub fn is_wayland() -> bool {
+    if let Ok(lock) = TEST_WAYLAND_DISPLAY.read() {
+        if let Some(ref d) = *lock {
+            return !d.trim().is_empty();
+        }
+    }
+    std::env::var("WAYLAND_DISPLAY")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// Sets or overrides the path for a Wayland tool in tests (e.g. "grim", "ydotool", "wtype").
+pub fn set_test_wayland_tool(tool: &str, path: Option<PathBuf>) {
+    if let Ok(mut lock) = TEST_WAYLAND_TOOLS.write() {
+        let map = lock.get_or_insert_with(std::collections::HashMap::new);
+        map.insert(tool.to_string(), path);
+    }
+}
+
+/// Clears all test Wayland tool path overrides.
+pub fn clear_test_wayland_tools() {
+    if let Ok(mut lock) = TEST_WAYLAND_TOOLS.write() {
+        *lock = None;
+    }
+}
+
+/// Sets a mock command execution handler for Wayland tools in tests.
+pub fn set_test_wayland_cmd_handler(handler: Option<WaylandCmdHandler>) {
+    if let Ok(mut lock) = TEST_WAYLAND_CMD_HANDLER.write() {
+        *lock = handler;
+    }
+}
+
+/// Retrieves the recorded Wayland tool invocations.
+pub fn get_last_wayland_inputs() -> Vec<SimulatedWaylandInput> {
+    if let Ok(lock) = LAST_WAYLAND_INPUTS.read() {
+        lock.clone()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Clears the recorded Wayland tool invocations.
+pub fn clear_last_wayland_inputs() {
+    if let Ok(mut lock) = LAST_WAYLAND_INPUTS.write() {
+        lock.clear();
+    }
+}
+
+fn which_wayland_tool(tool: &str) -> Option<PathBuf> {
+    if let Ok(lock) = TEST_WAYLAND_TOOLS.read() {
+        if let Some(ref map) = *lock {
+            if let Some(opt) = map.get(tool) {
+                return opt.clone();
+            }
+        }
+    }
+    which_executable(tool)
+}
+
+fn execute_wayland_command(tool: &str, action: &str, args: &[&str]) -> Result<Vec<u8>, String> {
+    let string_args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    if let Ok(mut lock) = LAST_WAYLAND_INPUTS.write() {
+        lock.push(SimulatedWaylandInput {
+            tool: tool.to_string(),
+            action: action.to_string(),
+            args: string_args.clone(),
+        });
+    }
+
+    let exe_path = which_wayland_tool(tool).ok_or_else(|| {
+        format!("Wayland tool '{tool}' not found in PATH. Install {tool} for Wayland support.")
+    })?;
+
+    if let Ok(lock) = TEST_WAYLAND_CMD_HANDLER.read() {
+        if let Some(ref handler) = *lock {
+            return handler(tool, &string_args);
+        }
+    }
+
+    let output = Command::new(&exe_path)
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to execute '{tool}': {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "'{tool}' exited with error (code {:?}): {}",
+            output.status.code(),
+            stderr.trim()
+        ));
+    }
+
+    Ok(output.stdout)
+}
+
+fn resolve_wayland_keyboard_tool() -> Result<&'static str, String> {
+    if which_wayland_tool("wtype").is_some() {
+        Ok("wtype")
+    } else if which_wayland_tool("ydotool").is_some() {
+        Ok("ydotool")
+    } else {
+        Err("Neither 'wtype' nor 'ydotool' found in PATH. Install wtype or ydotool for Wayland keyboard input.".to_string())
     }
 }
 
@@ -1098,7 +1234,7 @@ pub fn capture_screen(
     scale: Option<f64>,
     max_width: Option<u32>,
     show_cursor: bool,
-) -> (String, u32, u32) {
+) -> Result<(String, u32, u32), String> {
     let cursor_overlay = if show_cursor {
         Some(current_cursor_position())
     } else {
@@ -1127,7 +1263,7 @@ pub fn capture_screen(
                         .and_then(|v| v.as_u64())
                         .map(|h| h as u32)
                         .unwrap_or(1080);
-                    return process_and_encode_b64(
+                    return Ok(process_and_encode_b64(
                         &data,
                         width,
                         height,
@@ -1135,7 +1271,7 @@ pub fn capture_screen(
                         scale,
                         max_width,
                         cursor_overlay,
-                    );
+                    ));
                 }
             }
         }
@@ -1172,7 +1308,7 @@ pub fn capture_screen(
                             .and_then(|v| v.as_u64())
                             .map(|h| h as u32)
                             .unwrap_or(1080);
-                        return process_and_encode_b64(
+                        return Ok(process_and_encode_b64(
                             &data,
                             width,
                             height,
@@ -1180,7 +1316,7 @@ pub fn capture_screen(
                             scale,
                             max_width,
                             cursor_overlay,
-                        );
+                        ));
                     }
                 }
             }
@@ -1221,7 +1357,7 @@ pub fn capture_screen(
                         1080
                     }
                 });
-            return process_and_encode_b64(
+            return Ok(process_and_encode_b64(
                 &data,
                 width,
                 height,
@@ -1229,7 +1365,7 @@ pub fn capture_screen(
                 scale,
                 max_width,
                 cursor_overlay,
-            );
+            ));
         }
     }
 
@@ -1258,7 +1394,7 @@ pub fn capture_screen(
                     } else {
                         (1920, 1080)
                     };
-                    return process_and_encode_image(
+                    return Ok(process_and_encode_image(
                         &bytes,
                         w,
                         h,
@@ -1266,7 +1402,7 @@ pub fn capture_screen(
                         scale,
                         max_width,
                         cursor_overlay,
-                    );
+                    ));
                 }
             }
         }
@@ -1309,7 +1445,7 @@ pub fn capture_screen(
                     } else {
                         (1920, 1080)
                     };
-                    return process_and_encode_b64(
+                    return Ok(process_and_encode_b64(
                         &text,
                         w,
                         h,
@@ -1317,7 +1453,7 @@ pub fn capture_screen(
                         scale,
                         max_width,
                         cursor_overlay,
-                    );
+                    ));
                 }
             }
         }
@@ -1325,6 +1461,54 @@ pub fn capture_screen(
 
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let mut grim_args: Vec<String> = Vec::new();
+            let is_jpeg = format.eq_ignore_ascii_case("jpeg") || format.eq_ignore_ascii_case("jpg");
+            if is_jpeg {
+                grim_args.push("-t".to_string());
+                grim_args.push("jpeg".to_string());
+            } else {
+                grim_args.push("-t".to_string());
+                grim_args.push("png".to_string());
+            }
+
+            if let Some(did) = display_id {
+                let displays = list_displays();
+                if let Some(disp) = displays.iter().find(|d| d.id == did) {
+                    grim_args.push("-o".to_string());
+                    grim_args.push(disp.name.clone());
+                }
+            }
+
+            grim_args.push("-".to_string());
+            let str_args: Vec<&str> = grim_args.iter().map(|s| s.as_str()).collect();
+
+            let img_bytes = execute_wayland_command("grim", "capture", &str_args)
+                .map_err(|e| format!("Wayland screen capture failed: {e}"))?;
+
+            let (w, h) = if let Ok(img) = image::load_from_memory(&img_bytes) {
+                (img.width(), img.height())
+            } else if let Some(did) = display_id {
+                list_displays()
+                    .iter()
+                    .find(|d| d.id == did)
+                    .map(|d| (d.width, d.height))
+                    .unwrap_or((1920, 1080))
+            } else {
+                (1920, 1080)
+            };
+
+            return Ok(process_and_encode_image(
+                &img_bytes,
+                w,
+                h,
+                format,
+                scale,
+                max_width,
+                cursor_overlay,
+            ));
+        }
+
         if std::env::var("DISPLAY").is_ok() {
             if which_executable("scrot").is_some() {
                 let tmp_file =
@@ -1347,7 +1531,7 @@ pub fn capture_screen(
                             } else {
                                 (1920, 1080)
                             };
-                            return process_and_encode_image(
+                            return Ok(process_and_encode_image(
                                 &bytes,
                                 w,
                                 h,
@@ -1355,7 +1539,7 @@ pub fn capture_screen(
                                 scale,
                                 max_width,
                                 cursor_overlay,
-                            );
+                            ));
                         }
                     }
                 }
@@ -1382,7 +1566,7 @@ pub fn capture_screen(
                     .output();
                 if let Ok(out) = output {
                     if out.status.success() && !out.stdout.is_empty() {
-                        return process_and_encode_image(
+                        return Ok(process_and_encode_image(
                             &out.stdout,
                             1920,
                             1080,
@@ -1390,11 +1574,15 @@ pub fn capture_screen(
                             scale,
                             max_width,
                             cursor_overlay,
-                        );
+                        ));
                     }
                 }
             }
         }
+    }
+
+    if is_wayland() {
+        return Err("Wayland screen capture failed: grim executable not found in PATH. Install grim for Wayland screen capture.".to_string());
     }
 
     // 3. Fallback valid PNG base64 for headless / CI
@@ -1408,7 +1596,7 @@ pub fn capture_screen(
     } else {
         (1920, 1080)
     };
-    process_and_encode_b64(
+    Ok(process_and_encode_b64(
         FALLBACK_PNG_BASE64,
         target_w,
         target_h,
@@ -1416,7 +1604,7 @@ pub fn capture_screen(
         scale,
         max_width,
         cursor_overlay,
-    )
+    ))
 }
 
 /// Performs native screen capture or window capture on host OS.
@@ -1428,9 +1616,10 @@ pub fn capture_screen_native(
     max_width: Option<u32>,
 ) -> (String, u32, u32) {
     capture_screen(format, active_window, display_id, scale, max_width, false)
+        .unwrap_or_else(|_| (FALLBACK_PNG_BASE64.to_string(), 1920, 1080))
 }
 
-fn inject_mouse_move(x: f64, y: f64) {
+fn inject_mouse_move(x: f64, y: f64) -> Result<(), String> {
     set_cursor_position(x, y);
     record_event(json!({
         "type": "mouse_move",
@@ -1450,17 +1639,35 @@ fn inject_mouse_move(x: f64, y: f64) {
     }
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let x_str = x.round().to_string();
+            let y_str = y.round().to_string();
+            execute_wayland_command(
+                "ydotool",
+                "mousemove",
+                &["mousemove", "--absolute", &x_str, &y_str],
+            )
+            .map_err(|e| format!("Wayland mouse move failed: {e}"))?;
+            return Ok(());
+        }
+
         if std::env::var("DISPLAY").is_ok() && which_executable("xdotool").is_some() {
             let _ = Command::new("xdotool")
                 .args(["mousemove", &x.round().to_string(), &y.round().to_string()])
                 .status();
         }
     }
+    Ok(())
 }
 
-fn inject_mouse_click(button: &str, count: u32, x_opt: Option<f64>, y_opt: Option<f64>) {
+fn inject_mouse_click(
+    button: &str,
+    count: u32,
+    x_opt: Option<f64>,
+    y_opt: Option<f64>,
+) -> Result<(), String> {
     if let (Some(x), Some(y)) = (x_opt, y_opt) {
-        inject_mouse_move(x, y);
+        inject_mouse_move(x, y)?;
     }
 
     let (cx, cy) = current_cursor_position();
@@ -1484,6 +1691,19 @@ fn inject_mouse_click(button: &str, count: u32, x_opt: Option<f64>, y_opt: Optio
     }
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let btn_hex = match button {
+                "right" => "0xC1",
+                "middle" => "0xC2",
+                _ => "0xC0",
+            };
+            for _ in 0..count {
+                execute_wayland_command("ydotool", "click", &["click", btn_hex])
+                    .map_err(|e| format!("Wayland mouse click failed: {e}"))?;
+            }
+            return Ok(());
+        }
+
         if std::env::var("DISPLAY").is_ok() && which_executable("xdotool").is_some() {
             let btn_num = match button {
                 "right" => "3",
@@ -1499,9 +1719,10 @@ fn inject_mouse_click(button: &str, count: u32, x_opt: Option<f64>, y_opt: Optio
             let _ = cmd.status();
         }
     }
+    Ok(())
 }
 
-fn inject_mouse_press(button: &str, down: bool) {
+fn inject_mouse_press(button: &str, down: bool) -> Result<(), String> {
     let (cx, cy) = current_cursor_position();
     record_event(json!({
         "type": if down { "mouse_down" } else { "mouse_up" },
@@ -1521,6 +1742,21 @@ fn inject_mouse_press(button: &str, down: bool) {
     }
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let btn_code = match (button, down) {
+                ("right", true) => "0x41",
+                ("right", false) => "0x81",
+                ("middle", true) => "0x42",
+                ("middle", false) => "0x82",
+                (_, true) => "0x40",
+                (_, false) => "0x80",
+            };
+            let action = if down { "mousedown" } else { "mouseup" };
+            execute_wayland_command("ydotool", action, &["click", btn_code])
+                .map_err(|e| format!("Wayland mouse press failed: {e}"))?;
+            return Ok(());
+        }
+
         if std::env::var("DISPLAY").is_ok() && which_executable("xdotool").is_some() {
             let btn_num = match button {
                 "right" => "3",
@@ -1531,9 +1767,10 @@ fn inject_mouse_press(button: &str, down: bool) {
             let _ = Command::new("xdotool").args([op, btn_num]).status();
         }
     }
+    Ok(())
 }
 
-fn inject_mouse_scroll(delta_x: f64, delta_y: f64) {
+fn inject_mouse_scroll(delta_x: f64, delta_y: f64) -> Result<(), String> {
     record_event(json!({
         "type": "scroll",
         "delta_x": delta_x,
@@ -1551,6 +1788,14 @@ fn inject_mouse_scroll(delta_x: f64, delta_y: f64) {
     }
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let dy_val = delta_y.round() as i32;
+            let dy_str = dy_val.to_string();
+            execute_wayland_command("ydotool", "scroll", &["mousemove", "--wheel", &dy_str])
+                .map_err(|e| format!("Wayland mouse scroll failed: {e}"))?;
+            return Ok(());
+        }
+
         if std::env::var("DISPLAY").is_ok() && which_executable("xdotool").is_some() {
             if delta_y > 0.0 {
                 // Scroll up (button 4)
@@ -1567,9 +1812,10 @@ fn inject_mouse_scroll(delta_x: f64, delta_y: f64) {
             }
         }
     }
+    Ok(())
 }
 
-fn inject_type_text(text: &str) {
+fn inject_type_text(text: &str) -> Result<(), String> {
     record_event(json!({
         "type": "text",
         "text": text,
@@ -1587,13 +1833,26 @@ fn inject_type_text(text: &str) {
     }
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let tool = resolve_wayland_keyboard_tool()?;
+            if tool == "wtype" {
+                execute_wayland_command("wtype", "type", &["--", text])
+                    .map_err(|e| format!("Wayland type text failed: {e}"))?;
+            } else {
+                execute_wayland_command("ydotool", "type", &["type", "--", text])
+                    .map_err(|e| format!("Wayland type text failed: {e}"))?;
+            }
+            return Ok(());
+        }
+
         if std::env::var("DISPLAY").is_ok() && which_executable("xdotool").is_some() {
             let _ = Command::new("xdotool").args(["type", "--", text]).status();
         }
     }
+    Ok(())
 }
 
-fn inject_key_press(key: &str) {
+fn inject_key_press(key: &str) -> Result<(), String> {
     record_event(json!({
         "type": "key",
         "key": key,
@@ -1610,13 +1869,26 @@ fn inject_key_press(key: &str) {
     }
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let tool = resolve_wayland_keyboard_tool()?;
+            if tool == "wtype" {
+                execute_wayland_command("wtype", "key", &["-k", key])
+                    .map_err(|e| format!("Wayland key press failed: {e}"))?;
+            } else {
+                execute_wayland_command("ydotool", "key", &["key", key])
+                    .map_err(|e| format!("Wayland key press failed: {e}"))?;
+            }
+            return Ok(());
+        }
+
         if std::env::var("DISPLAY").is_ok() && which_executable("xdotool").is_some() {
             let _ = Command::new("xdotool").args(["key", key]).status();
         }
     }
+    Ok(())
 }
 
-fn inject_key_down(key: &str) {
+fn inject_key_down(key: &str) -> Result<(), String> {
     record_event(json!({ "type": "key_down", "key": key }));
     if let Some(vk) = map_key_to_win_vk(key) {
         let sim = SimulatedWindowsInput {
@@ -1642,13 +1914,27 @@ fn inject_key_down(key: &str) {
     }
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let tool = resolve_wayland_keyboard_tool()?;
+            if tool == "wtype" {
+                execute_wayland_command("wtype", "key_down", &["-P", key])
+                    .map_err(|e| format!("Wayland key down failed: {e}"))?;
+            } else {
+                let down_arg = format!("{key}:1");
+                execute_wayland_command("ydotool", "key_down", &["key", &down_arg])
+                    .map_err(|e| format!("Wayland key down failed: {e}"))?;
+            }
+            return Ok(());
+        }
+
         if std::env::var("DISPLAY").is_ok() && which_executable("xdotool").is_some() {
             let _ = Command::new("xdotool").args(["keydown", key]).status();
         }
     }
+    Ok(())
 }
 
-fn inject_key_up(key: &str) {
+fn inject_key_up(key: &str) -> Result<(), String> {
     record_event(json!({ "type": "key_up", "key": key }));
     if let Some(vk) = map_key_to_win_vk(key) {
         let sim = SimulatedWindowsInput {
@@ -1674,13 +1960,27 @@ fn inject_key_up(key: &str) {
     }
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let tool = resolve_wayland_keyboard_tool()?;
+            if tool == "wtype" {
+                execute_wayland_command("wtype", "key_up", &["-p", key])
+                    .map_err(|e| format!("Wayland key up failed: {e}"))?;
+            } else {
+                let up_arg = format!("{key}:0");
+                execute_wayland_command("ydotool", "key_up", &["key", &up_arg])
+                    .map_err(|e| format!("Wayland key up failed: {e}"))?;
+            }
+            return Ok(());
+        }
+
         if std::env::var("DISPLAY").is_ok() && which_executable("xdotool").is_some() {
             let _ = Command::new("xdotool").args(["keyup", key]).status();
         }
     }
+    Ok(())
 }
 
-fn inject_hotkey(keys_list: &[String], combination: &str) {
+fn inject_hotkey(keys_list: &[String], combination: &str) -> Result<(), String> {
     record_event(json!({
         "type": "hotkey",
         "combination": combination,
@@ -1698,10 +1998,28 @@ fn inject_hotkey(keys_list: &[String], combination: &str) {
     }
     #[cfg(target_os = "linux")]
     {
+        if is_wayland() {
+            let tool = resolve_wayland_keyboard_tool()?;
+            if tool == "wtype" {
+                let mut args = Vec::new();
+                for k in keys_list {
+                    args.push("-k");
+                    args.push(k.as_str());
+                }
+                execute_wayland_command("wtype", "hotkey", &args)
+                    .map_err(|e| format!("Wayland hotkey failed: {e}"))?;
+            } else {
+                execute_wayland_command("ydotool", "hotkey", &["key", combination])
+                    .map_err(|e| format!("Wayland hotkey failed: {e}"))?;
+            }
+            return Ok(());
+        }
+
         if std::env::var("DISPLAY").is_ok() && which_executable("xdotool").is_some() {
             let _ = Command::new("xdotool").args(["key", combination]).status();
         }
     }
+    Ok(())
 }
 
 fn make_ok_reply(id: &str, action: &str, data: Value, screenshot_opt: Option<String>) -> String {
@@ -1828,14 +2146,17 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 }
             }
 
-            let (b64, width, height) = capture_screen(
+            let (b64, width, height) = match capture_screen(
                 format,
                 active_win,
                 display_id,
                 scale,
                 max_width,
                 show_cursor,
-            );
+            ) {
+                Ok(tuple) => tuple,
+                Err(err) => return make_error_reply(id, action, err),
+            };
 
             let mut data_obj = json!({
                 "captured": true,
@@ -1880,7 +2201,10 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .unwrap_or(false);
 
             let (b64, width, height) =
-                capture_screen(format, true, None, scale, max_width, show_cursor);
+                match capture_screen(format, true, None, scale, max_width, show_cursor) {
+                    Ok(tuple) => tuple,
+                    Err(err) => return make_error_reply(id, action, err),
+                };
 
             make_ok_reply(
                 id,
@@ -1912,7 +2236,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_f64)
                 .unwrap_or(0.0);
 
-            inject_mouse_move(x, y);
+            if let Err(err) = inject_mouse_move(x, y) {
+                return make_error_reply(id, action, err);
+            }
 
             make_ok_reply(
                 id,
@@ -1964,7 +2290,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .or_else(|| params_obj.and_then(|p| p.get("y")))
                 .and_then(Value::as_f64);
 
-            inject_mouse_click(button, count, x_opt, y_opt);
+            if let Err(err) = inject_mouse_click(button, count, x_opt, y_opt) {
+                return make_error_reply(id, action, err);
+            }
             let (cx, cy) = current_cursor_position();
 
             make_ok_reply(
@@ -1998,7 +2326,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .or_else(|| params_obj.and_then(|p| p.get("y")))
                 .and_then(Value::as_f64);
 
-            inject_mouse_click(button, 2, x_opt, y_opt);
+            if let Err(err) = inject_mouse_click(button, 2, x_opt, y_opt) {
+                return make_error_reply(id, action, err);
+            }
             let (cx, cy) = current_cursor_position();
 
             make_ok_reply(
@@ -2032,7 +2362,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .or_else(|| params_obj.and_then(|p| p.get("y")))
                 .and_then(Value::as_f64);
 
-            inject_mouse_click(button, 3, x_opt, y_opt);
+            if let Err(err) = inject_mouse_click(button, 3, x_opt, y_opt) {
+                return make_error_reply(id, action, err);
+            }
             let (cx, cy) = current_cursor_position();
 
             make_ok_reply(
@@ -2056,7 +2388,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or("left");
 
-            inject_mouse_press(button, true);
+            if let Err(err) = inject_mouse_press(button, true) {
+                return make_error_reply(id, action, err);
+            }
             let (cx, cy) = current_cursor_position();
 
             make_ok_reply(
@@ -2079,7 +2413,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or("left");
 
-            inject_mouse_press(button, false);
+            if let Err(err) = inject_mouse_press(button, false) {
+                return make_error_reply(id, action, err);
+            }
             let (cx, cy) = current_cursor_position();
 
             make_ok_reply(
@@ -2128,10 +2464,18 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or("left");
 
-            inject_mouse_move(start_x, start_y);
-            inject_mouse_press(button, true);
-            inject_mouse_move(end_x, end_y);
-            inject_mouse_press(button, false);
+            if let Err(err) = inject_mouse_move(start_x, start_y) {
+                return make_error_reply(id, action, err);
+            }
+            if let Err(err) = inject_mouse_press(button, true) {
+                return make_error_reply(id, action, err);
+            }
+            if let Err(err) = inject_mouse_move(end_x, end_y) {
+                return make_error_reply(id, action, err);
+            }
+            if let Err(err) = inject_mouse_press(button, false) {
+                return make_error_reply(id, action, err);
+            }
 
             make_ok_reply(
                 id,
@@ -2161,7 +2505,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_f64)
                 .unwrap_or(0.0);
 
-            inject_mouse_scroll(delta_x, delta_y);
+            if let Err(err) = inject_mouse_scroll(delta_x, delta_y) {
+                return make_error_reply(id, action, err);
+            }
 
             make_ok_reply(
                 id,
@@ -2182,7 +2528,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
 
-            inject_type_text(text);
+            if let Err(err) = inject_type_text(text) {
+                return make_error_reply(id, action, err);
+            }
 
             make_ok_reply(
                 id,
@@ -2203,7 +2551,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
 
-            inject_key_press(key);
+            if let Err(err) = inject_key_press(key) {
+                return make_error_reply(id, action, err);
+            }
 
             make_ok_reply(
                 id,
@@ -2223,7 +2573,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
 
-            inject_key_down(key);
+            if let Err(err) = inject_key_down(key) {
+                return make_error_reply(id, action, err);
+            }
 
             make_ok_reply(
                 id,
@@ -2243,7 +2595,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
 
-            inject_key_up(key);
+            if let Err(err) = inject_key_up(key) {
+                return make_error_reply(id, action, err);
+            }
 
             make_ok_reply(
                 id,
@@ -2278,7 +2632,9 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
             };
 
             let combination = keys_list.join("+");
-            inject_hotkey(&keys_list, &combination);
+            if let Err(err) = inject_hotkey(&keys_list, &combination) {
+                return make_error_reply(id, action, err);
+            }
 
             make_ok_reply(
                 id,

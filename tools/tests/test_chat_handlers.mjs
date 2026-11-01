@@ -1797,6 +1797,82 @@ describe('VAL-WEB-004: test_web_notification_bridge container bridge script', ()
     assert.equal(audioEvents.length, 0, 'no sound should play when task_chime_enabled is false');
   });
 
+  test('VAL-UX-002: ui/container.js respects task_chime_volume and task_chime_tone customization', () => {
+    const audioEvents = [];
+    class MockAudioContext {
+      constructor() {
+        this.currentTime = 0;
+        this.destination = {};
+        audioEvents.push({ type: 'create_context' });
+      }
+      createOscillator() {
+        return {
+          type: '',
+          frequency: {
+            setValueAtTime: (val, time) => {
+              audioEvents.push({ type: 'freq', val, time });
+            }
+          },
+          connect: (dest) => audioEvents.push({ type: 'osc_connect', dest }),
+          start: (time) => audioEvents.push({ type: 'osc_start', time }),
+          stop: (time) => audioEvents.push({ type: 'osc_stop', time })
+        };
+      }
+      createGain() {
+        return {
+          gain: {
+            setValueAtTime: (val, time) => audioEvents.push({ type: 'gain_set', val, time }),
+            exponentialRampToValueAtTime: (val, time) => audioEvents.push({ type: 'gain_ramp', val, time }),
+            linearRampToValueAtTime: (val, time) => audioEvents.push({ type: 'gain_ramp', val, time })
+          },
+          connect: (dest) => audioEvents.push({ type: 'gain_connect', dest })
+        };
+      }
+      close() {
+        audioEvents.push({ type: 'close_context' });
+        return Promise.resolve();
+      }
+    }
+
+    const harness = createContainerHarness({
+      AudioContext: MockAudioContext,
+      localStorage: {
+        aqvn_task_chime_enabled: 'true',
+        aqvn_task_chime_volume: '0.8',
+        aqvn_task_chime_tone: 'bell'
+      }
+    });
+
+    assert.equal(typeof harness.bridge.getTaskChimeVolume, 'function', 'getTaskChimeVolume must be function');
+    assert.equal(typeof harness.bridge.setTaskChimeVolume, 'function', 'setTaskChimeVolume must be function');
+    assert.equal(typeof harness.bridge.getTaskChimeTone, 'function', 'getTaskChimeTone must be function');
+    assert.equal(typeof harness.bridge.setTaskChimeTone, 'function', 'setTaskChimeTone must be function');
+
+    assert.equal(harness.bridge.getTaskChimeVolume(), 0.8, 'volume loaded from storage');
+    assert.equal(harness.bridge.getTaskChimeTone(), 'bell', 'tone loaded from storage');
+
+    harness.bridge.setTaskState(true, 'running');
+    harness.bridge.setTaskState(false, 'finished');
+
+    const freqs = audioEvents.filter((e) => e.type === 'freq');
+    assert.ok(freqs.length >= 2, 'bell tone must schedule frequencies');
+    assert.equal(freqs[0].val, 587.33, 'bell tone starts at 587.33Hz');
+    assert.equal(freqs[1].val, 880, 'bell tone second freq is 880Hz');
+
+    const gainSets = audioEvents.filter((e) => e.type === 'gain_set');
+    assert.ok(gainSets.length > 0, 'gain must be set');
+    assert.ok(Math.abs(gainSets[0].val - 0.16) < 0.001, 'gain must scale with 0.8 volume (0.2 * 0.8 = 0.16)');
+
+    // Test tone switching via API
+    audioEvents.length = 0;
+    harness.bridge.setTaskChimeTone('beep');
+    harness.bridge.setTaskChimeVolume(1.0);
+    harness.bridge.setTaskState(true, 'running');
+    harness.bridge.setTaskState(false, 'finished');
+    const beepFreqs = audioEvents.filter((e) => e.type === 'freq');
+    assert.equal(beepFreqs[0].val, 800, 'beep tone starts at 800Hz');
+  });
+
   test('test_web_notification_bridge updates system tray icon state between idle and busy', () => {
     const harness = createContainerHarness({ hidden: false });
     const { bridge, calls } = harness;
@@ -2424,6 +2500,40 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     assert.match(js, /taskChimeEnabledInput/, 'settings.js must bind taskChimeEnabledInput');
     assert.match(js, /task_chime_enabled_label/, 'settings.js must define task_chime_enabled_label in i18n');
     assert.match(js, /task_chime_enabled_help/, 'settings.js must define task_chime_enabled_help in i18n');
+  });
+
+  test('VAL-UX-002: settings.html and settings.js support task_chime_volume slider and task_chime_tone selector with live preview', () => {
+    const htmlPath = new URL('../../ui/settings.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /id="task-chime-volume"/, 'settings.html must expose #task-chime-volume');
+    assert.match(html, /name="task_chime_volume"/, 'settings.html must set name="task_chime_volume"');
+    assert.match(html, /id="task-chime-tone"/, 'settings.html must expose #task-chime-tone');
+    assert.match(html, /name="task_chime_tone"/, 'settings.html must set name="task_chime_tone"');
+    assert.match(html, /id="preview-chime-btn"/, 'settings.html must expose #preview-chime-btn');
+
+    // Tone options check
+    assert.match(html, /value="classic"/, 'tone options must include classic');
+    assert.match(html, /value="bell"/, 'tone options must include bell');
+    assert.match(html, /value="beep"/, 'tone options must include beep');
+    assert.match(html, /value="subtle"/, 'tone options must include subtle');
+
+    const generalMatch = html.match(/<section[^>]*id="general-section"[^>]*>([\s\S]*?)<\/section>/);
+    assert.ok(generalMatch, 'settings.html must have #general-section');
+    assert.match(generalMatch[1], /id="task-chime-volume"/, '#general-section must contain #task-chime-volume');
+    assert.match(generalMatch[1], /id="task-chime-tone"/, '#general-section must contain #task-chime-tone');
+
+    const jsPath = new URL('../../ui/settings.js', import.meta.url);
+    const js = fs.readFileSync(jsPath, 'utf8');
+
+    assert.match(js, /task_chime_volume/, 'settings.js must reference task_chime_volume');
+    assert.match(js, /task_chime_tone/, 'settings.js must reference task_chime_tone');
+    assert.match(js, /taskChimeVolumeInput/, 'settings.js must bind taskChimeVolumeInput');
+    assert.match(js, /taskChimeToneInput/, 'settings.js must bind taskChimeToneInput');
+    assert.match(js, /previewChimeBtn/, 'settings.js must bind previewChimeBtn');
+    assert.match(js, /task_chime_volume_label/, 'settings.js must define task_chime_volume_label in i18n');
+    assert.match(js, /task_chime_tone_label/, 'settings.js must define task_chime_tone_label in i18n');
+    assert.match(js, /preview_chime_btn/, 'settings.js must define preview_chime_btn in i18n');
   });
 
   test('help.html supports close_current_window and language switcher', () => {

@@ -379,6 +379,51 @@
               Play an audible chime tone when the assistant finishes responding.
             </div>
           </div>
+
+          <div class="form-group" style="margin-top: 14px;">
+            <label for="task-chime-volume" data-i18n="task_chime_volume_label">Chime Volume / Âm lượng chuông (<span id="task-chime-volume-display">50%</span>)</label>
+            <input
+              type="range"
+              id="task-chime-volume"
+              name="task_chime_volume"
+              min="0"
+              max="1"
+              step="0.05"
+              value="0.5"
+              style="width: 100%; cursor: pointer;"
+            />
+            <div class="help-text" data-i18n="task_chime_volume_help">
+              Adjust volume for completion chime (0% to 100%).
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 14px;">
+            <label for="task-chime-tone" data-i18n="task_chime_tone_label">Chime Tone / Giai điệu chuông</label>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <select
+                id="task-chime-tone"
+                name="task_chime_tone"
+                style="flex: 1; padding: 10px 14px; border: 1px solid #1e2f45; border-radius: 8px; background: #070d16; color: #e6edf7; font: inherit; font-size: 0.9rem; cursor: pointer;"
+              >
+                <option value="classic" data-i18n="tone_classic">Classic (Dual Tone)</option>
+                <option value="bell" data-i18n="tone_bell">Bell</option>
+                <option value="beep" data-i18n="tone_beep">Beep</option>
+                <option value="subtle" data-i18n="tone_subtle">Subtle</option>
+              </select>
+              <button
+                type="button"
+                id="preview-chime-btn"
+                class="secondary-btn"
+                style="padding: 10px 16px; border: 1px solid #22d3ee55; border-radius: 8px; background: #0b1220; color: #22d3ee; cursor: pointer; white-space: nowrap; font: inherit; font-size: 0.9rem;"
+                data-i18n="preview_chime_btn"
+              >
+                Play Preview / Nghe thử
+              </button>
+            </div>
+            <div class="help-text" data-i18n="task_chime_tone_help">
+              Select tone synthesized via Web Audio API.
+            </div>
+          </div>
         </section>
 
         <section class="card">

@@ -30,6 +30,8 @@ pub const DEFAULT_CLOSE_TO_TRAY: bool = true;
 pub const DEFAULT_APP_LANGUAGE: &str = "vi";
 pub const DEFAULT_SHOW_MENU_BAR: bool = false;
 pub const DEFAULT_TASK_CHIME_ENABLED: bool = true;
+pub const DEFAULT_TASK_CHIME_VOLUME: f32 = 0.5;
+pub const DEFAULT_TASK_CHIME_TONE: &str = "classic";
 pub const STORE_FILENAME: &str = "settings.json";
 
 /// Returns a stable, deterministic gateway identifier for this device/installation.
@@ -88,6 +90,14 @@ pub fn default_workspace_path() -> String {
 
 const fn default_true() -> bool {
     true
+}
+
+const fn default_task_chime_volume() -> f32 {
+    DEFAULT_TASK_CHIME_VOLUME
+}
+
+fn default_task_chime_tone() -> String {
+    DEFAULT_TASK_CHIME_TONE.to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -159,6 +169,10 @@ pub struct AppConfig {
     pub show_menu_bar: bool,
     #[serde(default = "default_true")]
     pub task_chime_enabled: bool,
+    #[serde(default = "default_task_chime_volume")]
+    pub task_chime_volume: f32,
+    #[serde(default = "default_task_chime_tone")]
+    pub task_chime_tone: String,
     #[serde(default)]
     pub window_state: Option<WindowState>,
 }
@@ -192,6 +206,8 @@ impl Default for AppConfig {
             app_language: DEFAULT_APP_LANGUAGE.to_string(),
             show_menu_bar: DEFAULT_SHOW_MENU_BAR,
             task_chime_enabled: DEFAULT_TASK_CHIME_ENABLED,
+            task_chime_volume: DEFAULT_TASK_CHIME_VOLUME,
+            task_chime_tone: DEFAULT_TASK_CHIME_TONE.to_string(),
             window_state: None,
         }
     }
@@ -351,6 +367,16 @@ impl AppConfig {
                 config.task_chime_enabled = b;
             }
         }
+        if let Some(val) = store.get("task_chime_volume") {
+            if let Some(f) = val.as_f64() {
+                config.task_chime_volume = f.clamp(0.0, 1.0) as f32;
+            }
+        }
+        if let Some(val) = store.get("task_chime_tone") {
+            if let Some(s) = val.as_str() {
+                config.task_chime_tone = s.to_string();
+            }
+        }
         if let Some(val) = store.get("window_state") {
             if !val.is_null() {
                 if let Ok(ws) = serde_json::from_value::<WindowState>(val.clone()) {
@@ -394,6 +420,11 @@ impl AppConfig {
             "task_chime_enabled",
             serde_json::json!(self.task_chime_enabled),
         );
+        store.set(
+            "task_chime_volume",
+            serde_json::json!(self.task_chime_volume),
+        );
+        store.set("task_chime_tone", serde_json::json!(self.task_chime_tone));
         store.set("window_state", serde_json::json!(self.window_state));
 
         store

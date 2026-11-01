@@ -3,7 +3,8 @@
 use aqvn_workspace_lib::config::{
     AppConfig, ConfigWatcher, DEFAULT_ALLOWED_PATHS, DEFAULT_APP_LANGUAGE, DEFAULT_CLOSE_TO_TRAY,
     DEFAULT_GLOBAL_HOTKEY, DEFAULT_RFC_ENABLED, DEFAULT_RFC_PORT, DEFAULT_SERVER_URL,
-    DEFAULT_SHOW_MENU_BAR, DEFAULT_SSH_PORT, DEFAULT_TASK_CHIME_ENABLED, STORE_FILENAME,
+    DEFAULT_SHOW_MENU_BAR, DEFAULT_SSH_PORT, DEFAULT_TASK_CHIME_ENABLED, DEFAULT_TASK_CHIME_TONE,
+    DEFAULT_TASK_CHIME_VOLUME, STORE_FILENAME,
 };
 use tauri::Manager;
 
@@ -41,6 +42,8 @@ fn default_config_matches_contract_requirements() {
     const { assert!(!DEFAULT_SHOW_MENU_BAR) };
     assert!(conf.task_chime_enabled);
     const { assert!(DEFAULT_TASK_CHIME_ENABLED) };
+    assert_eq!(conf.task_chime_volume, DEFAULT_TASK_CHIME_VOLUME);
+    assert_eq!(conf.task_chime_tone, DEFAULT_TASK_CHIME_TONE);
 
     assert!(!conf.gateway_id.is_empty());
     assert_eq!(
@@ -93,6 +96,8 @@ fn config_json_serde_roundtrip() {
         app_language: "en".to_string(),
         show_menu_bar: true,
         task_chime_enabled: false,
+        task_chime_volume: 0.8,
+        task_chime_tone: "bell".to_string(),
         window_state: None,
     };
 
@@ -253,4 +258,22 @@ fn load_from_file_applies_partial_settings() {
     assert!(!loaded4.task_chime_enabled);
 
     let _ = std::fs::remove_file(path4);
+
+    // Test partial settings with task_chime_volume and task_chime_tone
+    let path5 = std::env::temp_dir().join(format!(
+        "aqvn-settings-chime-custom-{}-{unique}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &path5,
+        r#"{"task_chime_volume": 0.85, "task_chime_tone": "bell"}"#,
+    )
+    .expect("write settings fixture 5");
+
+    let loaded5 =
+        aqvn_workspace_lib::config::load_from_file(&path5).expect("settings file 5 must parse");
+    assert!((loaded5.task_chime_volume - 0.85).abs() < f32::EPSILON);
+    assert_eq!(loaded5.task_chime_tone, "bell");
+
+    let _ = std::fs::remove_file(path5);
 }

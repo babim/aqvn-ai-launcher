@@ -67,6 +67,23 @@
           } catch (e) {}
           return true;
         }
+        if (key === 'task_chime_volume') {
+          try {
+            const raw = localStorage.getItem('aqvn_task_chime_volume');
+            if (raw !== null) {
+              const num = parseFloat(raw);
+              if (!isNaN(num)) return Math.max(0, Math.min(1, num));
+            }
+          } catch (e) {}
+          return 0.5;
+        }
+        if (key === 'task_chime_tone') {
+          try {
+            const raw = localStorage.getItem('aqvn_task_chime_tone');
+            if (raw !== null && ['classic', 'bell', 'beep', 'subtle'].includes(raw)) return raw;
+          } catch (e) {}
+          return 'classic';
+        }
       }
       return undefined;
     }
@@ -83,6 +100,12 @@
           }
           if (key === 'task_chime_enabled') {
             localStorage.setItem('aqvn_task_chime_enabled', String(value));
+          }
+          if (key === 'task_chime_volume') {
+            localStorage.setItem('aqvn_task_chime_volume', String(value));
+          }
+          if (key === 'task_chime_tone') {
+            localStorage.setItem('aqvn_task_chime_tone', String(value));
           }
         } catch (e) {}
       }

@@ -26,6 +26,8 @@
     close_to_tray: true,
     show_menu_bar: false,
     task_chime_enabled: true,
+    task_chime_volume: 0.5,
+    task_chime_tone: 'classic',
     app_language: 'vi'
   };
 
@@ -39,6 +41,10 @@
   const closeToTrayInput = document.getElementById('close-to-tray');
   const showMenuBarInput = document.getElementById('show-menu-bar');
   const taskChimeEnabledInput = document.getElementById('task-chime-enabled');
+  const taskChimeVolumeInput = document.getElementById('task-chime-volume');
+  const taskChimeVolumeDisplay = document.getElementById('task-chime-volume-display');
+  const taskChimeToneInput = document.getElementById('task-chime-tone');
+  const previewChimeBtn = document.getElementById('preview-chime-btn');
   const langToggleBtn = document.getElementById('lang-toggle-btn');
   const currentLangText = document.getElementById('current-lang-text');
   const serverUrlInput = document.getElementById('server-url');
@@ -81,6 +87,15 @@
       show_menu_bar_help: 'Hiển thị thanh menu native dưới thanh tiêu đề cửa sổ (áp dụng ngay; chuột phải context menu luôn khả dụng).',
       task_chime_enabled_label: 'Âm báo hoàn thành tác vụ (Task Completion Sound)',
       task_chime_enabled_help: 'Phát âm thanh chuông báo khi trợ lý hoàn thành câu trả lời.',
+      task_chime_volume_label: 'Âm lượng chuông (Chime Volume)',
+      task_chime_volume_help: 'Điều chỉnh âm lượng âm báo hoàn thành (0% đến 100%).',
+      task_chime_tone_label: 'Giai điệu chuông (Chime Tone)',
+      task_chime_tone_help: 'Chọn kiểu giai điệu âm báo qua Web Audio API.',
+      preview_chime_btn: 'Nghe thử (Play Preview)',
+      tone_classic: 'Cổ điển (Classic - Dual Tone)',
+      tone_bell: 'Chuông ngân (Bell)',
+      tone_beep: 'Bíp (Beep)',
+      tone_subtle: 'Nhẹ nhàng (Subtle)',
       server_title: 'Cấu hình máy chủ',
       server_url_label: 'Địa chỉ máy chủ (Server URL)',
       server_url_help: 'Địa chỉ máy chủ làm việc từ xa (upstream workspace server).',
@@ -137,6 +152,15 @@
       show_menu_bar_help: 'Display the native menu bar under the title bar (hot-reloaded immediately; right-click context menu is always available).',
       task_chime_enabled_label: 'Task Completion Sound (Play Chime)',
       task_chime_enabled_help: 'Play an audible synthesized chime when the assistant finishes responding.',
+      task_chime_volume_label: 'Chime Volume',
+      task_chime_volume_help: 'Adjust volume for completion chime (0% to 100%).',
+      task_chime_tone_label: 'Chime Tone',
+      task_chime_tone_help: 'Select synthesized Web Audio chime tone.',
+      preview_chime_btn: 'Play Preview',
+      tone_classic: 'Classic (Dual Tone)',
+      tone_bell: 'Bell',
+      tone_beep: 'Beep',
+      tone_subtle: 'Subtle',
       server_title: 'Server Configuration',
       server_url_label: 'Server URL',
       server_url_help: 'Upstream workspace server endpoint.',
@@ -326,6 +350,85 @@
     }, 4000);
   }
 
+  function playPreviewChime(tone, volume) {
+    try {
+      const AudioCtx =
+        (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) ||
+        (typeof globalThis !== 'undefined' && (globalThis.AudioContext || globalThis.webkitAudioContext));
+      if (!AudioCtx) return null;
+      const ctx = new AudioCtx();
+      const now = typeof ctx.currentTime === 'number' ? ctx.currentTime : 0;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      const vol = typeof volume === 'number' && !isNaN(volume) ? Math.max(0, Math.min(1, volume)) : 0.5;
+      let peakGain = 0.2 * vol;
+      let duration = 0.2;
+
+      if (tone === 'bell') {
+        osc.type = 'sine';
+        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
+          osc.frequency.setValueAtTime(587.33, now);
+          osc.frequency.setValueAtTime(880, now + 0.08);
+        }
+        duration = 0.25;
+      } else if (tone === 'beep') {
+        osc.type = 'triangle';
+        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
+          osc.frequency.setValueAtTime(800, now);
+          osc.frequency.setValueAtTime(1200, now + 0.08);
+        }
+        duration = 0.16;
+      } else if (tone === 'subtle') {
+        osc.type = 'sine';
+        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
+          osc.frequency.setValueAtTime(330, now);
+          osc.frequency.setValueAtTime(440, now + 0.1);
+        }
+        peakGain = 0.15 * vol;
+        duration = 0.25;
+      } else {
+        // classic
+        osc.type = 'sine';
+        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
+          osc.frequency.setValueAtTime(440, now);
+          osc.frequency.setValueAtTime(880, now + 0.1);
+        }
+        duration = 0.2;
+      }
+
+      if (gain.gain && typeof gain.gain.setValueAtTime === 'function') {
+        gain.gain.setValueAtTime(peakGain, now);
+        if (typeof gain.gain.exponentialRampToValueAtTime === 'function') {
+          gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+        } else if (typeof gain.gain.linearRampToValueAtTime === 'function') {
+          gain.gain.linearRampToValueAtTime(0.001, now + duration);
+        }
+      }
+
+      if (typeof osc.connect === 'function') osc.connect(gain);
+      if (gain && typeof gain.connect === 'function' && ctx.destination) gain.connect(ctx.destination);
+      if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+        ctx.resume().catch(() => {});
+      }
+      if (typeof osc.start === 'function') osc.start(now);
+      if (typeof osc.stop === 'function') osc.stop(now + duration);
+
+      setTimeout(() => {
+        try {
+          if (typeof ctx.close === 'function') ctx.close();
+        } catch (e) {}
+      }, Math.round((duration + 0.1) * 1000));
+
+      return { ctx, osc, gain };
+    } catch (e) {
+      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn('[AQVN Settings] Preview chime failed:', e);
+      }
+      return null;
+    }
+  }
+
   async function loadSettings() {
     try {
       store = await window.bridge.getStore('settings.json');
@@ -429,6 +532,21 @@
           taskChimeEnabled !== undefined ? Boolean(taskChimeEnabled) : DEFAULTS.task_chime_enabled;
       }
 
+      const taskChimeVolume = await store.get('task_chime_volume');
+      if (taskChimeVolumeInput) {
+        const vol = taskChimeVolume !== undefined && taskChimeVolume !== null ? parseFloat(taskChimeVolume) : DEFAULTS.task_chime_volume;
+        taskChimeVolumeInput.value = isNaN(vol) ? DEFAULTS.task_chime_volume : Math.max(0, Math.min(1, vol));
+        if (taskChimeVolumeDisplay) {
+          taskChimeVolumeDisplay.textContent = `${Math.round(taskChimeVolumeInput.value * 100)}%`;
+        }
+      }
+
+      const taskChimeTone = await store.get('task_chime_tone');
+      if (taskChimeToneInput) {
+        const tone = taskChimeTone || DEFAULTS.task_chime_tone;
+        taskChimeToneInput.value = ['classic', 'bell', 'beep', 'subtle'].includes(tone) ? tone : DEFAULTS.task_chime_tone;
+      }
+
       const appLanguage = await store.get('app_language');
       let savedLocalLang = null;
       try {
@@ -458,6 +576,11 @@
       if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
       if (showMenuBarInput) showMenuBarInput.checked = DEFAULTS.show_menu_bar;
       if (taskChimeEnabledInput) taskChimeEnabledInput.checked = DEFAULTS.task_chime_enabled;
+      if (taskChimeVolumeInput) {
+        taskChimeVolumeInput.value = DEFAULTS.task_chime_volume;
+        if (taskChimeVolumeDisplay) taskChimeVolumeDisplay.textContent = '50%';
+      }
+      if (taskChimeToneInput) taskChimeToneInput.value = DEFAULTS.task_chime_tone;
       let fallbackLang = DEFAULTS.app_language;
       try {
         fallbackLang = localStorage.getItem('aqvn_lang') || DEFAULTS.app_language;
@@ -550,6 +673,16 @@
         : DEFAULTS.task_chime_enabled;
       await store.set('task_chime_enabled', taskChimeEnabled);
 
+      const taskChimeVolume = taskChimeVolumeInput
+        ? Math.max(0, Math.min(1, parseFloat(taskChimeVolumeInput.value)))
+        : DEFAULTS.task_chime_volume;
+      await store.set('task_chime_volume', taskChimeVolume);
+
+      const taskChimeTone = taskChimeToneInput && ['classic', 'bell', 'beep', 'subtle'].includes(taskChimeToneInput.value)
+        ? taskChimeToneInput.value
+        : DEFAULTS.task_chime_tone;
+      await store.set('task_chime_tone', taskChimeTone);
+
       const appLanguage = appLanguageSelect ? appLanguageSelect.value : currentLang;
       await store.set('app_language', appLanguage);
 
@@ -563,6 +696,8 @@
         localStorage.setItem('aqvn_server_profiles', JSON.stringify(serverProfiles));
         localStorage.setItem('aqvn_global_hotkey', globalHotkey || DEFAULTS.global_hotkey);
         localStorage.setItem('aqvn_task_chime_enabled', String(taskChimeEnabled));
+        localStorage.setItem('aqvn_task_chime_volume', String(taskChimeVolume));
+        localStorage.setItem('aqvn_task_chime_tone', taskChimeTone);
         localStorage.setItem('aqvn_lang', appLanguage);
       } catch (e) {}
 
@@ -597,11 +732,46 @@
     if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
     if (showMenuBarInput) showMenuBarInput.checked = DEFAULTS.show_menu_bar;
     if (taskChimeEnabledInput) taskChimeEnabledInput.checked = DEFAULTS.task_chime_enabled;
+    if (taskChimeVolumeInput) {
+      taskChimeVolumeInput.value = DEFAULTS.task_chime_volume;
+      if (taskChimeVolumeDisplay) taskChimeVolumeDisplay.textContent = '50%';
+    }
+    if (taskChimeToneInput) taskChimeToneInput.value = DEFAULTS.task_chime_tone;
     setLanguage(DEFAULTS.app_language);
     showStatus((SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi).reset_status, 'success');
   }
 
   // Event Listeners
+  if (taskChimeVolumeInput) {
+    taskChimeVolumeInput.addEventListener('input', () => {
+      if (taskChimeVolumeDisplay) {
+        taskChimeVolumeDisplay.textContent = `${Math.round(taskChimeVolumeInput.value * 100)}%`;
+      }
+    });
+    taskChimeVolumeInput.addEventListener('change', () => {
+      playPreviewChime(
+        taskChimeToneInput ? taskChimeToneInput.value : DEFAULTS.task_chime_tone,
+        parseFloat(taskChimeVolumeInput.value)
+      );
+    });
+  }
+  if (taskChimeToneInput) {
+    taskChimeToneInput.addEventListener('change', () => {
+      playPreviewChime(
+        taskChimeToneInput.value,
+        taskChimeVolumeInput ? parseFloat(taskChimeVolumeInput.value) : DEFAULTS.task_chime_volume
+      );
+    });
+  }
+  if (previewChimeBtn) {
+    previewChimeBtn.addEventListener('click', () => {
+      playPreviewChime(
+        taskChimeToneInput ? taskChimeToneInput.value : DEFAULTS.task_chime_tone,
+        taskChimeVolumeInput ? parseFloat(taskChimeVolumeInput.value) : DEFAULTS.task_chime_volume
+      );
+    });
+  }
+
   if (addProfileBtn) {
     addProfileBtn.addEventListener('click', addProfile);
   }

@@ -50,7 +50,10 @@
   var state = {
     busy: false,
     lastProgress: '',
-    lastSummary: ''
+    lastSummary: '',
+    taskChimeEnabled: undefined,
+    taskChimeVolume: undefined,
+    taskChimeTone: undefined
   };
 
   function notifyTaskComplete(summary) {
@@ -70,6 +73,11 @@
   }
 
   var TASK_CHIME_KEY = 'aqvn_task_chime_enabled';
+  var TASK_CHIME_VOLUME_KEY = 'aqvn_task_chime_volume';
+  var TASK_CHIME_TONE_KEY = 'aqvn_task_chime_tone';
+  var DEFAULT_TASK_CHIME_VOLUME = 0.5;
+  var DEFAULT_TASK_CHIME_TONE = 'classic';
+  var VALID_CHIME_TONES = ['classic', 'bell', 'beep', 'subtle'];
 
   function isTaskChimeEnabled() {
     if (state.taskChimeEnabled !== undefined) {
@@ -101,10 +109,88 @@
     return state.taskChimeEnabled;
   }
 
-  function playTaskChime() {
+  function getTaskChimeVolume() {
+    if (typeof state.taskChimeVolume === 'number') {
+      return state.taskChimeVolume;
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        if (typeof window.__AQVN_TASK_CHIME_VOLUME__ === 'number') {
+          return Math.max(0, Math.min(1, window.__AQVN_TASK_CHIME_VOLUME__));
+        }
+        if (window.localStorage) {
+          var val = window.localStorage.getItem(TASK_CHIME_VOLUME_KEY);
+          if (val !== null) {
+            var parsed = parseFloat(val);
+            if (!isNaN(parsed)) {
+              return Math.max(0, Math.min(1, parsed));
+            }
+          }
+        }
+      }
+    } catch (e) {}
+    return DEFAULT_TASK_CHIME_VOLUME;
+  }
+
+  function setTaskChimeVolume(vol) {
+    var num = parseFloat(vol);
+    if (isNaN(num)) {
+      num = DEFAULT_TASK_CHIME_VOLUME;
+    }
+    state.taskChimeVolume = Math.max(0, Math.min(1, num));
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(TASK_CHIME_VOLUME_KEY, String(state.taskChimeVolume));
+      }
+    } catch (e) {}
+    return state.taskChimeVolume;
+  }
+
+  function getTaskChimeTone() {
+    if (typeof state.taskChimeTone === 'string' && VALID_CHIME_TONES.indexOf(state.taskChimeTone) !== -1) {
+      return state.taskChimeTone;
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        if (typeof window.__AQVN_TASK_CHIME_TONE__ === 'string' && VALID_CHIME_TONES.indexOf(window.__AQVN_TASK_CHIME_TONE__) !== -1) {
+          return window.__AQVN_TASK_CHIME_TONE__;
+        }
+        if (window.localStorage) {
+          var val = window.localStorage.getItem(TASK_CHIME_TONE_KEY);
+          if (val !== null && VALID_CHIME_TONES.indexOf(val) !== -1) {
+            return val;
+          }
+        }
+      }
+    } catch (e) {}
+    return DEFAULT_TASK_CHIME_TONE;
+  }
+
+  function setTaskChimeTone(tone) {
+    var str = String(tone || '').toLowerCase().trim();
+    if (VALID_CHIME_TONES.indexOf(str) === -1) {
+      str = DEFAULT_TASK_CHIME_TONE;
+    }
+    state.taskChimeTone = str;
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(TASK_CHIME_TONE_KEY, state.taskChimeTone);
+      }
+    } catch (e) {}
+    return state.taskChimeTone;
+  }
+
+  function playTaskChime(toneOverride, volumeOverride) {
     if (!isTaskChimeEnabled()) {
       return null;
     }
+    var tone = (typeof toneOverride === 'string' && VALID_CHIME_TONES.indexOf(toneOverride) !== -1)
+      ? toneOverride
+      : getTaskChimeTone();
+    var volume = (typeof volumeOverride === 'number' && !isNaN(volumeOverride))
+      ? Math.max(0, Math.min(1, volumeOverride))
+      : getTaskChimeVolume();
+
     try {
       var AudioCtx =
         (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) ||
@@ -118,18 +204,47 @@
       var osc = ctx.createOscillator();
       var gain = ctx.createGain();
 
-      osc.type = 'sine';
-      if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
-        osc.frequency.setValueAtTime(440, now);
-        osc.frequency.setValueAtTime(880, now + 0.1);
+      var peakGain = 0.2 * volume;
+      var duration = 0.2;
+
+      if (tone === 'bell') {
+        osc.type = 'sine';
+        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
+          osc.frequency.setValueAtTime(587.33, now);
+          osc.frequency.setValueAtTime(880, now + 0.08);
+        }
+        duration = 0.25;
+      } else if (tone === 'beep') {
+        osc.type = 'triangle';
+        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
+          osc.frequency.setValueAtTime(800, now);
+          osc.frequency.setValueAtTime(1200, now + 0.08);
+        }
+        duration = 0.16;
+      } else if (tone === 'subtle') {
+        osc.type = 'sine';
+        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
+          osc.frequency.setValueAtTime(330, now);
+          osc.frequency.setValueAtTime(440, now + 0.1);
+        }
+        peakGain = 0.15 * volume;
+        duration = 0.25;
+      } else {
+        // 'classic' (default dual tone)
+        osc.type = 'sine';
+        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
+          osc.frequency.setValueAtTime(440, now);
+          osc.frequency.setValueAtTime(880, now + 0.1);
+        }
+        duration = 0.2;
       }
 
       if (gain.gain && typeof gain.gain.setValueAtTime === 'function') {
-        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.setValueAtTime(peakGain, now);
         if (typeof gain.gain.exponentialRampToValueAtTime === 'function') {
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
         } else if (typeof gain.gain.linearRampToValueAtTime === 'function') {
-          gain.gain.linearRampToValueAtTime(0.001, now + 0.2);
+          gain.gain.linearRampToValueAtTime(0.001, now + duration);
         }
       }
 
@@ -148,7 +263,7 @@
         osc.start(now);
       }
       if (typeof osc.stop === 'function') {
-        osc.stop(now + 0.2);
+        osc.stop(now + duration);
       }
 
       setTimeout(function () {
@@ -157,7 +272,7 @@
             ctx.close();
           }
         } catch (e) {}
-      }, 300);
+      }, Math.round((duration + 0.1) * 1000));
 
       return { ctx: ctx, osc: osc, gain: gain };
     } catch (e) {
@@ -853,12 +968,18 @@
     playTaskChime: playTaskChime,
     isTaskChimeEnabled: isTaskChimeEnabled,
     setTaskChimeEnabled: setTaskChimeEnabled,
+    getTaskChimeVolume: getTaskChimeVolume,
+    setTaskChimeVolume: setTaskChimeVolume,
+    getTaskChimeTone: getTaskChimeTone,
+    setTaskChimeTone: setTaskChimeTone,
     getState: function () {
       return {
         busy: state.busy,
         lastProgress: state.lastProgress,
         lastSummary: state.lastSummary,
-        taskChimeEnabled: isTaskChimeEnabled()
+        taskChimeEnabled: isTaskChimeEnabled(),
+        taskChimeVolume: getTaskChimeVolume(),
+        taskChimeTone: getTaskChimeTone()
       };
     }
   };

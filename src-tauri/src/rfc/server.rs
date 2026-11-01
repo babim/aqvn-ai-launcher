@@ -40,7 +40,7 @@ pub fn build_state(config: &AppConfig) -> RfcState {
     RfcState {
         password: config.rfc_password.clone(),
         context: DispatchContext {
-            sandbox: Sandbox::from_allowed_paths(&config.allowed_paths),
+            sandbox: Sandbox::from_allowed_paths(&config.unified_allowed_paths()),
             ssh_password: config.ssh_password.clone(),
         },
     }

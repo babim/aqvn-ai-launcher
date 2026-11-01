@@ -1288,3 +1288,113 @@ async fn test_unified_sandbox_allowed_paths() {
     let _ = std::fs::remove_dir_all(&allowed_dir);
     let _ = std::fs::remove_dir_all(&forbidden_dir);
 }
+
+#[tokio::test]
+async fn test_unified_sandbox_in_rfc_and_ssh() {
+    use axum::body::Body;
+    use axum::http::{header, Request, StatusCode};
+    use base64::Engine;
+    use tower::ServiceExt;
+
+    let (ws_dir, _) = create_temp_sandbox();
+    let ws_str = ws_dir.to_string_lossy().to_string();
+
+    let config = AppConfig {
+        workspace_path: ws_str.clone(),
+        allowed_paths: vec![],
+        rfc_enabled: true,
+        rfc_password: "test-rfc-pass".into(),
+        ssh_password: "test-ssh-pass".into(),
+        ..Default::default()
+    };
+
+    // 1. Verify AppConfig unified_allowed_paths contains workspace_path
+    let unified = config.unified_allowed_paths();
+    assert_eq!(unified, vec![ws_str.clone()]);
+
+    // 2. RFC sandbox initialization via rfc::server::build_state
+    let rfc_state = aqvn_workspace_lib::rfc::server::build_state(&config);
+    let app = aqvn_workspace_lib::rfc::server::router(rfc_state);
+
+    // Call RFC file write to write in workspace_path when allowed_paths is empty
+    let test_content = "rfc test file in unified sandbox";
+    let b64 = base64::engine::general_purpose::STANDARD.encode(test_content.as_bytes());
+    let rfc_input = serde_json::json!({
+        "module": "helpers.rfc_files",
+        "function_name": "_write_file_binary_impl",
+        "args": ["/a0/rfc_unified.txt", b64],
+        "kwargs": {}
+    })
+    .to_string();
+
+    let hash = aqvn_workspace_lib::rfc::auth::compute_hash("test-rfc-pass", &rfc_input);
+    let body = serde_json::json!({
+        "rfc_input": rfc_input,
+        "hash": hash,
+    })
+    .to_string();
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/rfc")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap();
+
+    let response = app.clone().oneshot(request).await.expect("send request");
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "RFC file operation must accept workspace_path when allowed_paths is empty"
+    );
+
+    let created_file = ws_dir.join("rfc_unified.txt");
+    assert!(
+        created_file.is_file(),
+        "file must be created in workspace_path"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&created_file).unwrap(),
+        test_content
+    );
+
+    // Read file via RFC
+    let read_input = serde_json::json!({
+        "module": "helpers.rfc_files",
+        "function_name": "_read_file_binary_impl",
+        "args": ["/a0/rfc_unified.txt"],
+        "kwargs": {}
+    })
+    .to_string();
+    let read_hash = aqvn_workspace_lib::rfc::auth::compute_hash("test-rfc-pass", &read_input);
+    let read_body = serde_json::json!({
+        "rfc_input": read_input,
+        "hash": read_hash,
+    })
+    .to_string();
+    let read_request = Request::builder()
+        .method("POST")
+        .uri("/api/rfc")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(read_body))
+        .unwrap();
+    let read_response = app.oneshot(read_request).await.expect("send read request");
+    assert_eq!(read_response.status(), StatusCode::OK);
+
+    // 3. SSH session CWD initializes in workspace_path when allowed_paths is empty
+    let ws_canonical = std::fs::canonicalize(&ws_dir).expect("canonicalize ws");
+    let session_cwd = aqvn_workspace_lib::ssh::session_cwd(&config.unified_allowed_paths());
+    assert_eq!(
+        std::fs::canonicalize(&session_cwd).expect("canonicalize session_cwd"),
+        ws_canonical,
+        "SSH session CWD must initialize in workspace_path when allowed_paths is empty"
+    );
+
+    let handler = aqvn_workspace_lib::ssh::server::ClientHandler::new(&config);
+    assert_eq!(
+        std::fs::canonicalize(handler.cwd()).expect("canonicalize handler cwd"),
+        ws_canonical
+    );
+
+    let _ = std::fs::remove_dir_all(&ws_dir);
+}

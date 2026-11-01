@@ -218,15 +218,22 @@ impl AppConfig {
     pub fn unified_allowed_paths(&self) -> Vec<String> {
         let mut unified = Vec::new();
         let ws = self.workspace_path.trim();
-        if !ws.is_empty() {
+        let include_ws = !ws.is_empty()
+            && (ws != DEFAULT_WORKSPACE_PATH
+                || self.allowed_paths.is_empty()
+                || self.allowed_paths.iter().any(|p| p.trim() == ws));
+
+        if include_ws {
             unified.push(ws.to_string());
         }
+
         for p in &self.allowed_paths {
             let trimmed = p.trim();
             if !trimmed.is_empty() && !unified.iter().any(|u| u == trimmed) {
                 unified.push(trimmed.to_string());
             }
         }
+
         if unified.is_empty() {
             unified.push(DEFAULT_WORKSPACE_PATH.to_string());
         }

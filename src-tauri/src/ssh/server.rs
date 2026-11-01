@@ -50,13 +50,17 @@ pub struct ClientHandler {
 }
 
 impl ClientHandler {
-    fn new(config: &AppConfig) -> Self {
+    pub fn new(config: &AppConfig) -> Self {
         Self {
             password: config.ssh_password.clone(),
-            cwd: session_cwd(&config.allowed_paths),
+            cwd: session_cwd(&config.unified_allowed_paths()),
             channels: HashMap::new(),
             pending_geometry: HashMap::new(),
         }
+    }
+
+    pub fn cwd(&self) -> &std::path::Path {
+        &self.cwd
     }
 
     /// Constant-time password comparison.

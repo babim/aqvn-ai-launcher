@@ -128,6 +128,15 @@ pub async fn bind_port_with_cache(
     cache: Arc<AssetCache>,
 ) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
     let upstream = Upstream::new(server_url)?;
+    bind_port_with_upstream(upstream, port, cache).await
+}
+
+/// Binds loopback on a specific port (0 for ephemeral) with an existing Upstream and cache.
+pub async fn bind_port_with_upstream(
+    upstream: Upstream,
+    port: u16,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
     let address = SocketAddr::new(BIND_ADDRESS, port);
     let listener = TcpListener::bind(address)
         .await
@@ -152,6 +161,22 @@ pub async fn bind(server_url: &str) -> Result<(TcpListener, ProxyState, ProxyInf
     bind_with_cache(server_url, Arc::new(AssetCache::default())).await
 }
 
+/// Binds loopback on a port in the preferred range using AppConfig.
+pub async fn bind_with_config(
+    config: &crate::config::AppConfig,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_with_config_and_cache(config, Arc::new(AssetCache::default())).await
+}
+
+/// Binds loopback on a port in the preferred range with specified asset cache using AppConfig.
+pub async fn bind_with_config_and_cache(
+    config: &crate::config::AppConfig,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    let upstream = Upstream::from_config(config)?;
+    bind_upstream_with_cache(upstream, cache).await
+}
+
 /// Binds loopback on a port in the preferred range with specified asset cache.
 /// Checks `AQVN_PROXY_PORT` or `AQVN_PROXY_EPHEMERAL` first, then probes PROXY_PORT_RANGE,
 /// falling back to ephemeral port 0.
@@ -159,19 +184,27 @@ pub async fn bind_with_cache(
     server_url: &str,
     cache: Arc<AssetCache>,
 ) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    let upstream = Upstream::new(server_url)?;
+    bind_upstream_with_cache(upstream, cache).await
+}
+
+/// Binds loopback on a port in the preferred range with an existing Upstream and asset cache.
+pub async fn bind_upstream_with_cache(
+    upstream: Upstream,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
     if let Ok(val) = std::env::var("AQVN_PROXY_PORT") {
         if let Ok(port) = val.parse::<u16>() {
-            return bind_port_with_cache(server_url, port, cache).await;
+            return bind_port_with_upstream(upstream, port, cache).await;
         }
     }
     if std::env::var("AQVN_PROXY_EPHEMERAL")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
     {
-        return bind_port_with_cache(server_url, 0, cache).await;
+        return bind_port_with_upstream(upstream, 0, cache).await;
     }
 
-    let upstream = Upstream::new(server_url)?;
     let mut bound_listener = None;
     for port in PROXY_PORT_RANGE {
         let address = SocketAddr::new(BIND_ADDRESS, port);
@@ -253,16 +286,22 @@ pub fn inject_container_bridge(html_bytes: &[u8], port: u16) -> Vec<u8> {
 /// Keeps the proxy pointed at the configured server; a change resets the jar.
 pub async fn watch_target(watcher: ConfigWatcher, state: ProxyState) {
     let mut receiver = watcher.subscribe();
-    let mut current = watcher.current().server_url;
+    let initial = watcher.current();
+    let mut current_url = initial.server_url;
+    let mut current_ca = initial.tls_ca_cert_path;
+    let mut current_skip = initial.tls_skip_verify;
     loop {
         if receiver.changed().await.is_err() {
             return;
         }
         let config = receiver.borrow_and_update().clone();
-        if config.server_url == current {
+        if config.server_url == current_url
+            && config.tls_ca_cert_path == current_ca
+            && config.tls_skip_verify == current_skip
+        {
             continue;
         }
-        match Upstream::new(&config.server_url) {
+        match Upstream::from_config(&config) {
             Ok(upstream) => {
                 println!(
                     "Bridge proxy: retargeted to {} (cookie jar reset)",
@@ -270,9 +309,11 @@ pub async fn watch_target(watcher: ConfigWatcher, state: ProxyState) {
                 );
                 state.cache().clear().await;
                 state.replace(upstream).await;
-                current = config.server_url;
+                current_url = config.server_url;
+                current_ca = config.tls_ca_cert_path;
+                current_skip = config.tls_skip_verify;
             }
-            Err(err) => eprintln!("Bridge proxy: ignoring invalid server_url: {err}"),
+            Err(err) => eprintln!("Bridge proxy: ignoring invalid server configuration: {err}"),
         }
     }
 }

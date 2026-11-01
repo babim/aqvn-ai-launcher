@@ -261,19 +261,87 @@ pub struct Upstream {
     target: Target,
     jar: Mutex<CookieJar>,
     cookie_path: Option<PathBuf>,
+    tls_ca_cert_path: Option<PathBuf>,
+    tls_skip_verify: bool,
+}
+
+/// Configures and builds a `reqwest::Client` with optional custom root CA certificates
+/// and TLS skip-verification.
+pub fn build_client<P: AsRef<Path>>(
+    tls_ca_cert_path: Option<P>,
+    tls_skip_verify: bool,
+) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(REQUEST_TIMEOUT)
+        .connect_timeout(Duration::from_secs(10));
+
+    if tls_skip_verify {
+        builder = builder
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
+    }
+
+    if let Some(path) = tls_ca_cert_path {
+        let p = path.as_ref();
+        if !p.as_os_str().is_empty() {
+            let resolved_path = if let Ok(stripped) = p.strip_prefix("~/") {
+                if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+                    PathBuf::from(home).join(stripped)
+                } else {
+                    p.to_path_buf()
+                }
+            } else {
+                p.to_path_buf()
+            };
+
+            let cert_bytes = std::fs::read(&resolved_path).map_err(|err| {
+                format!(
+                    "failed to read TLS CA certificate from {}: {err}",
+                    resolved_path.display()
+                )
+            })?;
+
+            let mut loaded = false;
+            if let Ok(bundle) = reqwest::Certificate::from_pem_bundle(&cert_bytes) {
+                for cert in bundle {
+                    builder = builder.add_root_certificate(cert);
+                    loaded = true;
+                }
+            }
+
+            if !loaded {
+                if let Ok(cert) = reqwest::Certificate::from_pem(&cert_bytes) {
+                    builder = builder.add_root_certificate(cert);
+                } else if let Ok(cert) = reqwest::Certificate::from_der(&cert_bytes) {
+                    builder = builder.add_root_certificate(cert);
+                } else {
+                    return Err(format!(
+                        "failed to parse TLS CA certificate from {}: invalid PEM or DER format",
+                        resolved_path.display()
+                    ));
+                }
+            }
+        }
+    }
+
+    builder
+        .build()
+        .map_err(|err| format!("failed to build upstream HTTP client: {err}"))
 }
 
 impl Upstream {
     pub fn new(server_url: &str) -> Result<Self, String> {
+        Self::new_with_tls(server_url, None::<&Path>, false)
+    }
+
+    pub fn new_with_tls<P: AsRef<Path>>(
+        server_url: &str,
+        tls_ca_cert_path: Option<P>,
+        tls_skip_verify: bool,
+    ) -> Result<Self, String> {
         let target = Target::parse(server_url)?;
-        // Redirects are followed manually so every hop's `Set-Cookie` lands in
-        // the jar (the login response sets the session on a 302).
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(REQUEST_TIMEOUT)
-            .connect_timeout(Duration::from_secs(10))
-            .build()
-            .map_err(|err| format!("failed to build upstream HTTP client: {err}"))?;
+        let client = build_client(tls_ca_cert_path.as_ref(), tls_skip_verify)?;
         let cookie_path = cookie_file_path(target.origin());
         let jar = if cookie_path.exists() {
             CookieJar::load_from_file(&cookie_path).unwrap_or_default()
@@ -285,7 +353,29 @@ impl Upstream {
             target,
             jar: Mutex::new(jar),
             cookie_path: Some(cookie_path),
+            tls_ca_cert_path: tls_ca_cert_path.map(|p| p.as_ref().to_path_buf()),
+            tls_skip_verify,
         })
+    }
+
+    pub fn from_config(config: &crate::config::AppConfig) -> Result<Self, String> {
+        Self::new_with_tls(
+            &config.server_url,
+            config.tls_ca_cert_path.as_deref(),
+            config.tls_skip_verify,
+        )
+    }
+
+    pub fn tls_skip_verify(&self) -> bool {
+        self.tls_skip_verify
+    }
+
+    pub fn tls_ca_cert_path(&self) -> Option<&Path> {
+        self.tls_ca_cert_path.as_deref()
+    }
+
+    pub fn client(&self) -> &reqwest::Client {
+        &self.client
     }
 
     pub fn cookie_path(&self) -> Option<&Path> {

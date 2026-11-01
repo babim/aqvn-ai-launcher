@@ -119,7 +119,7 @@ pub fn run() {
             // the window exists so the resolved port can be injected into the
             // page as `window.__AQVN_PROXY__`.
             let (proxy_listener, proxy_state, proxy_info) =
-                tauri::async_runtime::block_on(proxy::server::bind(&initial_config.server_url))?;
+                tauri::async_runtime::block_on(proxy::server::bind_with_config(&initial_config))?;
             app.manage(proxy_info.clone());
 
             let serve_state = proxy_state.clone();

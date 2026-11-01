@@ -99,6 +99,8 @@ fn config_json_serde_roundtrip() {
         task_chime_volume: 0.8,
         task_chime_tone: "bell".to_string(),
         window_state: None,
+        tls_ca_cert_path: None,
+        tls_skip_verify: false,
     };
 
     let json = serde_json::to_string(&conf).expect("serialize config");

@@ -175,6 +175,10 @@ pub struct AppConfig {
     pub task_chime_tone: String,
     #[serde(default)]
     pub window_state: Option<WindowState>,
+    #[serde(default)]
+    pub tls_ca_cert_path: Option<String>,
+    #[serde(default)]
+    pub tls_skip_verify: bool,
 }
 
 impl Default for AppConfig {
@@ -209,6 +213,8 @@ impl Default for AppConfig {
             task_chime_volume: DEFAULT_TASK_CHIME_VOLUME,
             task_chime_tone: DEFAULT_TASK_CHIME_TONE.to_string(),
             window_state: None,
+            tls_ca_cert_path: None,
+            tls_skip_verify: false,
         }
     }
 }
@@ -391,6 +397,23 @@ impl AppConfig {
                 }
             }
         }
+        if let Some(val) = store.get("tls_ca_cert_path") {
+            if let Some(s) = val.as_str() {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    config.tls_ca_cert_path = Some(trimmed.to_string());
+                } else {
+                    config.tls_ca_cert_path = None;
+                }
+            } else if val.is_null() {
+                config.tls_ca_cert_path = None;
+            }
+        }
+        if let Some(val) = store.get("tls_skip_verify") {
+            if let Some(b) = val.as_bool() {
+                config.tls_skip_verify = b;
+            }
+        }
 
         Ok(config)
     }
@@ -433,6 +456,8 @@ impl AppConfig {
         );
         store.set("task_chime_tone", serde_json::json!(self.task_chime_tone));
         store.set("window_state", serde_json::json!(self.window_state));
+        store.set("tls_ca_cert_path", serde_json::json!(self.tls_ca_cert_path));
+        store.set("tls_skip_verify", serde_json::json!(self.tls_skip_verify));
 
         store
             .save()

@@ -657,6 +657,10 @@
       ) {
         return true;
       }
+    } else if (e.altKey && !isCtrl && !e.shiftKey) {
+      if (key === 's' || code === 'KeyS' || key === 'c' || code === 'KeyC') {
+        return true;
+      }
     } else if (isCtrl && !e.altKey) {
       if (
         rawKey === ',' ||
@@ -749,6 +753,8 @@
 
       if (isZoomIn || isZoomOut || isZoomReset) {
         if (typeof e.preventDefault === 'function') e.preventDefault();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        if (typeof e.stopPropagation === 'function') e.stopPropagation();
         var now = (e && typeof e.timeStamp === 'number' && e.timeStamp > 0) ? e.timeStamp : Date.now();
         if (now - lastZoomTime < ZOOM_DEBOUNCE_MS) {
           return;

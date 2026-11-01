@@ -241,50 +241,42 @@
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
       const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      gain.gain.setValueAtTime(volume, now);
-      gain.connect(ctx.destination);
+      let duration = 0.2;
+      let peakGain = volume;
 
       const t = tone || 'classic';
-      if (t === 'classic') {
-        const osc1 = ctx.createOscillator();
-        const osc2 = ctx.createOscillator();
-        osc1.type = 'sine';
-        osc2.type = 'sine';
-        osc1.frequency.setValueAtTime(587.33, now); // D5
-        osc2.frequency.setValueAtTime(880.00, now + 0.1); // A5
-        osc1.connect(gain);
-        osc2.connect(gain);
-        osc1.start(now);
-        osc1.stop(now + 0.15);
-        osc2.start(now + 0.1);
-        osc2.stop(now + 0.35);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-      } else if (t === 'bell') {
-        const osc = ctx.createOscillator();
+      if (t === 'bell') {
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(1046.50, now); // C6
-        osc.connect(gain);
-        osc.start(now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
-        osc.stop(now + 0.6);
+        osc.frequency.setValueAtTime(587.33, now);
+        osc.frequency.setValueAtTime(880, now + 0.08);
+        duration = 0.25;
       } else if (t === 'beep') {
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(783.99, now); // G5
-        osc.connect(gain);
-        osc.start(now);
-        gain.gain.setValueAtTime(volume, now);
-        osc.stop(now + 0.12);
-      } else if (t === 'subtle') {
-        const osc = ctx.createOscillator();
         osc.type = 'triangle';
-        osc.frequency.setValueAtTime(440.00, now); // A4
-        osc.connect(gain);
-        osc.start(now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-        osc.stop(now + 0.25);
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.setValueAtTime(1200, now + 0.08);
+        duration = 0.16;
+      } else if (t === 'subtle') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(330, now);
+        osc.frequency.setValueAtTime(440, now + 0.1);
+        peakGain = 0.15 * volume;
+        duration = 0.25;
+      } else {
+        // 'classic'
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.setValueAtTime(880, now + 0.1);
+        duration = 0.2;
       }
+
+      gain.gain.setValueAtTime(peakGain, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + duration);
     } catch (e) {
       console.warn('Audio preview error:', e);
     }
@@ -818,6 +810,22 @@
   if (langToggleBtn) {
     langToggleBtn.addEventListener('click', () => {
       setLanguage(currentLang === 'vi' ? 'en' : 'vi');
+    });
+  }
+
+  const backBtn = document.getElementById('back-to-chat');
+  if (backBtn) {
+    backBtn.addEventListener('click', (e) => {
+      if (window.__TAURI_INTERNALS__ || (window.__TAURI__ && window.__TAURI__.core)) {
+        e.preventDefault();
+        if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function') {
+          window.__TAURI_INTERNALS__.invoke('close_current_window').catch(() => window.close());
+        } else if (window.__TAURI__ && window.__TAURI__.core) {
+          window.__TAURI__.core.invoke('close_current_window').catch(() => window.close());
+        } else {
+          window.close();
+        }
+      }
     });
   }
 

@@ -368,7 +368,14 @@ impl PtySession {
                             }
                         }
                         None => {
-                            // Shell process closed
+                            // Shell process closed: check exit status of child process
+                            let exit_code = self
+                                .child
+                                .try_wait()
+                                .ok()
+                                .flatten()
+                                .map(|s| s.exit_code() as i32)
+                                .unwrap_or(1);
                             let text = String::from_utf8_lossy(&raw_buf).replace("\r\n", "\n");
                             let output_to_return = if strip_ansi_flag {
                                 strip_ansi(&text)
@@ -376,7 +383,7 @@ impl PtySession {
                                 text
                             };
                             self.touch();
-                            return Ok((output_to_return, 0));
+                            return Ok((output_to_return, exit_code));
                         }
                     }
                 }
@@ -1018,7 +1025,7 @@ pub fn extract_exec_timeout_ms(envelope: &Value) -> u64 {
 /// Formats the command line wrapped with end marker for exit code tracking.
 pub fn format_pty_command_line(command: &str, end_marker: &str) -> String {
     if cfg!(windows) {
-        format!("{command}\r\nWrite-Output \"{end_marker}:$LASTEXITCODE:__\"\r\n")
+        format!("{command}\r\n$code = if ($LASTEXITCODE -ne $null) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}; Write-Output \"{end_marker}:$code:__\"\r\n")
     } else {
         format!("{{\n{command}\n}}\necho \"{end_marker}:$?:__\"\n")
     }
@@ -1280,7 +1287,15 @@ pub async fn handle_exec_op_streaming(
         let cwd = if let Some(req_cwd) = envelope.get("cwd").and_then(Value::as_str) {
             match sandbox.jail(req_cwd) {
                 Ok(p) => p,
-                Err(_) => default_cwd,
+                Err(err) => {
+                    return make_error_reply(
+                        &id,
+                        &op_id,
+                        &session_id,
+                        Some(runtime),
+                        format!("requested cwd is outside sandbox: {err}"),
+                    );
+                }
             }
         } else {
             default_cwd

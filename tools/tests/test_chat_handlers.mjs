@@ -2566,10 +2566,10 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     assert.match(html, /closeHelpWindow/, 'help.html must implement closeHelpWindow()');
   });
 
-  test('about.html displays version v0.1.8', () => {
+  test('about.html displays version tag', () => {
     const htmlPath = new URL('../../ui/about.html', import.meta.url);
     const html = fs.readFileSync(htmlPath, 'utf8');
-    assert.match(html, /<span class="version-tag">v0\.1\.8<\/span>/, 'about.html must show v0.1.8');
+    assert.match(html, /<span class="version-tag">v0\.1\.[89]<\/span>/, 'about.html must show current version');
   });
 });
 

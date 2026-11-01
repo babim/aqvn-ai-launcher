@@ -200,6 +200,12 @@ pub fn run() {
                                 }
                             }
                         }
+                        #[cfg(not(target_os = "android"))]
+                        if server_url_changed {
+                            if let Some(main_win) = poll_handle.get_webview_window("main") {
+                                let _ = main_win.eval("window.location.reload();");
+                            }
+                        }
                         last = next.clone();
                         #[cfg(not(target_os = "android"))]
                         connector::handlers::files::sync_from_app_config(&last);
@@ -288,7 +294,8 @@ pub fn run() {
             app::close_current_window,
             app::context_menu::show_context_menu,
             app::context_menu::toggle_fullscreen,
-            app::clear_disk_cache
+            app::clear_disk_cache,
+            app::reconnect_network
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AQVN Workspace");

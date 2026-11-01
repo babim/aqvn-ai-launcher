@@ -1184,19 +1184,19 @@ pub fn generate_remote_tree_update(sandbox: &Sandbox, max_depth: usize) -> Value
     let mut dir_count = 0usize;
 
     let roots = sandbox.canonical_roots().unwrap_or_default();
-    let tree_nodes = if let Some(first_root) = roots.first() {
-        build_tree_recursive(
-            first_root,
-            first_root,
+    let mut tree_nodes = Vec::new();
+    for root in &roots {
+        let mut root_nodes = build_tree_recursive(
+            root,
+            root,
             1,
             max_depth,
             &mut flat_entries,
             &mut file_count,
             &mut dir_count,
-        )
-    } else {
-        Vec::new()
-    };
+        );
+        tree_nodes.append(&mut root_nodes);
+    }
 
     let total_count = flat_entries.len();
 

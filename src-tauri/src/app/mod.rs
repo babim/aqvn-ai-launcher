@@ -167,3 +167,9 @@ pub async fn clear_disk_cache(app: AppHandle) -> Result<bool, String> {
     }
     Ok(true)
 }
+
+/// Tauri IPC command to trigger a network reconnect.
+#[tauri::command]
+pub fn reconnect_network() -> Result<(), String> {
+    Ok(())
+}

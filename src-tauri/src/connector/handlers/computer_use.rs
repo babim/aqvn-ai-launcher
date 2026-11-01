@@ -776,7 +776,17 @@ mod macos_input {
         }
     }
 
-    pub fn mouse_scroll(_delta_x: f64, _delta_y: f64) {}
+    pub fn mouse_scroll(_delta_x: f64, delta_y: f64) {
+        let dy = delta_y.round() as i32;
+        if dy == 0 {
+            return;
+        }
+        let script = format!(
+            r#"tell application "System Events" to scroll {}"#,
+            if dy > 0 { "up" } else { "down" }
+        );
+        run_osascript(&script);
+    }
 
     pub fn type_text(text: &str) {
         let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");

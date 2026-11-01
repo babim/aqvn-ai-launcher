@@ -778,6 +778,9 @@
       dom.connection.dataset.state = key;
       dom.connection.setAttribute('aria-label', 'Connection: ' + info.label);
     }
+    if (typeof window !== 'undefined' && window.__AQVN_CONTAINER__ && typeof window.__AQVN_CONTAINER__.setConnectionStatus === 'function') {
+      window.__AQVN_CONTAINER__.setConnectionStatus(key === 'online' ? 'connected' : key);
+    }
   }
 
   function showChatError(message) {
@@ -1300,6 +1303,7 @@
   }
 
   function handleShortcut(event) {
+    if (event.defaultPrevented) return false;
     var key = String(event.key || '').toLowerCase();
     if (key === 'f5' || (event.ctrlKey && event.shiftKey && key === 'r')) {
       hardRefresh();
@@ -1738,6 +1742,15 @@
         /* storage is optional */
       }
     });
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('aqvn:reconnect', function () {
+        disconnectSocket();
+        stopPolling();
+        connectSocket();
+        flushOutbox();
+      });
+    }
 
     setConnection('offline');
     applyProgress(false, '');

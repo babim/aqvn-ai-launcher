@@ -165,7 +165,7 @@ pub async fn dispatch_message_scoped(
             }
             Some(snapshot.to_string())
         }
-        MSG_TYPE_EXEC_OP | "exec_op" => {
+        MSG_TYPE_EXEC_OP | "exec_op" | "list_sessions" | "kill_session" => {
             if !config.scope_exec {
                 let session_id = exec::extract_session_id(&envelope);
                 return Some(

@@ -7,6 +7,7 @@
 #[cfg(not(target_os = "android"))]
 use crate::connector::handlers::files::current_sandbox;
 use crate::connector::protocol::{extract_id_and_op_id, MSG_TYPE_EXEC_OP_RESULT, RUNTIME_TERMINAL};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 #[cfg(not(target_os = "android"))]
 use std::collections::HashMap;
@@ -46,6 +47,7 @@ pub struct PtySession {
     output_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     cwd: PathBuf,
     last_accessed: Instant,
+    killed: bool,
 }
 
 #[cfg(not(target_os = "android"))]
@@ -166,11 +168,15 @@ impl PtySession {
             output_rx,
             cwd: cwd.to_path_buf(),
             last_accessed: Instant::now(),
+            killed: false,
         })
     }
 
     /// Checks if child process has completed or died.
     pub fn is_dead(&mut self) -> bool {
+        if self.killed {
+            return true;
+        }
         match self.child.try_wait() {
             Ok(Some(_status)) => true,
             Ok(None) => false,
@@ -394,8 +400,10 @@ impl PtySession {
     }
 
     pub fn kill(&mut self) {
+        self.killed = true;
         let _ = self.child.kill();
         let _ = self.killer.kill();
+        let _ = self.child.try_wait();
     }
 
     pub fn cwd(&self) -> &Path {
@@ -679,6 +687,85 @@ pub fn clear_all_sessions() {
     }
 }
 
+/// Descriptor of an active PTY session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionDescriptor {
+    pub id: String,
+    pub session_id: String,
+    pub cwd: String,
+    pub alive: bool,
+    pub last_accessed_secs_ago: u64,
+}
+
+/// Returns descriptors for all active PTY sessions in the registry.
+pub async fn list_sessions() -> Vec<SessionDescriptor> {
+    #[cfg(target_os = "android")]
+    {
+        Vec::new()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let sessions_to_check: Vec<(String, Arc<TokioMutex<PtySession>>)> = {
+            if let Ok(lock) = SESSIONS.lock() {
+                if let Some(map) = lock.as_ref() {
+                    map.iter()
+                        .map(|(k, v)| (k.clone(), Arc::clone(v)))
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            }
+        };
+
+        let mut descriptors = Vec::with_capacity(sessions_to_check.len());
+        for (id, session_arc) in sessions_to_check {
+            let mut s = session_arc.lock().await;
+            let alive = !s.is_dead();
+            let cwd = s.cwd().to_string_lossy().to_string();
+            let last_accessed_secs_ago = s.last_accessed().elapsed().as_secs();
+            descriptors.push(SessionDescriptor {
+                session_id: id.clone(),
+                id,
+                cwd,
+                alive,
+                last_accessed_secs_ago,
+            });
+        }
+        descriptors.sort_by(|a, b| a.id.cmp(&b.id));
+        descriptors
+    }
+}
+
+/// Terminates child process and removes session entry from registry.
+/// Returns `true` if the session existed and was terminated, `false` otherwise.
+pub async fn kill_session(session_id: &str) -> bool {
+    #[cfg(target_os = "android")]
+    {
+        let _ = session_id;
+        false
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let session_arc = {
+            if let Ok(mut lock) = SESSIONS.lock() {
+                lock.as_mut().and_then(|map| map.remove(session_id))
+            } else {
+                None
+            }
+        };
+
+        if let Some(session_arc) = session_arc {
+            let mut s = session_arc.lock().await;
+            s.kill();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// Extracts flexible session ID as string from integer or string session parameter.
 pub fn extract_session_id(envelope: &Value) -> String {
     let session_val = envelope
@@ -818,10 +905,54 @@ pub async fn handle_exec_op_streaming(
         .get("action")
         .or_else(|| envelope.get("operation"))
         .and_then(Value::as_str)
+        .or(
+            match envelope
+                .get("op")
+                .or_else(|| envelope.get("type"))
+                .and_then(Value::as_str)
+            {
+                Some("list_sessions") => Some("list_sessions"),
+                Some("kill_session") => Some("kill_session"),
+                _ => None,
+            },
+        )
         .unwrap_or("execute");
 
     #[cfg(target_os = "android")]
     {
+        if _action == "list_sessions" || _action == "list" {
+            return json!({
+                "type": MSG_TYPE_EXEC_OP_RESULT,
+                "op": MSG_TYPE_EXEC_OP_RESULT,
+                "id": id,
+                "op_id": op_id,
+                "session_id": session_id,
+                "session": session_id,
+                "action": "list_sessions",
+                "status": "ok",
+                "success": true,
+                "done": true,
+                "sessions": [],
+                "count": 0,
+            })
+            .to_string();
+        }
+        if _action == "kill_session" || _action == "kill" {
+            return json!({
+                "type": MSG_TYPE_EXEC_OP_RESULT,
+                "op": MSG_TYPE_EXEC_OP_RESULT,
+                "id": id,
+                "op_id": op_id,
+                "session_id": session_id,
+                "session": session_id,
+                "action": "kill_session",
+                "status": "ok",
+                "success": true,
+                "killed": false,
+                "done": true,
+            })
+            .to_string();
+        }
         return make_error_reply(
             &id,
             &op_id,
@@ -835,6 +966,51 @@ pub async fn handle_exec_op_streaming(
     {
         let action = _action;
         let chunk_tx = _chunk_tx;
+
+        if action == "list_sessions" || action == "list" {
+            let descriptors = list_sessions().await;
+            let descriptors_json = serde_json::to_value(&descriptors).unwrap_or_else(|_| json!([]));
+            return json!({
+                "type": MSG_TYPE_EXEC_OP_RESULT,
+                "op": MSG_TYPE_EXEC_OP_RESULT,
+                "id": id,
+                "op_id": op_id,
+                "session_id": session_id,
+                "session": session_id,
+                "action": "list_sessions",
+                "status": "ok",
+                "success": true,
+                "done": true,
+                "sessions": descriptors_json,
+                "count": descriptors.len(),
+            })
+            .to_string();
+        }
+
+        if action == "kill_session" || action == "kill" {
+            let target_id = envelope
+                .get("target_session_id")
+                .or_else(|| envelope.get("target_session"))
+                .and_then(Value::as_str)
+                .map(String::from)
+                .unwrap_or_else(|| session_id.clone());
+
+            let killed = kill_session(&target_id).await;
+            return json!({
+                "type": MSG_TYPE_EXEC_OP_RESULT,
+                "op": MSG_TYPE_EXEC_OP_RESULT,
+                "id": id,
+                "op_id": op_id,
+                "session_id": target_id,
+                "session": target_id,
+                "action": "kill_session",
+                "status": "ok",
+                "success": true,
+                "killed": killed,
+                "done": true,
+            })
+            .to_string();
+        }
 
         // Automatically reap idle / dead sessions periodically or on requests
         let _ = reap_idle_sessions(DEFAULT_MAX_IDLE_DURATION).await;
@@ -1132,5 +1308,22 @@ mod tests {
         } else {
             assert!(formatted.contains("$?"));
         }
+    }
+
+    #[test]
+    fn test_session_descriptor_serialization() {
+        let desc = SessionDescriptor {
+            id: "sess-1".to_string(),
+            session_id: "sess-1".to_string(),
+            cwd: "/tmp/workspace".to_string(),
+            alive: true,
+            last_accessed_secs_ago: 42,
+        };
+        let val = serde_json::to_value(&desc).expect("serialize descriptor");
+        assert_eq!(val["id"], "sess-1");
+        assert_eq!(val["session_id"], "sess-1");
+        assert_eq!(val["cwd"], "/tmp/workspace");
+        assert_eq!(val["alive"], true);
+        assert_eq!(val["last_accessed_secs_ago"], 42);
     }
 }

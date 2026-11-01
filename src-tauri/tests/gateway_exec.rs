@@ -593,3 +593,137 @@ async fn test_pty_session_idle_reaper_and_ansi_strip() {
 
     exec::reset_session(sess_active);
 }
+
+#[tokio::test]
+async fn test_pty_session_list_and_kill_lifecycle() {
+    let sess1 = "test-sess-lifecycle-1";
+    let sess2 = "test-sess-lifecycle-2";
+    let sess3 = "test-sess-lifecycle-3";
+
+    // Clean start
+    exec::reset_session(sess1);
+    exec::reset_session(sess2);
+    exec::reset_session(sess3);
+
+    // 1. Initialize first session with an echo command
+    let op1 = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-init-1",
+        "command": "echo session1_init",
+        "session_id": sess1,
+    });
+    let rep1_str = exec::handle_exec_op(&op1).await;
+    let rep1: Value = serde_json::from_str(&rep1_str).expect("parse rep1");
+    assert_eq!(rep1["success"], true);
+
+    // 2. Initialize second session with an echo command
+    let op2 = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-init-2",
+        "command": "echo session2_init",
+        "session_id": sess2,
+    });
+    let rep2_str = exec::handle_exec_op(&op2).await;
+    let rep2: Value = serde_json::from_str(&rep2_str).expect("parse rep2");
+    assert_eq!(rep2["success"], true);
+
+    // 3. Test list_sessions directly via exec::list_sessions()
+    let direct_sessions = exec::list_sessions().await;
+    let d1 = direct_sessions
+        .iter()
+        .find(|s| s.id == sess1)
+        .expect("sess1 in direct list_sessions");
+    assert_eq!(d1.id, sess1);
+    assert_eq!(d1.session_id, sess1);
+    assert!(d1.alive, "active session 1 must be alive");
+    assert!(!d1.cwd.is_empty(), "cwd must not be empty");
+
+    let d2 = direct_sessions
+        .iter()
+        .find(|s| s.id == sess2)
+        .expect("sess2 in direct list_sessions");
+    assert!(d2.alive, "active session 2 must be alive");
+
+    // 4. Test list_sessions via handle_exec_op action
+    let list_op = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-list-1",
+        "action": "list_sessions",
+    });
+    let list_rep_str = exec::handle_exec_op(&list_op).await;
+    let list_rep: Value = serde_json::from_str(&list_rep_str).expect("parse list_rep");
+    assert_eq!(list_rep["type"], MSG_TYPE_EXEC_OP_RESULT);
+    assert_eq!(list_rep["action"], "list_sessions");
+    assert_eq!(list_rep["success"], true);
+    let sessions_arr = list_rep["sessions"].as_array().expect("sessions array");
+    assert!(sessions_arr
+        .iter()
+        .any(|s| s["id"] == sess1 && s["alive"] == true));
+    assert!(sessions_arr
+        .iter()
+        .any(|s| s["id"] == sess2 && s["alive"] == true));
+
+    // 5. Test liveness detection: terminate child process of sess3
+    let op3 = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-init-3",
+        "command": "echo session3_init",
+        "session_id": sess3,
+    });
+    let _ = exec::handle_exec_op(&op3).await;
+
+    let exit_op = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-exit-3",
+        "command": "exit 0",
+        "session_id": sess3,
+    });
+    let _ = exec::handle_exec_op(&exit_op).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let sessions_after_exit = exec::list_sessions().await;
+    if let Some(d3) = sessions_after_exit.iter().find(|s| s.id == sess3) {
+        assert!(!d3.alive, "exited session must report alive=false");
+    }
+
+    // 6. Test kill_session via direct Rust call: kill sess1
+    assert!(exec::has_session(sess1), "sess1 must exist before kill");
+    let killed_direct = exec::kill_session(sess1).await;
+    assert!(
+        killed_direct,
+        "kill_session must return true for active session"
+    );
+    assert!(
+        !exec::has_session(sess1),
+        "sess1 must be removed after kill_session"
+    );
+
+    // 7. Test kill_session via handle_exec_op: kill sess2
+    assert!(exec::has_session(sess2), "sess2 must exist before kill");
+    let kill_op = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-kill-2",
+        "action": "kill_session",
+        "session_id": sess2,
+    });
+    let kill_rep_str = exec::handle_exec_op(&kill_op).await;
+    let kill_rep: Value = serde_json::from_str(&kill_rep_str).expect("parse kill_rep");
+    assert_eq!(kill_rep["type"], MSG_TYPE_EXEC_OP_RESULT);
+    assert_eq!(kill_rep["action"], "kill_session");
+    assert_eq!(kill_rep["success"], true);
+    assert_eq!(kill_rep["killed"], true);
+    assert!(
+        !exec::has_session(sess2),
+        "sess2 must be removed after kill_session"
+    );
+
+    // 8. Confirm both sessions are no longer in list_sessions
+    let final_sessions = exec::list_sessions().await;
+    assert!(!final_sessions
+        .iter()
+        .any(|s| s.id == sess1 || s.id == sess2));
+
+    // 9. kill_session on already killed / non-existent session returns false
+    let killed_again = exec::kill_session(sess1).await;
+    assert!(!killed_again, "killing nonexistent session returns false");
+}

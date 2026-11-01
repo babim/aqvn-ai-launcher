@@ -19,6 +19,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 #[cfg(not(target_os = "android"))]
 use tokio::sync::Mutex as TokioMutex;
+#[cfg(not(target_os = "android"))]
+use tokio::task::AbortHandle;
 
 #[cfg(not(target_os = "android"))]
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
@@ -418,7 +420,13 @@ type SessionMap = HashMap<String, Arc<TokioMutex<PtySession>>>;
 #[cfg(not(target_os = "android"))]
 static SESSIONS: StdMutex<Option<SessionMap>> = StdMutex::new(None);
 
+pub const MAX_CONCURRENT_PTY_SESSIONS: usize = 16;
 pub const DEFAULT_MAX_IDLE_DURATION: Duration = Duration::from_secs(30 * 60);
+pub const DEFAULT_REAPER_INTERVAL: Duration = Duration::from_secs(60);
+pub const REAPER_INTERVAL: Duration = DEFAULT_REAPER_INTERVAL;
+
+#[cfg(not(target_os = "android"))]
+static REAPER_HANDLE: StdMutex<Option<AbortHandle>> = StdMutex::new(None);
 
 /// Strips ANSI escape sequences (CSI, OSC, and basic ESC sequences) from a string slice.
 pub fn strip_ansi(s: &str) -> String {
@@ -526,6 +534,104 @@ pub async fn reap_default_idle_sessions() -> usize {
     reap_idle_sessions(DEFAULT_MAX_IDLE_DURATION).await
 }
 
+/// Starts a periodic background reaper task terminating idle or dead sessions.
+pub fn start_background_reaper(
+    interval: Duration,
+    max_idle: Duration,
+) -> tokio::task::JoinHandle<()> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = (interval, max_idle);
+        tokio::spawn(async {})
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let handle = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                let _ = reap_idle_sessions(max_idle).await;
+            }
+        });
+
+        if let Ok(mut lock) = REAPER_HANDLE.lock() {
+            if let Some(old) = lock.take() {
+                old.abort();
+            }
+            *lock = Some(handle.abort_handle());
+        }
+
+        handle
+    }
+}
+
+/// Checks if the periodic background reaper is currently running.
+pub fn is_background_reaper_running() -> bool {
+    #[cfg(target_os = "android")]
+    {
+        false
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Ok(lock) = REAPER_HANDLE.lock() {
+            if let Some(handle) = lock.as_ref() {
+                return !handle.is_finished();
+            }
+        }
+        false
+    }
+}
+
+/// Ensures the 60-second periodic background reaper is running.
+pub fn ensure_background_reaper_started() {
+    #[cfg(not(target_os = "android"))]
+    {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+        if !is_background_reaper_running() {
+            drop(start_background_reaper(
+                DEFAULT_REAPER_INTERVAL,
+                DEFAULT_MAX_IDLE_DURATION,
+            ));
+        }
+    }
+}
+
+/// Stops the periodic background reaper task if running.
+pub fn stop_background_reaper() {
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Ok(mut lock) = REAPER_HANDLE.lock() {
+            if let Some(handle) = lock.take() {
+                handle.abort();
+            }
+        }
+    }
+}
+
+/// Asynchronously terminates and removes all active PTY sessions.
+pub async fn clear_all_sessions_async() {
+    #[cfg(not(target_os = "android"))]
+    {
+        let sessions = {
+            if let Ok(mut lock) = SESSIONS.lock() {
+                lock.take().map(|m| m.into_values().collect::<Vec<_>>())
+            } else {
+                None
+            }
+        };
+        if let Some(sessions) = sessions {
+            for session_arc in sessions {
+                let mut s = session_arc.lock().await;
+                s.kill();
+            }
+        }
+    }
+}
+
 pub fn has_session(session_id: &str) -> bool {
     #[cfg(target_os = "android")]
     {
@@ -616,6 +722,8 @@ pub async fn get_or_create_session(
     cols: u16,
     rows: u16,
 ) -> Result<Arc<TokioMutex<PtySession>>, String> {
+    ensure_background_reaper_started();
+
     let existing_arc = {
         let mut lock = SESSIONS.lock().map_err(|e| e.to_string())?;
         let map = lock.get_or_insert_with(HashMap::new);
@@ -641,15 +749,80 @@ pub async fn get_or_create_session(
         }
     }
 
+    // Check cap BEFORE spawning child process
+    {
+        let mut lock = SESSIONS.lock().map_err(|e| e.to_string())?;
+        let map = lock.get_or_insert_with(HashMap::new);
+
+        if map.len() >= MAX_CONCURRENT_PTY_SESSIONS {
+            let to_remove: Vec<String> = map
+                .iter()
+                .filter_map(|(id, arc)| {
+                    if let Ok(mut s) = arc.try_lock() {
+                        if s.is_dead() || s.last_accessed().elapsed() >= DEFAULT_MAX_IDLE_DURATION {
+                            s.kill();
+                            return Some(id.clone());
+                        }
+                    }
+                    None
+                })
+                .collect();
+            for id in to_remove {
+                map.remove(&id);
+            }
+        }
+
+        if map.len() >= MAX_CONCURRENT_PTY_SESSIONS {
+            return Err(format!(
+                "maximum concurrent PTY sessions ({MAX_CONCURRENT_PTY_SESSIONS}) reached"
+            ));
+        }
+    }
+
     let session = PtySession::spawn(cwd, cols, rows).await?;
     let session_arc = Arc::new(TokioMutex::new(session));
 
-    let mut lock = SESSIONS.lock().map_err(|e| e.to_string())?;
-    let map = lock.get_or_insert_with(HashMap::new);
-    if let Some(existing) = map.get(session_id) {
-        return Ok(Arc::clone(existing));
+    let at_cap = {
+        let mut lock = SESSIONS.lock().map_err(|e| e.to_string())?;
+        let map = lock.get_or_insert_with(HashMap::new);
+        if let Some(existing) = map.get(session_id) {
+            return Ok(Arc::clone(existing));
+        }
+
+        if map.len() >= MAX_CONCURRENT_PTY_SESSIONS {
+            let to_remove: Vec<String> = map
+                .iter()
+                .filter_map(|(id, arc)| {
+                    if let Ok(mut s) = arc.try_lock() {
+                        if s.is_dead() || s.last_accessed().elapsed() >= DEFAULT_MAX_IDLE_DURATION {
+                            s.kill();
+                            return Some(id.clone());
+                        }
+                    }
+                    None
+                })
+                .collect();
+            for id in to_remove {
+                map.remove(&id);
+            }
+        }
+
+        if map.len() >= MAX_CONCURRENT_PTY_SESSIONS {
+            true
+        } else {
+            map.insert(session_id.to_string(), Arc::clone(&session_arc));
+            false
+        }
+    };
+
+    if at_cap {
+        let mut s = session_arc.lock().await;
+        s.kill();
+        return Err(format!(
+            "maximum concurrent PTY sessions ({MAX_CONCURRENT_PTY_SESSIONS}) reached"
+        ));
     }
-    map.insert(session_id.to_string(), Arc::clone(&session_arc));
+
     Ok(session_arc)
 }
 
@@ -1013,6 +1186,7 @@ pub async fn handle_exec_op_streaming(
         }
 
         // Automatically reap idle / dead sessions periodically or on requests
+        ensure_background_reaper_started();
         let _ = reap_idle_sessions(DEFAULT_MAX_IDLE_DURATION).await;
 
         if action == "reap" || action == "reap_idle" || action == "cleanup" {

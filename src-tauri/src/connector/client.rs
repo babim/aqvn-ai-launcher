@@ -247,6 +247,8 @@ impl GatewayClient {
 
         crate::connector::handlers::files::set_workspace_path(Some(&self.config.workspace_path));
         crate::connector::handlers::files::set_allowed_paths(Some(&self.config.allowed_paths));
+        #[cfg(not(target_os = "android"))]
+        crate::connector::handlers::exec::ensure_background_reaper_started();
 
         let handle = GatewayHandle {
             connected: Arc::clone(&connected),

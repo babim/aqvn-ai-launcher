@@ -19,8 +19,11 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
 
+static TEST_SERIAL_MUTEX: Mutex<()> = Mutex::const_new(());
+
 #[tokio::test]
 async fn test_gateway_pty_execution() {
+    let _serial_guard = TEST_SERIAL_MUTEX.lock().await;
     let session_id = "test-session-stateful-1";
     exec::reset_session(session_id);
 
@@ -163,6 +166,7 @@ async fn test_gateway_pty_execution() {
 
 #[tokio::test]
 async fn test_gateway_pty_streaming() {
+    let _serial_guard = TEST_SERIAL_MUTEX.lock().await;
     let session_id = "test-session-stream-1";
     exec::reset_session(session_id);
 
@@ -227,6 +231,7 @@ async fn test_gateway_pty_streaming() {
 
 #[tokio::test]
 async fn test_gateway_pty_websocket_roundtrip() {
+    let _serial_guard = TEST_SERIAL_MUTEX.lock().await;
     let session_id = "ws-session-1";
     exec::reset_session(session_id);
 
@@ -368,6 +373,7 @@ async fn test_gateway_pty_websocket_roundtrip() {
 
 #[tokio::test]
 async fn test_flexible_session_parsing() {
+    let _serial_guard = TEST_SERIAL_MUTEX.lock().await;
     // 1. Integer session parameter
     let session_int = 98765;
     exec::reset_session(&session_int.to_string());
@@ -443,6 +449,7 @@ async fn test_flexible_session_parsing() {
 
 #[tokio::test]
 async fn test_pty_session_idle_reaper_and_ansi_strip() {
+    let _serial_guard = TEST_SERIAL_MUTEX.lock().await;
     // Part 1: ANSI escape sequence stripping
     // Test pure unit function
     let colored = "\x1b[1;31mError:\x1b[0m \x1b[32mFile saved\x1b[0m\x1b]0;Title\x07";
@@ -596,6 +603,7 @@ async fn test_pty_session_idle_reaper_and_ansi_strip() {
 
 #[tokio::test]
 async fn test_pty_session_list_and_kill_lifecycle() {
+    let _serial_guard = TEST_SERIAL_MUTEX.lock().await;
     let sess1 = "test-sess-lifecycle-1";
     let sess2 = "test-sess-lifecycle-2";
     let sess3 = "test-sess-lifecycle-3";
@@ -726,4 +734,123 @@ async fn test_pty_session_list_and_kill_lifecycle() {
     // 9. kill_session on already killed / non-existent session returns false
     let killed_again = exec::kill_session(sess1).await;
     assert!(!killed_again, "killing nonexistent session returns false");
+}
+
+#[tokio::test]
+async fn test_pty_max_sessions_and_background_reap() {
+    let _serial_guard = TEST_SERIAL_MUTEX.lock().await;
+    exec::clear_all_sessions_async().await;
+    exec::stop_background_reaper();
+
+    assert_eq!(exec::MAX_CONCURRENT_PTY_SESSIONS, 16);
+    assert_eq!(exec::DEFAULT_REAPER_INTERVAL, Duration::from_secs(60));
+    assert_eq!(
+        exec::DEFAULT_MAX_IDLE_DURATION,
+        Duration::from_secs(30 * 60)
+    );
+
+    // Part 1: Enforce MAX_CONCURRENT_PTY_SESSIONS cap of 16
+    let spawn_futures = (1..=16).map(|i| {
+        let sid = format!("cap-sess-{i}");
+        let op = json!({
+            "type": MSG_TYPE_EXEC_OP,
+            "id": format!("req-cap-{i}"),
+            "command": format!("echo cap_{i}"),
+            "session_id": sid,
+        });
+        async move {
+            let rep_str = exec::handle_exec_op(&op).await;
+            let rep: Value = serde_json::from_str(&rep_str).expect("parse spawn rep");
+            (i, rep)
+        }
+    });
+    let results = futures_util::future::join_all(spawn_futures).await;
+    for (i, rep) in results {
+        assert_eq!(
+            rep["success"], true,
+            "session {i} should spawn successfully, got: {:?}",
+            rep
+        );
+    }
+
+    assert_eq!(exec::session_count(), 16);
+
+    // Attempting to spawn >16 concurrent sessions returns an error notice
+    let op17 = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-cap-17",
+        "command": "echo cap_17",
+        "session_id": "cap-sess-17",
+    });
+    let rep17_str = exec::handle_exec_op(&op17).await;
+    let rep17: Value = serde_json::from_str(&rep17_str).expect("parse rep17");
+
+    assert_eq!(rep17["type"], MSG_TYPE_EXEC_OP_RESULT);
+    assert_eq!(rep17["id"], "req-cap-17");
+    assert_eq!(rep17["status"], "error");
+    assert_eq!(rep17["success"], false);
+    assert_eq!(rep17["done"], true);
+    let err_msg = rep17["error"].as_str().unwrap_or_default();
+    assert!(
+        err_msg.contains("maximum concurrent PTY sessions") && err_msg.contains("16"),
+        "error notice must mention maximum concurrent PTY sessions cap, got: {err_msg}"
+    );
+    assert_eq!(
+        exec::session_count(),
+        16,
+        "session count must remain capped at 16"
+    );
+    assert!(!exec::has_session("cap-sess-17"));
+
+    // Existing active sessions continue to work
+    let op_reuse = json!({
+        "type": MSG_TYPE_EXEC_OP,
+        "id": "req-cap-reuse",
+        "command": "echo reuse_ok",
+        "session_id": "cap-sess-1",
+    });
+    let rep_reuse_str = exec::handle_exec_op(&op_reuse).await;
+    let rep_reuse: Value = serde_json::from_str(&rep_reuse_str).expect("parse rep_reuse");
+    assert_eq!(rep_reuse["success"], true);
+    assert_eq!(exec::session_count(), 16);
+
+    // Part 2: Background reaper automatically removes idle sessions inactive for >30 minutes
+    // Start background reaper with a fast interval for test verification (50ms interval, 30min idle threshold)
+    let reaper_handle =
+        exec::start_background_reaper(Duration::from_millis(50), Duration::from_secs(30 * 60));
+    assert!(exec::is_background_reaper_running());
+
+    // Mark cap-sess-2 and cap-sess-3 as idle (>30 min ago)
+    let thirty_one_mins_ago = std::time::Instant::now() - Duration::from_secs(31 * 60);
+    assert!(exec::set_session_last_accessed("cap-sess-2", thirty_one_mins_ago).await);
+    assert!(exec::set_session_last_accessed("cap-sess-3", thirty_one_mins_ago).await);
+
+    // Wait for the periodic background reaper to automatically reap them
+    let mut reaped = false;
+    for _ in 0..30 {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        if !exec::has_session("cap-sess-2") && !exec::has_session("cap-sess-3") {
+            reaped = true;
+            break;
+        }
+    }
+    assert!(
+        reaped,
+        "background reaper must automatically remove sessions idle >30 minutes"
+    );
+
+    // Active session (cap-sess-1) must still be alive and not reaped
+    assert!(exec::has_session("cap-sess-1"));
+    assert_eq!(exec::session_count(), 14);
+
+    // Now that sessions were reaped, new session can spawn without exceeding cap
+    let rep17_retry_str = exec::handle_exec_op(&op17).await;
+    let rep17_retry: Value = serde_json::from_str(&rep17_retry_str).expect("parse rep17_retry");
+    assert_eq!(rep17_retry["success"], true);
+    assert!(exec::has_session("cap-sess-17"));
+
+    // Cleanup
+    reaper_handle.abort();
+    exec::stop_background_reaper();
+    exec::clear_all_sessions_async().await;
 }

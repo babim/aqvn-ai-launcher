@@ -858,6 +858,13 @@
   function installKeyboardShortcuts(dom) {
     function messageHandler(e) {
       if (!e || !e.data) return;
+      if (typeof window !== 'undefined' && e.origin) {
+        var isLocal =
+          e.origin === window.location.origin ||
+          /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(e.origin) ||
+          e.origin === 'null';
+        if (!isLocal) return;
+      }
       var data = e.data;
       if (
         data.type === 'aqvn:keydown' ||
@@ -981,6 +988,16 @@
           badge.setAttribute('aria-label', 'Connection: ' + info.label);
         }
         badge.textContent = info.icon + ' ' + info.label;
+      }
+
+      var pill = (document.getElementById && document.getElementById('connection-pill')) ||
+                 (document.querySelector && document.querySelector('.conn'));
+      if (pill) {
+        if (pill.dataset) pill.dataset.state = canonical;
+        if (typeof pill.setAttribute === 'function') {
+          pill.setAttribute('aria-label', 'Connection: ' + info.label);
+        }
+        pill.textContent = info.icon + ' ' + info.label;
       }
 
       var statusEl = document.getElementById && document.getElementById('diagnostics-connection-status');

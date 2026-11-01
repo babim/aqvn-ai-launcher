@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.9] - 2026-11-01
 
 ### Added
+- **Security Hardening & Sandboxing**:
+  - **IPC Capability Scheme Restriction & Strict CSP**: Scoped `shell:allow-open` capability to explicit scheme regexes (`^https?://`, `^mailto:`), preventing dangerous protocol invocation, and defined strict Content Security Policy in `tauri.conf.json` (`VAL-SEC-003`).
+  - **Unified Sandbox Applied to RFC & SSH Bridges**: Bound `config.unified_allowed_paths()` across RFC HTTP handlers and embedded SSH daemon sessions, ensuring sandbox jail integrity when `workspace_path` is configured (`VAL-SEC-004`).
+  - **Inbound Rate Limiting & SSH Lockout Defense**: Implemented 60 req/min sliding-window rate limiter on `/api/rfc` (returning HTTP 429) and consecutive failed authentication lockout (5 attempts) on SSH bridge (`VAL-SEC-005`).
+- **Agent Hub & Transfer Resilience**:
+  - **PTY Session Capacity & Background Idle Reaper**: Enforced `MAX_CONCURRENT_PTY_SESSIONS` cap of 16 in `exec.rs` and wired a 60-second periodic background reaper terminating idle sessions (>30 min) (`VAL-HUB-004`).
+  - **Chunked File Write Rollback on SHA-256 Mismatch**: Automatically truncated/removed corrupted partial files upon checksum validation failure during `final: true` chunk write, reporting `rollback: true` in error payload (`VAL-HUB-005`).
+- **Proxy TLS & Disk Cache Lifecycle**:
+  - **Custom Root CA & TLS Skip Verify Configuration**: Added `tls_ca_cert_path` and `tls_skip_verify` to `AppConfig` and upstream proxy `reqwest::ClientBuilder` for self-hosted and private CA endpoints (`VAL-NET-003`).
+  - **Bounded 256MB Disk Cache Quota & Manual Purge**: Implemented automatic LRU disk cache pruning of oldest assets and `.meta`/`.etag` files upon exceeding 256MB quota, with `clear_disk_cache` API and UI action in Settings (`VAL-CACHE-004`).
+- **Cross-Platform & Operator Diagnostics**:
+  - **Wayland Native Screen Capture & Input Support**: Added `WAYLAND_DISPLAY` detection integrating `grim` for screen capture and `ydotool`/`wtype` for input simulation, with explicit error diagnostics on failure (`VAL-DESK-001`).
+  - **Connection Diagnostics Modal & Network Recovery Badge**: Added interactive connection badge (Connected, Reconnecting, Offline) and Diagnostics Modal in `ui/container.js` displaying proxy port, server profile, latency, and manual reconnect action (`VAL-UI-004`).
+  - **Android Kotlin Test Harness & Taskfile Parity**: Added `test:android` and `test:node` tasks to `Taskfile.yml` and established unit test harness `AndroidHarnessTest.kt` under `src-tauri/gen/android/app/src/test/java/` (`VAL-MOB-006`).
 - **Network & Proxy Hardening (Round 4 Upgrades)**:
   - **Upstream HTTP Client Retry with Exponential Backoff**: Automatic retry up to 3 attempts (`MAX_UPSTREAM_ATTEMPTS = 3`, initial delay 100ms doubling exponentially) on transient connection errors (`is_connect`, `is_timeout`) and a dedicated 10s connection timeout in `src-tauri/src/proxy/upstream.rs` (`VAL-NET-001`).
   - **WebSocket Heartbeat Watchdog**: 60s inactivity watchdog in `src-tauri/src/proxy/ws.rs` issuing periodic 15s ping probes and terminating hung or idle bridge legs cleanly, allowing automatic client reconnection (`VAL-NET-002`).

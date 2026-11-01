@@ -475,6 +475,20 @@ async fn test_default_sandbox_workspace_confinement() {
 
     // 3. Normal file write and read inside ~/Workspace is jailed and cleanable
     let test_filename = format!(".aqvn_test_sandbox_{}.txt", std::process::id());
+    let full_path = sandbox.jail(&test_filename).ok();
+
+    struct TestCleanupGuard {
+        path: Option<std::path::PathBuf>,
+    }
+    impl Drop for TestCleanupGuard {
+        fn drop(&mut self) {
+            if let Some(ref p) = self.path {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
+    let _cleanup_guard = TestCleanupGuard { path: full_path };
+
     let write_op = json!({
         "type": MSG_TYPE_FILE_OP,
         "id": "req-default-write",
@@ -496,15 +510,6 @@ async fn test_default_sandbox_workspace_confinement() {
     let reply: Value = serde_json::from_str(&reply_str).unwrap();
     assert_eq!(reply["success"], true);
     assert_eq!(reply["content"], "sandboxed inside Workspace\n");
-
-    // Clean up test file
-    let remove_op = json!({
-        "type": MSG_TYPE_FILE_OP,
-        "id": "req-default-remove",
-        "action": "files_remove",
-        "path": test_filename
-    });
-    let _ = files::handle_file_op_with_sandbox(&remove_op, &sandbox).await;
 }
 
 #[tokio::test]

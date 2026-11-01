@@ -327,9 +327,12 @@ pub fn map_key_to_win_vk(key: &str) -> Option<u16> {
         "f11" => Some(WIN_VK_F11),
         "f12" => Some(WIN_VK_F12),
         s if s.len() == 1 => {
-            let c = s.chars().next().unwrap();
-            if c.is_ascii_alphanumeric() {
-                Some(c.to_ascii_uppercase() as u16)
+            if let Some(c) = s.chars().next() {
+                if c.is_ascii_alphanumeric() {
+                    Some(c.to_ascii_uppercase() as u16)
+                } else {
+                    None
+                }
             } else {
                 None
             }

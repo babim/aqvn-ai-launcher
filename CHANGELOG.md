@@ -46,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cross-Platform Release Enhancements**:
   - Added macOS runner job on `macos-14` building `.dmg` and `.app` bundles in `.github/workflows/release.yml`.
   - Configured 60-minute job timeouts across all CI runner jobs.
+- **Windows UI Stability & Architecture Fixes**:
+  - Single-target root CSS zoom on `documentElement` without mutating `body.style.zoom`, preventing compound 1.72x visual magnification.
+  - Added 150ms debounce window on zoom keyboard shortcuts (`Ctrl +/-/0`) in `container.js`, resolving multi-step zoom jumps from single keypresses on Windows WebView2.
+  - Disabled `zoom_hotkeys_enabled(false)` in `src-tauri/src/lib.rs` to eliminate WebView2 engine shortcut collision with application menu accelerators.
+  - Synchronized absolute target scale `applyZoom(scale)` from Rust context menu action dispatching, eliminating repeated zoom increments.
+  - Added primary mouse button filter (`e.button === 0 && !e.ctrlKey`) and 300ms cooldown timestamp guard in `container.js`, preventing left-click menu popups during Win32 popup dismissal.
+  - Native Windows input injection (`SendInput`) and macOS fallback in `computer_use.rs` for mouse clicks, movements, scroll, text typing, and keys.
+  - Transfer Protocol v1 chunked file write with `offset` seek in `files.rs`.
+  - Dynamic cache ETag generation and `304 Not Modified` validation on `If-None-Match` in proxy server.
+  - Native window fullscreen control (`core:window:allow-set-fullscreen`, `toggle_fullscreen`, and `F11` shortcut).
+  - Internal unit test coverage for connector handlers (`computer_use`, `files`, `exec`).
 
 ### Changed
 - Refactored outbound connector WebSocket to use Socket.IO protocol framing (`/socket.io/?EIO=4&transport=websocket`).

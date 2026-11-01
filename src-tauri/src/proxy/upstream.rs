@@ -17,6 +17,73 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CSRF_PATH: &str = "/api/csrf_token";
 const LOGIN_PATH: &str = "/login";
 
+pub const MAX_UPSTREAM_ATTEMPTS: usize = 3;
+pub const INITIAL_BACKOFF_MS: u64 = 100;
+
+/// Returns true if the reqwest error is a transient connection error or timeout.
+pub fn is_transient_error(err: &reqwest::Error) -> bool {
+    err.is_connect() || err.is_timeout()
+}
+
+/// Executes an HTTP request closure with automatic retry and exponential backoff
+/// on transient connection failures (`is_connect`, `is_timeout`) up to 3 attempts.
+pub async fn execute_with_retry<F, Fut>(
+    mut make_request: F,
+) -> Result<reqwest::Response, reqwest::Error>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
+{
+    for attempt in 0..MAX_UPSTREAM_ATTEMPTS {
+        match make_request().await {
+            Ok(resp) => return Ok(resp),
+            Err(err) => {
+                if is_transient_error(&err) && attempt + 1 < MAX_UPSTREAM_ATTEMPTS {
+                    let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * (1 << attempt));
+                    println!(
+                        "Bridge proxy: transient upstream error ({err}); retrying in {}ms (attempt {}/{MAX_UPSTREAM_ATTEMPTS})",
+                        backoff.as_millis(),
+                        attempt + 2
+                    );
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    }
+    unreachable!("loop always returns on Ok or Err");
+}
+
+/// Helper that retries a cloneable `RequestBuilder` with exponential backoff.
+pub async fn send_with_retry(
+    request: reqwest::RequestBuilder,
+) -> Result<reqwest::Response, reqwest::Error> {
+    for attempt in 0..MAX_UPSTREAM_ATTEMPTS {
+        let req = match request.try_clone() {
+            Some(r) => r,
+            None => return request.send().await,
+        };
+        match req.send().await {
+            Ok(resp) => return Ok(resp),
+            Err(err) => {
+                if is_transient_error(&err) && attempt + 1 < MAX_UPSTREAM_ATTEMPTS {
+                    let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * (1 << attempt));
+                    println!(
+                        "Bridge proxy: transient upstream error ({err}); retrying in {}ms (attempt {}/{MAX_UPSTREAM_ATTEMPTS})",
+                        backoff.as_millis(),
+                        attempt + 2
+                    );
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    }
+    unreachable!("loop always returns on Ok or Err");
+}
+
 /// Resolves the default cookie directory on the host.
 pub fn cookie_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("AQVN_CONFIG_DIR") {
@@ -204,6 +271,7 @@ impl Upstream {
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .map_err(|err| format!("failed to build upstream HTTP client: {err}"))?;
         let cookie_path = cookie_file_path(target.origin());
@@ -283,8 +351,7 @@ impl Upstream {
         if let Some(cookie) = jar.cookie_header() {
             request = request.header(header::COOKIE, cookie);
         }
-        let response = request
-            .send()
+        let response = send_with_retry(request)
             .await
             .map_err(|err| format!("CSRF bootstrap request failed: {err}"))?;
         let status = response.status();
@@ -554,8 +621,7 @@ impl Upstream {
                 request = request.body(bytes.clone());
             }
 
-            let response = request
-                .send()
+            let response = send_with_retry(request)
                 .await
                 .map_err(|err| format!("upstream request to {url} failed: {err}"))?;
             let status = response.status().as_u16();

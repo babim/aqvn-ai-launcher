@@ -104,13 +104,9 @@ async fn start_stub() -> (Arc<Stub>, Running) {
         axum::serve(listener, router).await.expect("stub serve");
     });
 
-    (
-        stub,
-        Running {
-            base: format!("http://{address}"),
-            task,
-        },
-    )
+    let base = format!("http://{address}");
+    let _ = std::fs::remove_file(upstream::cookie_file_path(&base));
+    (stub, Running { base, task })
 }
 
 async fn start_proxy(target: &str) -> Running {
@@ -1718,4 +1714,132 @@ async fn test_cache_etag_and_304_not_modified() {
     );
     let body_mismatch = resp_mismatch.bytes().await.expect("body_mismatch");
     assert_eq!(body_mismatch.as_ref(), RAW_BODY);
+}
+
+// --------------------------------- Upstream Retry & Exponential Backoff (VAL-NET-001)
+
+#[tokio::test]
+async fn test_upstream_retry_exponential_backoff() {
+    use tokio::io::AsyncWriteExt;
+
+    // 1. Verify constants and contract
+    assert_eq!(upstream::MAX_UPSTREAM_ATTEMPTS, 3);
+    assert_eq!(upstream::INITIAL_BACKOFF_MS, 100);
+
+    // 2. Connection failure on closed port (is_connect) retries 3 times with exponential backoff (100ms * 2^attempt)
+    let unused_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind unused port");
+    let closed_port = unused_listener.local_addr().expect("port").port();
+    drop(unused_listener);
+
+    let target_url = format!("http://127.0.0.1:{closed_port}");
+    let upstream = upstream::Upstream::new(&target_url).expect("upstream instance");
+
+    let start = std::time::Instant::now();
+    let result = upstream
+        .forward(axum::http::Method::GET, "/api/test", None, Vec::new())
+        .await;
+    let elapsed = start.elapsed();
+
+    assert!(result.is_err(), "request to closed port must fail");
+    // With 3 attempts:
+    // attempt 0 fail -> sleep 100ms
+    // attempt 1 fail -> sleep 200ms
+    // attempt 2 fail -> return error
+    // Total sleep = 100ms + 200ms = 300ms
+    assert!(
+        elapsed >= std::time::Duration::from_millis(280),
+        "expected backoff delay >= 280ms (100ms + 200ms), actual: {:?}",
+        elapsed
+    );
+
+    // 3. Transient timeout failure that succeeds on attempt 2 (1st retry)
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind server");
+    let port = listener.local_addr().expect("port").port();
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let attempts_server = attempts.clone();
+
+    let server_task = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let attempt_idx = attempts_server.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf).await;
+                if attempt_idx == 0 {
+                    // First attempt: delay to trigger client timeout
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                }
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .await;
+            });
+        }
+    });
+
+    let client = reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .timeout(std::time::Duration::from_millis(50))
+        .build()
+        .expect("client");
+
+    let req_url = format!("http://127.0.0.1:{port}/test");
+    let resp = upstream::execute_with_retry(|| client.get(&req_url).send()).await;
+    assert!(
+        resp.is_ok(),
+        "request must succeed on attempt 2 after transient timeout"
+    );
+    assert_eq!(resp.unwrap().status(), StatusCode::OK);
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        2,
+        "must make exactly 2 attempts"
+    );
+    server_task.abort();
+
+    // 4. Transient timeout failure exceeding max attempts (3 attempts)
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind server");
+    let port = listener.local_addr().expect("port").port();
+    let attempts_fail = Arc::new(AtomicUsize::new(0));
+    let attempts_fail_server = attempts_fail.clone();
+
+    let server_task = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            attempts_fail_server.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf).await;
+                // Always delay longer than timeout
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .await;
+            });
+        }
+    });
+
+    let req_url = format!("http://127.0.0.1:{port}/fail");
+    let resp = upstream::execute_with_retry(|| client.get(&req_url).send()).await;
+    assert!(resp.is_err(), "must fail after 3 attempts");
+    let err = resp.unwrap_err();
+    assert!(
+        upstream::is_transient_error(&err),
+        "error must be transient"
+    );
+    assert_eq!(
+        attempts_fail.load(Ordering::SeqCst),
+        3,
+        "must make exactly 3 attempts"
+    );
+    server_task.abort();
 }

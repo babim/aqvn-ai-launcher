@@ -7,22 +7,40 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem};
+use tauri::menu::{
+    CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
+use tauri_plugin_shell::ShellExt;
+use tauri_plugin_store::StoreExt;
 
 pub const TRAY_ID: &str = "aqvn-tray";
 
 pub const ID_SERVER_STATUS: &str = "server_status";
 pub const ID_SERVER_URL: &str = "server_status";
 pub const ID_GATEWAY_STATUS: &str = "gateway_status";
+pub const ID_SERVER_PROFILES: &str = "server_profiles";
+pub const ID_OPEN_WORKSPACE: &str = "open_workspace";
 pub const ID_TOGGLE: &str = "toggle";
 pub const ID_SETTINGS: &str = "settings";
 pub const ID_HELP: &str = "help";
 pub const ID_ABOUT: &str = "about";
 pub const ID_QUIT: &str = "quit";
 
+pub const LABEL_SERVER_PROFILES: &str = "Server Profiles";
+pub const LABEL_OPEN_WORKSPACE: &str = "Open Workspace Folder";
+pub const LABEL_TOGGLE: &str = "Show / Hide window";
+pub const LABEL_SETTINGS: &str = "Launcher Settings...";
+pub const LABEL_HELP: &str = "Help & Shortcuts (F1)...";
+pub const LABEL_ABOUT: &str = "About AQVN Workspace...";
+pub const LABEL_QUIT: &str = "Quit AQVN Workspace";
+
+pub const PREFIX_PROFILE: &str = "profile:";
+
 static CURRENT_SERVER_URL: RwLock<Option<String>> = RwLock::new(None);
+static CURRENT_SERVER_PROFILES: RwLock<Vec<String>> = RwLock::new(Vec::new());
+static CURRENT_WORKSPACE_PATH: RwLock<Option<String>> = RwLock::new(None);
 static CURRENT_GATEWAY_CONNECTED: AtomicBool = AtomicBool::new(false);
 
 const TRAY_SIZE: u32 = 32;
@@ -95,13 +113,175 @@ pub fn format_gateway_label(connected: bool) -> String {
     format_gateway_status_label(connected)
 }
 
+/// Constructs a menu item identifier for a server profile URL.
+pub fn profile_menu_id(url: &str) -> String {
+    format!("{PREFIX_PROFILE}{url}")
+}
+
+/// Parses a server profile URL from a menu item identifier if formatted as such.
+pub fn parse_profile_menu_id(id: &str) -> Option<&str> {
+    id.strip_prefix(PREFIX_PROFILE)
+}
+
 /// Gets the currently recorded active server URL.
 pub fn get_server_url() -> String {
     CURRENT_SERVER_URL
         .read()
         .ok()
         .and_then(|lock| lock.clone())
-        .unwrap_or_else(|| "https://a0.matmagoc.com".to_string())
+        .unwrap_or_else(|| crate::config::DEFAULT_SERVER_URL.to_string())
+}
+
+/// Gets the currently recorded server profiles list.
+pub fn get_server_profiles() -> Vec<String> {
+    let list = CURRENT_SERVER_PROFILES
+        .read()
+        .ok()
+        .map(|lock| lock.clone())
+        .unwrap_or_default();
+    if list.is_empty() {
+        vec![get_server_url()]
+    } else {
+        list
+    }
+}
+
+/// Sets the currently recorded server profiles list.
+pub fn set_server_profiles(profiles: Vec<String>) {
+    if let Ok(mut lock) = CURRENT_SERVER_PROFILES.write() {
+        *lock = profiles;
+    }
+}
+
+/// Gets the currently recorded workspace directory.
+pub fn get_workspace_path() -> String {
+    CURRENT_WORKSPACE_PATH
+        .read()
+        .ok()
+        .and_then(|lock| lock.clone())
+        .unwrap_or_else(|| crate::config::DEFAULT_WORKSPACE_PATH.to_string())
+}
+
+/// Sets the currently recorded workspace directory.
+pub fn set_workspace_path(path: &str) {
+    if let Ok(mut lock) = CURRENT_WORKSPACE_PATH.write() {
+        *lock = Some(path.to_string());
+    }
+}
+
+/// User home directory resolution helper.
+fn home_dir() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// Resolves a workspace path string (supporting `~/...` expansion) to a PathBuf.
+pub fn resolve_workspace_path(path: &str) -> std::path::PathBuf {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return home_dir().join("Workspace");
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        return home_dir().join(rest);
+    }
+    if trimmed == "~" {
+        return home_dir();
+    }
+    std::path::PathBuf::from(trimmed)
+}
+
+/// Launches the system file manager at the specified path using native platform commands.
+pub fn launch_system_file_manager(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("failed to launch explorer: {e}"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("failed to launch open: {e}"))
+    }
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("failed to launch xdg-open: {e}"))
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// Opens the configured workspace directory in the OS default file explorer.
+#[allow(deprecated)]
+pub fn open_workspace_folder<R: Runtime>(
+    app: &AppHandle<R>,
+    workspace_path: &str,
+) -> Result<(), String> {
+    let resolved = resolve_workspace_path(workspace_path);
+    if let Err(e) = std::fs::create_dir_all(&resolved) {
+        eprintln!(
+            "aqvn: failed to create workspace dir {}: {e}",
+            resolved.display()
+        );
+    }
+    let path_str = resolved.to_string_lossy().to_string();
+    eprintln!("aqvn: opening workspace folder at {path_str}");
+
+    // Prefer tauri shell plugin if managed
+    if app.try_state::<tauri_plugin_shell::Shell<R>>().is_some() {
+        if let Ok(()) = app.shell().open(&path_str, None) {
+            return Ok(());
+        }
+    }
+
+    // Fall back to native command spawn
+    launch_system_file_manager(&resolved)
+}
+
+/// Switches active server profile in store and config watcher, triggering hot reload.
+pub fn switch_server_profile<R: Runtime>(app: &AppHandle<R>, new_url: &str) -> Result<(), String> {
+    let trimmed = new_url.trim();
+    if trimmed.is_empty() {
+        return Err("cannot switch to empty server url".to_string());
+    }
+
+    if let Ok(store) = app.store(crate::config::STORE_FILENAME) {
+        store.set("server_url", serde_json::json!(trimmed));
+        let _ = store.save();
+    }
+
+    if let Some(watcher) = app.try_state::<crate::config::ConfigWatcher>() {
+        let mut conf = watcher.current();
+        conf.server_url = trimmed.to_string();
+        watcher.update(conf);
+    }
+
+    if let Ok(mut lock) = CURRENT_SERVER_URL.write() {
+        *lock = Some(trimmed.to_string());
+    }
+
+    let _ = update_tray_status(app, trimmed, is_gateway_connected());
+
+    if let Some(main_win) = app.get_webview_window("main") {
+        let _ = main_win.eval("window.location.reload();");
+    }
+
+    eprintln!("aqvn: switched active server profile to {trimmed} and triggered reload");
+    Ok(())
 }
 
 /// Checks whether Gateway connection is currently active.
@@ -114,12 +294,27 @@ pub fn set_gateway_connected(connected: bool) {
     CURRENT_GATEWAY_CONNECTED.store(connected, Ordering::SeqCst);
 }
 
-/// Builds the system tray menu displaying dynamic server and gateway status.
-pub fn build_tray_menu(
-    app: &AppHandle,
+/// Builds the system tray menu displaying dynamic server and gateway status,
+/// Server Profiles submenu with checkmarks, and Open Workspace Folder launcher.
+pub fn build_tray_menu<R: Runtime>(
+    app: &AppHandle<R>,
     server_url: &str,
     gateway_connected: bool,
-) -> tauri::Result<Menu<tauri::Wry>> {
+) -> tauri::Result<Menu<R>> {
+    let profiles = app
+        .try_state::<crate::config::ConfigWatcher>()
+        .map(|w| w.current().server_profiles)
+        .unwrap_or_else(get_server_profiles);
+    build_tray_menu_with_profiles(app, server_url, gateway_connected, &profiles)
+}
+
+/// Builds the system tray menu with explicit server profiles list.
+pub fn build_tray_menu_with_profiles<R: Runtime>(
+    app: &AppHandle<R>,
+    server_url: &str,
+    gateway_connected: bool,
+    profiles: &[String],
+) -> tauri::Result<Menu<R>> {
     let server_item =
         MenuItemBuilder::with_id(ID_SERVER_STATUS, format_server_url_label(server_url))
             .enabled(false)
@@ -130,20 +325,51 @@ pub fn build_tray_menu(
     )
     .enabled(false)
     .build(app)?;
+
+    // Build Server Profiles submenu preserving configured profile order
+    let mut profiles_list: Vec<String> = Vec::new();
+    for p in profiles {
+        let trimmed = p.trim();
+        if !trimmed.is_empty() && !profiles_list.iter().any(|existing| existing == trimmed) {
+            profiles_list.push(trimmed.to_string());
+        }
+    }
+    if !server_url.trim().is_empty() && !profiles_list.iter().any(|p| p == server_url) {
+        profiles_list.push(server_url.to_string());
+    }
+    if profiles_list.is_empty() {
+        profiles_list.push(crate::config::DEFAULT_SERVER_URL.to_string());
+    }
+
+    let mut profiles_builder =
+        SubmenuBuilder::with_id(app, ID_SERVER_PROFILES, LABEL_SERVER_PROFILES);
+    for profile in &profiles_list {
+        let is_active = profile == server_url;
+        let item = CheckMenuItemBuilder::with_id(profile_menu_id(profile), profile)
+            .checked(is_active)
+            .build(app)?;
+        profiles_builder = profiles_builder.item(&item);
+    }
+    let profiles_submenu = profiles_builder.build()?;
+
     let sep1 = PredefinedMenuItem::separator(app)?;
-    let toggle = MenuItemBuilder::with_id(ID_TOGGLE, "Show / Hide window").build(app)?;
-    let settings = MenuItemBuilder::with_id(ID_SETTINGS, "Launcher Settings...").build(app)?;
-    let help = MenuItemBuilder::with_id(ID_HELP, "Help & Shortcuts (F1)...").build(app)?;
-    let about = MenuItemBuilder::with_id(ID_ABOUT, "About AQVN Workspace...").build(app)?;
+    let open_workspace =
+        MenuItemBuilder::with_id(ID_OPEN_WORKSPACE, LABEL_OPEN_WORKSPACE).build(app)?;
+    let toggle = MenuItemBuilder::with_id(ID_TOGGLE, LABEL_TOGGLE).build(app)?;
+    let settings = MenuItemBuilder::with_id(ID_SETTINGS, LABEL_SETTINGS).build(app)?;
+    let help = MenuItemBuilder::with_id(ID_HELP, LABEL_HELP).build(app)?;
+    let about = MenuItemBuilder::with_id(ID_ABOUT, LABEL_ABOUT).build(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItemBuilder::with_id(ID_QUIT, "Quit AQVN Workspace").build(app)?;
+    let quit = MenuItemBuilder::with_id(ID_QUIT, LABEL_QUIT).build(app)?;
 
     Menu::with_items(
         app,
         &[
             &server_item,
             &gateway_item,
+            &profiles_submenu,
             &sep1,
+            &open_workspace,
             &toggle,
             &settings,
             &help,
@@ -156,17 +382,23 @@ pub fn build_tray_menu(
 
 /// Registers the tray icon with its menu. Must run on the main thread.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
-    let server_url = app
+    let config = app
         .try_state::<crate::config::ConfigWatcher>()
-        .map(|w| w.current().server_url)
-        .unwrap_or_else(|| "https://a0.matmagoc.com".to_string());
+        .map(|w| w.current())
+        .unwrap_or_default();
+    let server_url = config.server_url;
+    let server_profiles = config.server_profiles;
+    let workspace_path = config.workspace_path;
     let gateway_connected = is_gateway_connected();
 
     if let Ok(mut lock) = CURRENT_SERVER_URL.write() {
         *lock = Some(server_url.clone());
     }
+    set_server_profiles(server_profiles.clone());
+    set_workspace_path(&workspace_path);
 
-    let menu = build_tray_menu(app, &server_url, gateway_connected)?;
+    let menu =
+        build_tray_menu_with_profiles(app, &server_url, gateway_connected, &server_profiles)?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(image(false))
@@ -175,6 +407,15 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             ID_TOGGLE => super::toggle_main_window(app),
+            ID_OPEN_WORKSPACE => {
+                let ws_path = app
+                    .try_state::<crate::config::ConfigWatcher>()
+                    .map(|w| w.current().workspace_path)
+                    .unwrap_or_else(get_workspace_path);
+                if let Err(err) = open_workspace_folder(app, &ws_path) {
+                    eprintln!("aqvn: failed to open workspace folder: {err}");
+                }
+            }
             ID_SETTINGS => super::open_settings_window(app),
             ID_HELP => super::open_help_window(app),
             ID_ABOUT => super::open_about_window(app),
@@ -183,23 +424,33 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
                 eprintln!("aqvn: quitting from tray menu");
                 app.exit(0);
             }
-            ID_SERVER_STATUS | ID_GATEWAY_STATUS => {}
-            other => eprintln!("aqvn: unknown tray menu id {other:?}"),
+            ID_SERVER_STATUS | ID_GATEWAY_STATUS | ID_SERVER_PROFILES => {}
+            other => {
+                if let Some(target_url) = parse_profile_menu_id(other) {
+                    if let Err(err) = switch_server_profile(app, target_url) {
+                        eprintln!("aqvn: failed to switch server profile to {target_url}: {err}");
+                    }
+                } else {
+                    eprintln!("aqvn: unknown tray menu id {other:?}");
+                }
+            }
         })
         .build(app)?;
 
     eprintln!(
-        "aqvn: tray registered (menu: Show / Hide window, Launcher Settings..., Help & Shortcuts (F1)..., About AQVN Workspace..., Quit)"
+        "aqvn: tray registered (menu: Server Profiles, Open Workspace Folder, Show / Hide window, Launcher Settings..., Help & Shortcuts (F1)..., About AQVN Workspace..., Quit)"
     );
     Ok(())
 }
 
-/// Updates the dynamic tray menu status indicators with active server URL and Gateway status.
-pub fn update_tray_status(
-    app: &AppHandle,
+/// Updates the dynamic tray menu status indicators with active server URL, Gateway status, and profiles.
+pub fn update_tray_status_with_profiles<R: Runtime>(
+    app: &AppHandle<R>,
     server_url: &str,
     gateway_connected: bool,
+    profiles: &[String],
 ) -> tauri::Result<()> {
+    set_server_profiles(profiles.to_vec());
     if let Ok(mut lock) = CURRENT_SERVER_URL.write() {
         *lock = Some(server_url.to_string());
     }
@@ -212,7 +463,7 @@ pub fn update_tray_status(
         return Ok(());
     };
 
-    let menu = build_tray_menu(app, server_url, gateway_connected)?;
+    let menu = build_tray_menu_with_profiles(app, server_url, gateway_connected, profiles)?;
     tray.set_menu(Some(menu))?;
     eprintln!(
         "aqvn: tray menu updated (server: {server_url}, gateway: {})",
@@ -225,9 +476,22 @@ pub fn update_tray_status(
     Ok(())
 }
 
+/// Updates the dynamic tray menu status indicators with active server URL and Gateway status.
+pub fn update_tray_status<R: Runtime>(
+    app: &AppHandle<R>,
+    server_url: &str,
+    gateway_connected: bool,
+) -> tauri::Result<()> {
+    let profiles = app
+        .try_state::<crate::config::ConfigWatcher>()
+        .map(|w| w.current().server_profiles)
+        .unwrap_or_else(get_server_profiles);
+    update_tray_status_with_profiles(app, server_url, gateway_connected, &profiles)
+}
+
 /// Alias for `update_tray_status`.
-pub fn set_tray_status(
-    app: &AppHandle,
+pub fn set_tray_status<R: Runtime>(
+    app: &AppHandle<R>,
     server_url: &str,
     gateway_connected: bool,
 ) -> tauri::Result<()> {
@@ -236,7 +500,7 @@ pub fn set_tray_status(
 
 /// Swaps the tray icon between busy and idle. Logged so headless runs can
 /// prove the transition even when the glyph is hard to see in a capture.
-pub fn set_busy(app: &AppHandle, busy: bool) -> tauri::Result<()> {
+pub fn set_busy<R: Runtime>(app: &AppHandle<R>, busy: bool) -> tauri::Result<()> {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         eprintln!("aqvn: tray icon not registered, ignoring busy={busy}");
         return Ok(());

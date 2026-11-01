@@ -182,6 +182,10 @@ pub fn run() {
                     let Some(next) = next else { continue };
                     #[cfg(not(target_os = "android"))]
                     let server_url_changed = next.server_url != last.server_url;
+                    #[cfg(not(target_os = "android"))]
+                    let server_profiles_changed = next.server_profiles != last.server_profiles;
+                    #[cfg(not(target_os = "android"))]
+                    let workspace_path_changed = next.workspace_path != last.workspace_path;
                     if next != last {
                         #[cfg(not(target_os = "android"))]
                         if next.show_menu_bar != last.show_menu_bar {
@@ -206,13 +210,19 @@ pub fn run() {
                     #[cfg(not(target_os = "android"))]
                     {
                         let current_gw = app::tray::is_gateway_connected();
-                        if server_url_changed || current_gw != last_gateway_connected {
+                        if server_url_changed
+                            || server_profiles_changed
+                            || current_gw != last_gateway_connected
+                        {
                             last_gateway_connected = current_gw;
                             let _ = app::tray::update_tray_status(
                                 &poll_handle,
                                 &last.server_url,
                                 current_gw,
                             );
+                        }
+                        if workspace_path_changed {
+                            app::tray::set_workspace_path(&last.workspace_path);
                         }
                     }
                 }

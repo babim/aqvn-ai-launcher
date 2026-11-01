@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::watch;
 
@@ -90,7 +90,41 @@ const fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WindowState {
+    pub width: f64,
+    pub height: f64,
+    pub x: f64,
+    pub y: f64,
+    #[serde(default)]
+    pub is_maximized: bool,
+}
+
+impl WindowState {
+    pub fn new(width: f64, height: f64, x: f64, y: f64, is_maximized: bool) -> Self {
+        Self {
+            width,
+            height,
+            x,
+            y,
+            is_maximized,
+        }
+    }
+}
+
+impl Default for WindowState {
+    fn default() -> Self {
+        Self {
+            width: 1100.0,
+            height: 720.0,
+            x: 0.0,
+            y: 0.0,
+            is_maximized: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     pub server_url: String,
@@ -125,6 +159,8 @@ pub struct AppConfig {
     pub show_menu_bar: bool,
     #[serde(default = "default_true")]
     pub task_chime_enabled: bool,
+    #[serde(default)]
+    pub window_state: Option<WindowState>,
 }
 
 impl Default for AppConfig {
@@ -156,6 +192,7 @@ impl Default for AppConfig {
             app_language: DEFAULT_APP_LANGUAGE.to_string(),
             show_menu_bar: DEFAULT_SHOW_MENU_BAR,
             task_chime_enabled: DEFAULT_TASK_CHIME_ENABLED,
+            window_state: None,
         }
     }
 }
@@ -314,6 +351,13 @@ impl AppConfig {
                 config.task_chime_enabled = b;
             }
         }
+        if let Some(val) = store.get("window_state") {
+            if !val.is_null() {
+                if let Ok(ws) = serde_json::from_value::<WindowState>(val.clone()) {
+                    config.window_state = Some(ws);
+                }
+            }
+        }
 
         Ok(config)
     }
@@ -350,6 +394,7 @@ impl AppConfig {
             "task_chime_enabled",
             serde_json::json!(self.task_chime_enabled),
         );
+        store.set("window_state", serde_json::json!(self.window_state));
 
         store
             .save()
@@ -357,6 +402,42 @@ impl AppConfig {
 
         Ok(())
     }
+}
+
+/// Persists window geometry to settings.json and updates ConfigWatcher if present.
+pub fn persist_window_geometry<R: Runtime>(
+    app: &AppHandle<R>,
+    state: WindowState,
+) -> Result<(), String> {
+    let store = app
+        .store(STORE_FILENAME)
+        .map_err(|e| format!("Failed to open store {STORE_FILENAME}: {e}"))?;
+
+    store.set("window_state", serde_json::json!(state));
+    store
+        .save()
+        .map_err(|e| format!("Failed to save store {STORE_FILENAME}: {e}"))?;
+
+    if let Some(watcher) = app.try_state::<ConfigWatcher>() {
+        let mut conf = watcher.current();
+        conf.window_state = Some(state);
+        watcher.update(conf);
+    }
+
+    Ok(())
+}
+
+/// Applies saved window state (dimensions, position, maximized) to a WindowConfig.
+pub fn apply_window_state(
+    window_config: &mut tauri::utils::config::WindowConfig,
+    state: &WindowState,
+) {
+    window_config.width = state.width;
+    window_config.height = state.height;
+    window_config.x = Some(state.x);
+    window_config.y = Some(state.y);
+    window_config.center = false;
+    window_config.maximized = state.is_maximized;
 }
 
 /// Channel for watching configuration changes and notifying listeners.

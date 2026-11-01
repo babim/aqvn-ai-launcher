@@ -35,18 +35,70 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     {
         builder = builder.on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    let close_to_tray = window
-                        .app_handle()
-                        .try_state::<config::ConfigWatcher>()
-                        .map(|w| w.current().close_to_tray)
-                        .unwrap_or(true);
-                    if close_to_tray {
-                        api.prevent_close();
-                        let _ = window.hide();
-                        eprintln!("aqvn: main window hidden to tray");
+            if window.label() == "main" {
+                match event {
+                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+                        if let (Ok(factor), Ok(pos), Ok(size), Ok(is_maximized)) = (
+                            window.scale_factor(),
+                            window.outer_position(),
+                            window.inner_size(),
+                            window.is_maximized(),
+                        ) {
+                            if size.width > 0 && size.height > 0 {
+                                let logical_size = size.to_logical::<f64>(factor);
+                                let logical_pos = pos.to_logical::<f64>(factor);
+
+                                let current_ws = window
+                                    .app_handle()
+                                    .try_state::<config::ConfigWatcher>()
+                                    .and_then(|w| w.current().window_state);
+
+                                let (x, y, width, height) = if is_maximized {
+                                    if let Some(prev) = current_ws {
+                                        (prev.x, prev.y, prev.width, prev.height)
+                                    } else {
+                                        (
+                                            logical_pos.x,
+                                            logical_pos.y,
+                                            logical_size.width,
+                                            logical_size.height,
+                                        )
+                                    }
+                                } else {
+                                    (
+                                        logical_pos.x,
+                                        logical_pos.y,
+                                        logical_size.width,
+                                        logical_size.height,
+                                    )
+                                };
+
+                                let new_state = config::WindowState {
+                                    width,
+                                    height,
+                                    x,
+                                    y,
+                                    is_maximized,
+                                };
+
+                                let _ =
+                                    config::persist_window_geometry(window.app_handle(), new_state);
+                            }
+                        }
                     }
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        let close_to_tray = window
+                            .app_handle()
+                            .try_state::<config::ConfigWatcher>()
+                            .map(|w| w.current().close_to_tray)
+                            .unwrap_or(true);
+                        if close_to_tray {
+                            api.prevent_close();
+                            let _ = window.hide();
+                            eprintln!("aqvn: main window hidden to tray");
+                        }
+                    }
+                    _ => {}
                 }
             }
         });
@@ -174,13 +226,29 @@ pub fn run() {
                 .find(|w| w.label == "main")
                 .expect("main window config not found in tauri.conf.json");
 
-            let container_config =
+            let mut container_config =
                 app::links::configure_container_window(window_config, proxy_info.port);
 
+            if let Some(ref ws) = initial_config.window_state {
+                config::apply_window_state(&mut container_config, ws);
+            }
+
             let nav_handle = app.handle().clone();
-            let _main_window = WebviewWindowBuilder::from_config(app.handle(), &container_config)?
-                .initialization_script(proxy::server::init_script(proxy_info.port))
-                .zoom_hotkeys_enabled(false)
+            #[allow(unused_mut)]
+            let mut window_builder =
+                WebviewWindowBuilder::from_config(app.handle(), &container_config)?
+                    .initialization_script(proxy::server::init_script(proxy_info.port))
+                    .zoom_hotkeys_enabled(false);
+
+            #[cfg(not(target_os = "android"))]
+            if let Some(ref ws) = initial_config.window_state {
+                window_builder = window_builder
+                    .inner_size(ws.width, ws.height)
+                    .position(ws.x, ws.y)
+                    .maximized(ws.is_maximized);
+            }
+
+            let _main_window = window_builder
                 .on_navigation(move |url| app::links::handle_navigation(&nav_handle, url))
                 .on_document_title_changed(|window, title| {
                     // Rust-side sync needs no `core:window:allow-set-title`.

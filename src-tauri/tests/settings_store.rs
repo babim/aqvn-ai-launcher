@@ -93,6 +93,7 @@ fn config_json_serde_roundtrip() {
         app_language: "en".to_string(),
         show_menu_bar: true,
         task_chime_enabled: false,
+        window_state: None,
     };
 
     let json = serde_json::to_string(&conf).expect("serialize config");

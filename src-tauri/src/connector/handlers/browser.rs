@@ -319,6 +319,36 @@ pub async fn get_or_create_page_ws_url(
     }
 }
 
+/// Resolves the WebSocket debugger URL for a target tab.
+/// If `target_id` is specified, searches active CDP targets for that target ID.
+/// If `target_id` is None, falls back to `get_or_create_page_ws_url`.
+pub async fn get_target_ws_url(
+    cdp_url: &str,
+    target_id: Option<&str>,
+    fallback_url: Option<&str>,
+) -> Result<String, String> {
+    if let Some(tid) = target_id {
+        let targets = get_page_targets(cdp_url).await?;
+        for target in targets {
+            let matches = target
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(|id| id == tid)
+                .unwrap_or(false);
+            if matches {
+                if let Some(ws_raw) = target.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
+                    return Ok(resolve_ws_url(ws_raw, cdp_url));
+                } else {
+                    return Err(format!("target tab {tid} has no webSocketDebuggerUrl"));
+                }
+            }
+        }
+        return Err(format!("target tab not found: {tid}"));
+    }
+
+    get_or_create_page_ws_url(cdp_url, fallback_url).await
+}
+
 /// Sends a JSON-RPC command over WebSocket to CDP and waits for the matching result.
 pub async fn send_cdp_command(ws_url: &str, method: &str, params: Value) -> Result<Value, String> {
     use futures_util::{SinkExt, StreamExt};
@@ -406,6 +436,28 @@ fn make_error_reply(id: &str, action: &str, error_msg: impl Into<String>) -> Str
     .to_string()
 }
 
+/// Extracts target tab ID from envelope or params object.
+pub fn extract_target_id<'a>(
+    envelope: &'a Value,
+    params_obj: Option<&'a Value>,
+) -> Option<&'a str> {
+    envelope
+        .get("target_id")
+        .or_else(|| envelope.get("tab_id"))
+        .or_else(|| envelope.get("target"))
+        .or_else(|| envelope.get("tab"))
+        .or_else(|| {
+            params_obj.and_then(|p| {
+                p.get("target_id")
+                    .or_else(|| p.get("tab_id"))
+                    .or_else(|| p.get("id"))
+                    .or_else(|| p.get("target"))
+                    .or_else(|| p.get("tab"))
+            })
+        })
+        .and_then(|v| v.as_str())
+}
+
 /// Dispatches an incoming `connector_browser_op` envelope.
 pub async fn handle_browser_op(envelope: &Value) -> String {
     let (id_str, op_id_str) = extract_id_and_op_id(envelope, "browser-op-req");
@@ -419,6 +471,8 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
         .or_else(|| params_obj.and_then(|p| p.get("action")))
         .and_then(|v| v.as_str())
         .unwrap_or_default();
+
+    let target_id = extract_target_id(envelope, params_obj);
 
     let cdp_url = envelope
         .get("cdp_url")
@@ -435,53 +489,80 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
                 .and_then(|v| v.as_str())
                 .unwrap_or("about:blank");
 
-            // Try creating tab via /json/new
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-            {
-                Ok(c) => c,
-                Err(e) => return make_error_reply(id, action, format!("client build error: {e}")),
-            };
-
-            let base = cdp_url.trim_end_matches('/');
-            let new_url = format!("{base}/json/new?{target_url}");
-            if let Ok(resp) = client.put(&new_url).send().await {
-                if resp.status().is_success() {
-                    if let Ok(text) = resp.text().await {
-                        if let Ok(created) = serde_json::from_str::<Value>(&text) {
-                            return make_ok_reply(
+            if let Some(tid) = target_id {
+                match get_target_ws_url(&cdp_url, Some(tid), Some(target_url)).await {
+                    Ok(ws_url) => {
+                        let nav_params = json!({ "url": target_url });
+                        match send_cdp_command(&ws_url, "Page.navigate", nav_params).await {
+                            Ok(res) => make_ok_reply(
                                 id,
                                 action,
                                 json!({
                                     "opened": true,
                                     "url": target_url,
-                                    "target": created,
+                                    "target_id": tid,
+                                    "tab_id": tid,
+                                    "cdp_result": res,
                                 }),
-                            );
+                            ),
+                            Err(e) => make_error_reply(id, action, e),
+                        }
+                    }
+                    Err(e) => make_error_reply(id, action, e),
+                }
+            } else {
+                // Try creating tab via /json/new
+                let client = match reqwest::Client::builder()
+                    .timeout(Duration::from_secs(5))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return make_error_reply(id, action, format!("client build error: {e}"))
+                    }
+                };
+
+                let base = cdp_url.trim_end_matches('/');
+                let new_url = format!("{base}/json/new?{target_url}");
+                if let Ok(resp) = client.put(&new_url).send().await {
+                    if resp.status().is_success() {
+                        if let Ok(text) = resp.text().await {
+                            if let Ok(created) = serde_json::from_str::<Value>(&text) {
+                                let tid = created.get("id").and_then(|v| v.as_str());
+                                let mut reply_data = json!({
+                                    "opened": true,
+                                    "url": target_url,
+                                    "target": created,
+                                });
+                                if let Some(t) = tid {
+                                    reply_data["target_id"] = json!(t);
+                                    reply_data["tab_id"] = json!(t);
+                                }
+                                return make_ok_reply(id, action, reply_data);
+                            }
                         }
                     }
                 }
-            }
 
-            // Fallback: navigate existing active page
-            match get_or_create_page_ws_url(&cdp_url, Some(target_url)).await {
-                Ok(ws_url) => {
-                    let nav_params = json!({ "url": target_url });
-                    match send_cdp_command(&ws_url, "Page.navigate", nav_params).await {
-                        Ok(res) => make_ok_reply(
-                            id,
-                            action,
-                            json!({
-                                "opened": true,
-                                "url": target_url,
-                                "cdp_result": res,
-                            }),
-                        ),
-                        Err(e) => make_error_reply(id, action, e),
+                // Fallback: navigate existing active page
+                match get_or_create_page_ws_url(&cdp_url, Some(target_url)).await {
+                    Ok(ws_url) => {
+                        let nav_params = json!({ "url": target_url });
+                        match send_cdp_command(&ws_url, "Page.navigate", nav_params).await {
+                            Ok(res) => make_ok_reply(
+                                id,
+                                action,
+                                json!({
+                                    "opened": true,
+                                    "url": target_url,
+                                    "cdp_result": res,
+                                }),
+                            ),
+                            Err(e) => make_error_reply(id, action, e),
+                        }
                     }
+                    Err(e) => make_error_reply(id, action, e),
                 }
-                Err(e) => make_error_reply(id, action, e),
             }
         }
 
@@ -495,23 +576,26 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
                 None => return make_error_reply(id, action, "missing url for navigate"),
             };
 
-            let ws_url = match get_or_create_page_ws_url(&cdp_url, Some(target_url)).await {
+            let ws_url = match get_target_ws_url(&cdp_url, target_id, Some(target_url)).await {
                 Ok(w) => w,
                 Err(e) => return make_error_reply(id, action, e),
             };
 
             let nav_params = json!({ "url": target_url });
             match send_cdp_command(&ws_url, "Page.navigate", nav_params).await {
-                Ok(res) => make_ok_reply(
-                    id,
-                    action,
-                    json!({
+                Ok(res) => {
+                    let mut data = json!({
                         "navigated": true,
                         "url": target_url,
                         "frame_id": res.get("frameId"),
                         "loader_id": res.get("loaderId"),
-                    }),
-                ),
+                    });
+                    if let Some(tid) = target_id {
+                        data["target_id"] = json!(tid);
+                        data["tab_id"] = json!(tid);
+                    }
+                    make_ok_reply(id, action, data)
+                }
                 Err(e) => make_error_reply(id, action, e),
             }
         }
@@ -530,7 +614,7 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
                 .or_else(|| params_obj.and_then(|p| p.get("y")))
                 .and_then(|v| v.as_f64());
 
-            let ws_url = match get_or_create_page_ws_url(&cdp_url, None).await {
+            let ws_url = match get_target_ws_url(&cdp_url, target_id, None).await {
                 Ok(w) => w,
                 Err(e) => return make_error_reply(id, action, e),
             };
@@ -567,14 +651,15 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
                                 format!("click evaluation exception: {exc}"),
                             )
                         } else {
-                            make_ok_reply(
-                                id,
-                                action,
-                                json!({
-                                    "clicked": true,
-                                    "selector": sel,
-                                }),
-                            )
+                            let mut data = json!({
+                                "clicked": true,
+                                "selector": sel,
+                            });
+                            if let Some(tid) = target_id {
+                                data["target_id"] = json!(tid);
+                                data["tab_id"] = json!(tid);
+                            }
+                            make_ok_reply(id, action, data)
                         }
                     }
                     Err(e) => make_error_reply(id, action, e),
@@ -598,15 +683,18 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
 
                 let _ = send_cdp_command(&ws_url, "Input.dispatchMouseEvent", press_params).await;
                 match send_cdp_command(&ws_url, "Input.dispatchMouseEvent", release_params).await {
-                    Ok(_) => make_ok_reply(
-                        id,
-                        action,
-                        json!({
+                    Ok(_) => {
+                        let mut data = json!({
                             "clicked": true,
                             "x": px,
                             "y": py,
-                        }),
-                    ),
+                        });
+                        if let Some(tid) = target_id {
+                            data["target_id"] = json!(tid);
+                            data["tab_id"] = json!(tid);
+                        }
+                        make_ok_reply(id, action, data)
+                    }
                     Err(e) => make_error_reply(id, action, e),
                 }
             } else {
@@ -630,7 +718,7 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
                 .or_else(|| params_obj.and_then(|p| p.get("selector")))
                 .and_then(|v| v.as_str());
 
-            let ws_url = match get_or_create_page_ws_url(&cdp_url, None).await {
+            let ws_url = match get_target_ws_url(&cdp_url, target_id, None).await {
                 Ok(w) => w,
                 Err(e) => return make_error_reply(id, action, e),
             };
@@ -675,15 +763,16 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
                                 format!("type evaluation exception: {exc}"),
                             )
                         } else {
-                            make_ok_reply(
-                                id,
-                                action,
-                                json!({
-                                    "typed": true,
-                                    "selector": sel,
-                                    "length": text.len(),
-                                }),
-                            )
+                            let mut data = json!({
+                                "typed": true,
+                                "selector": sel,
+                                "length": text.len(),
+                            });
+                            if let Some(tid) = target_id {
+                                data["target_id"] = json!(tid);
+                                data["tab_id"] = json!(tid);
+                            }
+                            make_ok_reply(id, action, data)
                         }
                     }
                     Err(e) => make_error_reply(id, action, e),
@@ -691,14 +780,17 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
             } else {
                 // Insert text at current active element
                 match send_cdp_command(&ws_url, "Input.insertText", json!({ "text": text })).await {
-                    Ok(_) => make_ok_reply(
-                        id,
-                        action,
-                        json!({
+                    Ok(_) => {
+                        let mut data = json!({
                             "typed": true,
                             "length": text.len(),
-                        }),
-                    ),
+                        });
+                        if let Some(tid) = target_id {
+                            data["target_id"] = json!(tid);
+                            data["tab_id"] = json!(tid);
+                        }
+                        make_ok_reply(id, action, data)
+                    }
                     Err(e) => make_error_reply(id, action, e),
                 }
             }
@@ -711,7 +803,7 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
                 .and_then(|v| v.as_str())
                 .unwrap_or("png");
 
-            let ws_url = match get_or_create_page_ws_url(&cdp_url, None).await {
+            let ws_url = match get_target_ws_url(&cdp_url, target_id, None).await {
                 Ok(w) => w,
                 Err(e) => return make_error_reply(id, action, e),
             };
@@ -728,15 +820,16 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
             match send_cdp_command(&ws_url, "Page.captureScreenshot", screenshot_params).await {
                 Ok(res) => {
                     let data_b64 = res.get("data").and_then(|v| v.as_str()).unwrap_or_default();
-                    make_ok_reply(
-                        id,
-                        action,
-                        json!({
-                            "format": format,
-                            "data": data_b64,
-                            "size": data_b64.len(),
-                        }),
-                    )
+                    let mut data = json!({
+                        "format": format,
+                        "data": data_b64,
+                        "size": data_b64.len(),
+                    });
+                    if let Some(tid) = target_id {
+                        data["target_id"] = json!(tid);
+                        data["tab_id"] = json!(tid);
+                    }
+                    make_ok_reply(id, action, data)
                 }
                 Err(e) => make_error_reply(id, action, e),
             }
@@ -760,7 +853,7 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
                 None => return make_error_reply(id, action, "missing expression for evaluate"),
             };
 
-            let ws_url = match get_or_create_page_ws_url(&cdp_url, None).await {
+            let ws_url = match get_target_ws_url(&cdp_url, target_id, None).await {
                 Ok(w) => w,
                 Err(e) => return make_error_reply(id, action, e),
             };
@@ -786,15 +879,16 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
                             .cloned()
                             .unwrap_or_else(|| res.get("result").cloned().unwrap_or(Value::Null));
 
-                        make_ok_reply(
-                            id,
-                            action,
-                            json!({
-                                "expression": expression,
-                                "value": eval_val.clone(),
-                                "result": eval_val,
-                            }),
-                        )
+                        let mut data = json!({
+                            "expression": expression,
+                            "value": eval_val.clone(),
+                            "result": eval_val,
+                        });
+                        if let Some(tid) = target_id {
+                            data["target_id"] = json!(tid);
+                            data["tab_id"] = json!(tid);
+                        }
+                        make_ok_reply(id, action, data)
                     }
                 }
                 Err(e) => make_error_reply(id, action, e),
@@ -864,6 +958,240 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
             Err(e) => make_error_reply(id, action, e),
         },
 
+        "list_tabs" | "tabs" | "list_pages" | "pages" => match get_page_targets(&cdp_url).await {
+            Ok(targets) => {
+                let tabs: Vec<Value> = targets
+                    .into_iter()
+                    .filter(|t| {
+                        t.get("type")
+                            .and_then(|v| v.as_str())
+                            .map(|ty| ty == "page")
+                            .unwrap_or(true)
+                    })
+                    .map(|t| {
+                        let tid = t
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let title = t
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let url = t
+                            .get("url")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let ws_raw = t
+                            .get("webSocketDebuggerUrl")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let ws = resolve_ws_url(ws_raw, &cdp_url);
+                        json!({
+                            "id": tid,
+                            "target_id": tid,
+                            "title": title,
+                            "url": url,
+                            "webSocketDebuggerUrl": ws,
+                            "type": "page",
+                        })
+                    })
+                    .collect();
+
+                make_ok_reply(
+                    id,
+                    action,
+                    json!({
+                        "tabs": tabs,
+                        "count": tabs.len(),
+                    }),
+                )
+            }
+            Err(e) => make_error_reply(id, action, e),
+        },
+
+        "new_tab" | "create_tab" | "open_tab" => {
+            let target_url = envelope
+                .get("url")
+                .or_else(|| params_obj.and_then(|p| p.get("url")))
+                .and_then(|v| v.as_str())
+                .unwrap_or("about:blank");
+
+            let client = match reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+            {
+                Ok(c) => c,
+                Err(e) => return make_error_reply(id, action, format!("client build error: {e}")),
+            };
+
+            let base = cdp_url.trim_end_matches('/');
+            let new_url = if target_url.is_empty() {
+                format!("{base}/json/new")
+            } else {
+                format!("{base}/json/new?{target_url}")
+            };
+
+            let resp = match client.put(&new_url).send().await {
+                Ok(r) if r.status().is_success() => Ok(r),
+                Ok(_) | Err(_) => client.get(&new_url).send().await,
+            };
+
+            match resp {
+                Ok(r) if r.status().is_success() => match r.text().await {
+                    Ok(text) => match serde_json::from_str::<Value>(&text) {
+                        Ok(val) => {
+                            let tid = val
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            let title = val
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            let url_str = val
+                                .get("url")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(target_url)
+                                .to_string();
+                            let ws_raw = val
+                                .get("webSocketDebuggerUrl")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default();
+                            let ws = resolve_ws_url(ws_raw, &cdp_url);
+
+                            make_ok_reply(
+                                id,
+                                action,
+                                json!({
+                                    "created": true,
+                                    "target_id": tid,
+                                    "tab_id": tid,
+                                    "id": tid,
+                                    "url": url_str,
+                                    "title": title,
+                                    "webSocketDebuggerUrl": ws,
+                                    "target": val,
+                                }),
+                            )
+                        }
+                        Err(e) => make_error_reply(
+                            id,
+                            action,
+                            format!("failed to parse new tab target JSON: {e}"),
+                        ),
+                    },
+                    Err(e) => make_error_reply(
+                        id,
+                        action,
+                        format!("failed to read new tab response: {e}"),
+                    ),
+                },
+                Ok(r) => make_error_reply(
+                    id,
+                    action,
+                    format!("new tab creation returned status: {}", r.status()),
+                ),
+                Err(e) => make_error_reply(
+                    id,
+                    action,
+                    format!("failed to create new tab at {new_url}: {e}"),
+                ),
+            }
+        }
+
+        "activate_tab" | "select_tab" | "switch_tab" => {
+            let tid = match target_id {
+                Some(t) => t,
+                None => return make_error_reply(id, action, "missing target_id for activate_tab"),
+            };
+
+            let client = match reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+            {
+                Ok(c) => c,
+                Err(e) => return make_error_reply(id, action, format!("client build error: {e}")),
+            };
+
+            let base = cdp_url.trim_end_matches('/');
+            let act_url = format!("{base}/json/activate/{tid}");
+            let resp = match client.get(&act_url).send().await {
+                Ok(r) if r.status().is_success() => Ok(r),
+                Ok(_) | Err(_) => client.put(&act_url).send().await,
+            };
+
+            match resp {
+                Ok(r) if r.status().is_success() => make_ok_reply(
+                    id,
+                    action,
+                    json!({
+                        "activated": true,
+                        "target_id": tid,
+                        "tab_id": tid,
+                    }),
+                ),
+                Ok(r) => make_error_reply(
+                    id,
+                    action,
+                    format!("failed to activate tab {tid}: status {}", r.status()),
+                ),
+                Err(e) => make_error_reply(
+                    id,
+                    action,
+                    format!("failed to connect to CDP activate endpoint: {e}"),
+                ),
+            }
+        }
+
+        "close_tab" | "close_page" => {
+            let tid = match target_id {
+                Some(t) => t,
+                None => return make_error_reply(id, action, "missing target_id for close_tab"),
+            };
+
+            let client = match reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+            {
+                Ok(c) => c,
+                Err(e) => return make_error_reply(id, action, format!("client build error: {e}")),
+            };
+
+            let base = cdp_url.trim_end_matches('/');
+            let close_url = format!("{base}/json/close/{tid}");
+            let resp = match client.get(&close_url).send().await {
+                Ok(r) if r.status().is_success() => Ok(r),
+                Ok(_) | Err(_) => client.put(&close_url).send().await,
+            };
+
+            match resp {
+                Ok(r) if r.status().is_success() => make_ok_reply(
+                    id,
+                    action,
+                    json!({
+                        "closed": true,
+                        "target_id": tid,
+                        "tab_id": tid,
+                    }),
+                ),
+                Ok(r) => make_error_reply(
+                    id,
+                    action,
+                    format!("failed to close tab {tid}: status {}", r.status()),
+                ),
+                Err(e) => make_error_reply(
+                    id,
+                    action,
+                    format!("failed to connect to CDP close endpoint: {e}"),
+                ),
+            }
+        }
+
         other => make_error_reply(
             id,
             other,
@@ -871,4 +1199,41 @@ pub async fn handle_browser_op(envelope: &Value) -> String {
         ),
     };
     attach_id_and_op_id(raw_reply, id, op_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_target_id_from_envelope_and_params() {
+        let env1 = json!({ "target_id": "tab-123" });
+        assert_eq!(extract_target_id(&env1, None), Some("tab-123"));
+
+        let env2 = json!({ "tab_id": "tab-456" });
+        assert_eq!(extract_target_id(&env2, None), Some("tab-456"));
+
+        let env3 = json!({ "params": { "target_id": "tab-789" } });
+        assert_eq!(
+            extract_target_id(&env3, env3.get("params")),
+            Some("tab-789")
+        );
+
+        let env4 = json!({ "params": { "id": "tab-000" } });
+        assert_eq!(
+            extract_target_id(&env4, env4.get("params")),
+            Some("tab-000")
+        );
+
+        let env5 = json!({ "action": "list_tabs" });
+        assert_eq!(extract_target_id(&env5, None), None);
+    }
+
+    #[test]
+    fn test_resolve_ws_url_remapping() {
+        let raw = "ws://localhost:9222/devtools/page/tab-1";
+        let cdp_base = "http://127.0.0.1:9222";
+        let resolved = resolve_ws_url(raw, cdp_base);
+        assert_eq!(resolved, "ws://127.0.0.1:9222/devtools/page/tab-1");
+    }
 }

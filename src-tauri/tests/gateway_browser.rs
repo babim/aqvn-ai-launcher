@@ -23,6 +23,14 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
 
+#[derive(Clone)]
+struct MockCdpState {
+    tabs: Arc<Mutex<Vec<Value>>>,
+    counter: Arc<Mutex<usize>>,
+    ip: Ipv4Addr,
+    port: u16,
+}
+
 /// Runs a mock CDP server supporting `/json/version`, `/json/list`, `/json/new`, and `/devtools/page/:id`.
 async fn run_mock_cdp_server() -> (u16, tokio::task::JoinHandle<()>) {
     // Attempt port 9222 first if available, otherwise ephemeral port
@@ -39,63 +47,124 @@ async fn run_mock_cdp_server() -> (u16, tokio::task::JoinHandle<()>) {
 
     let p_copy = port;
     let ip = Ipv4Addr::LOCALHOST;
-    let app = Router::new()
-        .route(
-            "/json/version",
-            get(move || async move {
-                axum::Json(json!({
-                    "Browser": "Chrome/120.0.0.0",
-                    "Protocol-Version": "1.3",
-                    "User-Agent": "Mozilla/5.0 AQVN-Workspace",
-                    "V8-Version": "12.0.0.0",
-                    "webSocketDebuggerUrl": format!("ws://{ip}:{p_copy}/devtools/browser")
-                }))
-            }),
-        )
+    let app = Router::new().route(
+        "/json/version",
+        get(move || async move {
+            axum::Json(json!({
+                "Browser": "Chrome/120.0.0.0",
+                "Protocol-Version": "1.3",
+                "User-Agent": "Mozilla/5.0 AQVN-Workspace",
+                "V8-Version": "12.0.0.0",
+                "webSocketDebuggerUrl": format!("ws://{ip}:{p_copy}/devtools/browser")
+            }))
+        }),
+    );
+
+    let initial_tabs = vec![json!({
+        "id": "target-page-1",
+        "type": "page",
+        "title": "AQVN Test Page",
+        "url": format!("http://{ip}:{p_copy}/test"),
+        "webSocketDebuggerUrl": format!("ws://{ip}:{p_copy}/devtools/page/target-page-1")
+    })];
+
+    let state = MockCdpState {
+        tabs: Arc::new(Mutex::new(initial_tabs)),
+        counter: Arc::new(Mutex::new(1)),
+        ip,
+        port: p_copy,
+    };
+
+    let app = app
         .route(
             "/json/list",
-            get(move || async move {
-                axum::Json(json!([
-                    {
-                        "id": "target-page-1",
-                        "type": "page",
-                        "title": "AQVN Test Page",
-                        "url": format!("http://{ip}:{p_copy}/test"),
-                        "webSocketDebuggerUrl": format!("ws://{ip}:{p_copy}/devtools/page/target-page-1")
-                    }
-                ]))
+            get(|axum::extract::State(state): axum::extract::State<MockCdpState>| async move {
+                let tabs = state.tabs.lock().await.clone();
+                axum::Json(json!(tabs))
             }),
         )
         .route(
             "/json",
-            get(move || async move {
-                axum::Json(json!([
-                    {
-                        "id": "target-page-1",
-                        "type": "page",
-                        "title": "AQVN Test Page",
-                        "url": format!("http://{ip}:{p_copy}/test"),
-                        "webSocketDebuggerUrl": format!("ws://{ip}:{p_copy}/devtools/page/target-page-1")
-                    }
-                ]))
+            get(|axum::extract::State(state): axum::extract::State<MockCdpState>| async move {
+                let tabs = state.tabs.lock().await.clone();
+                axum::Json(json!(tabs))
             }),
         )
         .route(
             "/json/new",
-            put(move || async move {
-                axum::Json(json!({
-                    "id": "target-page-new",
+            put(|axum::extract::State(state): axum::extract::State<MockCdpState>, uri: axum::http::Uri| async move {
+                let url = uri.query().unwrap_or("http://example.com/opened").to_string();
+                let mut count = state.counter.lock().await;
+                *count += 1;
+                let new_id = format!("target-page-{}", *count);
+                let tab = json!({
+                    "id": new_id,
                     "type": "page",
                     "title": "New Tab",
-                    "url": "http://example.com/opened",
-                    "webSocketDebuggerUrl": format!("ws://{ip}:{p_copy}/devtools/page/target-page-new")
-                }))
+                    "url": url,
+                    "webSocketDebuggerUrl": format!("ws://{}:{}/devtools/page/{new_id}", state.ip, state.port)
+                });
+                state.tabs.lock().await.push(tab.clone());
+                axum::Json(tab)
+            }).get(|axum::extract::State(state): axum::extract::State<MockCdpState>, uri: axum::http::Uri| async move {
+                let url = uri.query().unwrap_or("http://example.com/opened").to_string();
+                let mut count = state.counter.lock().await;
+                *count += 1;
+                let new_id = format!("target-page-{}", *count);
+                let tab = json!({
+                    "id": new_id,
+                    "type": "page",
+                    "title": "New Tab",
+                    "url": url,
+                    "webSocketDebuggerUrl": format!("ws://{}:{}/devtools/page/{new_id}", state.ip, state.port)
+                });
+                state.tabs.lock().await.push(tab.clone());
+                axum::Json(tab)
+            }),
+        )
+        .route(
+            "/json/activate/{target_id}",
+            get(|axum::extract::State(state): axum::extract::State<MockCdpState>, AxumPath(target_id): AxumPath<String>| async move {
+                let tabs = state.tabs.lock().await;
+                if tabs.iter().any(|t| t.get("id").and_then(|v| v.as_str()) == Some(&target_id)) {
+                    (axum::http::StatusCode::OK, "Target activated")
+                } else {
+                    (axum::http::StatusCode::NOT_FOUND, "Target not found")
+                }
+            }).put(|axum::extract::State(state): axum::extract::State<MockCdpState>, AxumPath(target_id): AxumPath<String>| async move {
+                let tabs = state.tabs.lock().await;
+                if tabs.iter().any(|t| t.get("id").and_then(|v| v.as_str()) == Some(&target_id)) {
+                    (axum::http::StatusCode::OK, "Target activated")
+                } else {
+                    (axum::http::StatusCode::NOT_FOUND, "Target not found")
+                }
+            }),
+        )
+        .route(
+            "/json/close/{target_id}",
+            get(|axum::extract::State(state): axum::extract::State<MockCdpState>, AxumPath(target_id): AxumPath<String>| async move {
+                let mut tabs = state.tabs.lock().await;
+                if let Some(pos) = tabs.iter().position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&target_id)) {
+                    tabs.remove(pos);
+                    (axum::http::StatusCode::OK, "Target is closing")
+                } else {
+                    (axum::http::StatusCode::NOT_FOUND, "Target not found")
+                }
+            }).put(|axum::extract::State(state): axum::extract::State<MockCdpState>, AxumPath(target_id): AxumPath<String>| async move {
+                let mut tabs = state.tabs.lock().await;
+                if let Some(pos) = tabs.iter().position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&target_id)) {
+                    tabs.remove(pos);
+                    (axum::http::StatusCode::OK, "Target is closing")
+                } else {
+                    (axum::http::StatusCode::NOT_FOUND, "Target not found")
+                }
             }),
         )
         .route(
             "/devtools/page/{target_id}",
             get(handle_cdp_ws_upgrade),
-        );
+        )
+        .with_state(state);
 
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -681,5 +750,163 @@ async fn test_browser_auto_launch_on_demand() {
     let _ = std::fs::remove_file(marker_path);
     let _ = std::fs::remove_file(bin_path);
     set_test_browser_binary(None);
+    set_test_cdp_endpoint(None);
+}
+
+#[tokio::test]
+async fn test_cdp_multi_tab_management() {
+    let _guard = TEST_LOCK.lock().await;
+    let (cdp_port, _server_handle) = run_mock_cdp_server().await;
+    let cdp_url = format!("http://{}:{cdp_port}", Ipv4Addr::LOCALHOST);
+    set_test_cdp_endpoint(Some(cdp_url.clone()));
+
+    // 1. list_tabs initial state (1 tab)
+    let list_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-list-tabs-1",
+        "action": "list_tabs",
+    });
+    let reply_str = browser::handle_browser_op(&list_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse list_tabs reply");
+
+    assert_eq!(reply["type"], MSG_TYPE_BROWSER_OP_RESULT);
+    assert_eq!(reply["action"], "list_tabs");
+    assert_eq!(reply["success"], true);
+    let tabs = reply["data"]["tabs"].as_array().expect("tabs array");
+    assert_eq!(tabs.len(), 1);
+    assert_eq!(tabs[0]["id"], "target-page-1");
+    assert_eq!(tabs[0]["title"], "AQVN Test Page");
+    assert!(tabs[0]["webSocketDebuggerUrl"]
+        .as_str()
+        .unwrap()
+        .contains("/devtools/page/target-page-1"));
+
+    // 2. new_tab action
+    let new_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-new-tab-1",
+        "action": "new_tab",
+        "url": "http://example.com/tab2",
+    });
+    let reply_str = browser::handle_browser_op(&new_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse new_tab reply");
+
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["action"], "new_tab");
+    assert_eq!(reply["data"]["created"], true);
+    let tab2_id = reply["data"]["target_id"]
+        .as_str()
+        .expect("new tab target_id")
+        .to_string();
+    assert!(!tab2_id.is_empty());
+    assert_ne!(tab2_id, "target-page-1");
+
+    // 3. list_tabs now returns 2 tabs
+    let reply_str = browser::handle_browser_op(&list_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse list_tabs reply");
+    assert_eq!(reply["success"], true);
+    let tabs = reply["data"]["tabs"].as_array().expect("tabs array");
+    assert_eq!(tabs.len(), 2);
+
+    // 4. Action commands targeting tab2 by target_id
+    let eval_target_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-eval-tab2",
+        "action": "evaluate",
+        "target_id": tab2_id,
+        "expression": "2 + 2",
+    });
+    let reply_str = browser::handle_browser_op(&eval_target_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse eval tab2 reply");
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["data"]["value"], 4);
+    assert_eq!(reply["data"]["target_id"], tab2_id);
+
+    // Navigate tab2 with target_id
+    let nav_target_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-nav-tab2",
+        "action": "navigate",
+        "target_id": tab2_id,
+        "url": "http://example.com/tab2-updated",
+    });
+    let reply_str = browser::handle_browser_op(&nav_target_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse nav tab2 reply");
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["data"]["navigated"], true);
+    assert_eq!(reply["data"]["target_id"], tab2_id);
+
+    // Targeting non-existent tab returns error
+    let bad_target_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-bad-target",
+        "action": "evaluate",
+        "target_id": "non-existent-tab-999",
+        "expression": "2 + 2",
+    });
+    let reply_str = browser::handle_browser_op(&bad_target_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse bad target reply");
+    assert_eq!(reply["success"], false);
+    assert!(reply["error"]
+        .as_str()
+        .unwrap()
+        .contains("non-existent-tab-999"));
+
+    // 5. activate_tab
+    let act_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-act-tab2",
+        "action": "activate_tab",
+        "target_id": tab2_id,
+    });
+    let reply_str = browser::handle_browser_op(&act_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse activate_tab reply");
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["action"], "activate_tab");
+    assert_eq!(reply["data"]["activated"], true);
+    assert_eq!(reply["data"]["target_id"], tab2_id);
+
+    // activate_tab with missing target_id returns error
+    let bad_act_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-bad-act",
+        "action": "activate_tab",
+    });
+    let reply_str = browser::handle_browser_op(&bad_act_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse bad act reply");
+    assert_eq!(reply["success"], false);
+
+    // 6. close_tab
+    let close_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-close-tab2",
+        "action": "close_tab",
+        "target_id": tab2_id,
+    });
+    let reply_str = browser::handle_browser_op(&close_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse close_tab reply");
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["action"], "close_tab");
+    assert_eq!(reply["data"]["closed"], true);
+    assert_eq!(reply["data"]["target_id"], tab2_id);
+
+    // close_tab with missing target_id returns error
+    let bad_close_op = json!({
+        "type": MSG_TYPE_BROWSER_OP,
+        "id": "req-bad-close",
+        "action": "close_tab",
+    });
+    let reply_str = browser::handle_browser_op(&bad_close_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse bad close reply");
+    assert_eq!(reply["success"], false);
+
+    // 7. list_tabs after close has 1 tab
+    let reply_str = browser::handle_browser_op(&list_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse list_tabs reply");
+    assert_eq!(reply["success"], true);
+    let tabs = reply["data"]["tabs"].as_array().expect("tabs array");
+    assert_eq!(tabs.len(), 1);
+    assert_eq!(tabs[0]["id"], "target-page-1");
+
     set_test_cdp_endpoint(None);
 }

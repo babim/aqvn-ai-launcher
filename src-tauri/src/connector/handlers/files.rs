@@ -76,10 +76,46 @@ pub fn normalize_requested_path(requested: &str) -> String {
     }
 }
 
-fn calculate_checksum(bytes: &[u8]) -> String {
+/// Calculates SHA-256 checksum formatted as hexadecimal string.
+pub fn calculate_checksum(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize())
+}
+
+/// Extracts the offset parameter from envelope if present.
+pub fn parse_file_offset(envelope: &Value) -> Option<u64> {
+    envelope.get("offset").and_then(|v| {
+        v.as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+    })
+}
+
+/// Extracts the length parameter from envelope if present.
+pub fn parse_file_length(envelope: &Value) -> Option<usize> {
+    envelope.get("length").and_then(|v| {
+        v.as_u64()
+            .map(|l| l as usize)
+            .or_else(|| v.as_str().and_then(|s| s.parse::<usize>().ok()))
+    })
+}
+
+/// Extracts encoding mode ("utf-8", "base64", etc.), defaulting to "utf-8".
+pub fn parse_file_encoding(envelope: &Value) -> String {
+    envelope
+        .get("encoding")
+        .and_then(Value::as_str)
+        .unwrap_or("utf-8")
+        .to_lowercase()
+}
+
+/// Extracts write mode ("overwrite", "append", etc.), defaulting to "overwrite".
+pub fn parse_file_mode(envelope: &Value) -> String {
+    envelope
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("overwrite")
+        .to_lowercase()
 }
 
 fn make_error_reply(
@@ -217,12 +253,8 @@ fn op_read(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sa
         }
     };
 
-    let offset = envelope.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
-    let length = envelope
-        .get("length")
-        .and_then(Value::as_u64)
-        .map(|l| l as usize)
-        .unwrap_or(total_size.saturating_sub(offset));
+    let offset = parse_file_offset(envelope).unwrap_or(0) as usize;
+    let length = parse_file_length(envelope).unwrap_or(total_size.saturating_sub(offset));
 
     let start = offset.min(total_size);
     let end = (start + length).min(total_size);
@@ -326,11 +358,7 @@ fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
         Err(err) => return make_error_reply(id, op_id, "write", Some(raw_path), err.to_string()),
     };
 
-    let encoding = envelope
-        .get("encoding")
-        .and_then(Value::as_str)
-        .unwrap_or("utf-8")
-        .to_lowercase();
+    let encoding = parse_file_encoding(envelope);
 
     let content_raw = envelope
         .get("content")
@@ -366,16 +394,8 @@ fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
         }
     }
 
-    let mode = envelope
-        .get("mode")
-        .and_then(Value::as_str)
-        .unwrap_or("overwrite")
-        .to_lowercase();
-
-    let maybe_offset = envelope.get("offset").and_then(|v| {
-        v.as_u64()
-            .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
-    });
+    let mode = parse_file_mode(envelope);
+    let maybe_offset = parse_file_offset(envelope);
 
     let (write_res, final_total_size) = if let Some(offset) = maybe_offset {
         let res = fs::OpenOptions::new()
@@ -1119,4 +1139,125 @@ fn build_tree_recursive(
     }
 
     nodes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_requested_path() {
+        // Empty or dot becomes /a0
+        assert_eq!(normalize_requested_path(""), "/a0");
+        assert_eq!(normalize_requested_path("   "), "/a0");
+        assert_eq!(normalize_requested_path("."), "/a0");
+        assert_eq!(normalize_requested_path("  .  "), "/a0");
+
+        // Already starting with /a0
+        assert_eq!(normalize_requested_path("/a0"), "/a0");
+        assert_eq!(
+            normalize_requested_path("/a0/workspace/file.txt"),
+            "/a0/workspace/file.txt"
+        );
+
+        // Home directory / tilde
+        assert_eq!(
+            normalize_requested_path("~/projects/code.rs"),
+            "~/projects/code.rs"
+        );
+
+        // Absolute path
+        assert_eq!(normalize_requested_path("/tmp/test.txt"), "/tmp/test.txt");
+        assert_eq!(normalize_requested_path("/usr/bin/bash"), "/usr/bin/bash");
+
+        // Relative path prepends /a0/
+        assert_eq!(normalize_requested_path("hello.txt"), "/a0/hello.txt");
+        assert_eq!(
+            normalize_requested_path("sub/dir/nested.rs"),
+            "/a0/sub/dir/nested.rs"
+        );
+        assert_eq!(
+            normalize_requested_path("  trimmed/path.json  "),
+            "/a0/trimmed/path.json"
+        );
+    }
+
+    #[test]
+    fn test_calculate_checksum() {
+        assert_eq!(
+            calculate_checksum(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            calculate_checksum(b"hello world"),
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
+    }
+
+    #[test]
+    fn test_file_parameter_parsing() {
+        let env_offset_num = json!({ "offset": 1024 });
+        assert_eq!(parse_file_offset(&env_offset_num), Some(1024));
+
+        let env_offset_str = json!({ "offset": "2048" });
+        assert_eq!(parse_file_offset(&env_offset_str), Some(2048));
+
+        let env_empty = json!({});
+        assert_eq!(parse_file_offset(&env_empty), None);
+        assert_eq!(parse_file_length(&env_empty), None);
+        assert_eq!(parse_file_encoding(&env_empty), "utf-8");
+        assert_eq!(parse_file_mode(&env_empty), "overwrite");
+
+        let env_length_num = json!({ "length": 512 });
+        assert_eq!(parse_file_length(&env_length_num), Some(512));
+
+        let env_length_str = json!({ "length": "256" });
+        assert_eq!(parse_file_length(&env_length_str), Some(256));
+
+        let env_opts = json!({
+            "encoding": "BASE64",
+            "mode": "APPEND",
+        });
+        assert_eq!(parse_file_encoding(&env_opts), "base64");
+        assert_eq!(parse_file_mode(&env_opts), "append");
+    }
+
+    #[test]
+    fn test_file_op_read_write_sandbox() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aqvn_files_unit_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::create_dir_all(&temp_dir);
+        let temp_str = temp_dir.to_string_lossy().to_string();
+        let sandbox = Sandbox::from_allowed_paths(&[temp_str]);
+
+        // Write file
+        let write_req = json!({
+            "action": "write",
+            "path": "test.txt",
+            "content": "Hello connector unit test!",
+        });
+        let write_reply_raw = op_write("req-w", "op-w", "test.txt", &write_req, &sandbox);
+        let write_reply: Value = serde_json::from_str(&write_reply_raw).expect("parse write reply");
+        assert_eq!(write_reply["success"], true);
+
+        // Read file back
+        let read_req = json!({
+            "action": "read",
+            "path": "test.txt",
+        });
+        let read_reply_raw = op_read("req-r", "op-r", "test.txt", &read_req, &sandbox);
+        let read_reply: Value = serde_json::from_str(&read_reply_raw).expect("parse read reply");
+        assert_eq!(read_reply["success"], true);
+        assert_eq!(read_reply["data"]["content"], "Hello connector unit test!");
+        assert_eq!(read_reply["data"]["size"], 26);
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }

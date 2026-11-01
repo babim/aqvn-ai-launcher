@@ -219,12 +219,7 @@ impl PtySession {
 
         let nonce = format!("{:08x}", rand::random::<u32>());
         let end_marker = format!("__AQVN_END_{nonce}__");
-
-        let command_line = if cfg!(windows) {
-            format!("{command}\r\nWrite-Output \"{end_marker}:$LASTEXITCODE:__\"\r\n")
-        } else {
-            format!("{{\n{command}\n}}\necho \"{end_marker}:$?:__\"\n")
-        };
+        let command_line = format_pty_command_line(command, &end_marker);
 
         {
             let mut w = self
@@ -700,6 +695,69 @@ pub fn extract_session_id(envelope: &Value) -> String {
     "default".to_string()
 }
 
+/// Extracts the command string from `command`, `code`, or `input` fields in the envelope.
+pub fn extract_exec_command(envelope: &Value) -> Option<&str> {
+    envelope
+        .get("command")
+        .or_else(|| envelope.get("code"))
+        .or_else(|| envelope.get("input"))
+        .and_then(Value::as_str)
+}
+
+/// Extracts the `strip_ansi` boolean flag from boolean, string ("true"/"1"), or number (1).
+pub fn extract_strip_ansi(envelope: &Value) -> bool {
+    envelope
+        .get("strip_ansi")
+        .or_else(|| envelope.get("stripAnsi"))
+        .map(|v| match v {
+            Value::Bool(b) => *b,
+            Value::String(s) => s.eq_ignore_ascii_case("true") || s == "1",
+            Value::Number(n) => n.as_i64() == Some(1),
+            _ => false,
+        })
+        .unwrap_or(false)
+}
+
+/// Extracts the execution runtime, defaulting to "terminal".
+pub fn extract_exec_runtime(envelope: &Value) -> &str {
+    envelope
+        .get("runtime")
+        .and_then(Value::as_str)
+        .unwrap_or(RUNTIME_TERMINAL)
+}
+
+/// Extracts terminal cols and rows, defaulting to (80, 24).
+pub fn extract_exec_dimensions(envelope: &Value) -> (u16, u16) {
+    let cols = envelope
+        .get("cols")
+        .and_then(Value::as_u64)
+        .map(|v| v as u16)
+        .unwrap_or(80);
+    let rows = envelope
+        .get("rows")
+        .and_then(Value::as_u64)
+        .map(|v| v as u16)
+        .unwrap_or(24);
+    (cols, rows)
+}
+
+/// Extracts execution timeout in milliseconds, defaulting to 30,000ms.
+pub fn extract_exec_timeout_ms(envelope: &Value) -> u64 {
+    envelope
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(30_000)
+}
+
+/// Formats the command line wrapped with end marker for exit code tracking.
+pub fn format_pty_command_line(command: &str, end_marker: &str) -> String {
+    if cfg!(windows) {
+        format!("{command}\r\nWrite-Output \"{end_marker}:$LASTEXITCODE:__\"\r\n")
+    } else {
+        format!("{{\n{command}\n}}\necho \"{end_marker}:$?:__\"\n")
+    }
+}
+
 fn make_error_reply(
     id: &str,
     op_id: &str,
@@ -803,11 +861,7 @@ pub async fn handle_exec_op_streaming(
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
 
-        let command_opt = envelope
-            .get("command")
-            .or_else(|| envelope.get("code"))
-            .or_else(|| envelope.get("input"))
-            .and_then(Value::as_str);
+        let command_opt = extract_exec_command(envelope);
 
         if is_reset && command_opt.is_none() {
             reset_session(&session_id);
@@ -831,10 +885,7 @@ pub async fn handle_exec_op_streaming(
         }
 
         // Validate runtime
-        let runtime = envelope
-            .get("runtime")
-            .and_then(Value::as_str)
-            .unwrap_or(RUNTIME_TERMINAL);
+        let runtime = extract_exec_runtime(envelope);
 
         if runtime != RUNTIME_TERMINAL && runtime != "bash" && runtime != "sh" && runtime != "shell"
         {
@@ -857,16 +908,7 @@ pub async fn handle_exec_op_streaming(
             );
         };
 
-        let strip_ansi_enabled = envelope
-            .get("strip_ansi")
-            .or_else(|| envelope.get("stripAnsi"))
-            .map(|v| match v {
-                Value::Bool(b) => *b,
-                Value::String(s) => s.eq_ignore_ascii_case("true") || s == "1",
-                Value::Number(n) => n.as_i64() == Some(1),
-                _ => false,
-            })
-            .unwrap_or(false);
+        let strip_ansi_enabled = extract_strip_ansi(envelope);
 
         // Determine working directory
         let sandbox = current_sandbox();
@@ -885,20 +927,8 @@ pub async fn handle_exec_op_streaming(
             default_cwd
         };
 
-        let cols = envelope
-            .get("cols")
-            .and_then(Value::as_u64)
-            .map(|v| v as u16)
-            .unwrap_or(80);
-        let rows = envelope
-            .get("rows")
-            .and_then(Value::as_u64)
-            .map(|v| v as u16)
-            .unwrap_or(24);
-        let timeout_ms = envelope
-            .get("timeout_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(30_000);
+        let (cols, rows) = extract_exec_dimensions(envelope);
+        let timeout_ms = extract_exec_timeout_ms(envelope);
 
         let session_arc = match get_or_create_session(&session_id, &cwd, cols, rows).await {
             Ok(s) => s,
@@ -968,5 +998,130 @@ pub async fn handle_exec_op_with_sender(
         result
     } else {
         handle_exec_op_streaming(envelope, None).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_exec_command() {
+        // command field
+        let env_cmd = json!({ "command": "echo hello" });
+        assert_eq!(extract_exec_command(&env_cmd), Some("echo hello"));
+
+        // code field
+        let env_code = json!({ "code": "ls -la" });
+        assert_eq!(extract_exec_command(&env_code), Some("ls -la"));
+
+        // input field
+        let env_input = json!({ "input": "pwd" });
+        assert_eq!(extract_exec_command(&env_input), Some("pwd"));
+
+        // Precedence: command > code > input
+        let env_multi = json!({
+            "command": "first",
+            "code": "second",
+            "input": "third",
+        });
+        assert_eq!(extract_exec_command(&env_multi), Some("first"));
+
+        let env_code_input = json!({
+            "code": "second",
+            "input": "third",
+        });
+        assert_eq!(extract_exec_command(&env_code_input), Some("second"));
+
+        // Missing or non-string
+        let env_none = json!({});
+        assert_eq!(extract_exec_command(&env_none), None);
+
+        let env_num = json!({ "command": 12345 });
+        assert_eq!(extract_exec_command(&env_num), None);
+    }
+
+    #[test]
+    fn test_extract_session_id() {
+        // String session_id
+        let env_sid = json!({ "session_id": "test-session-1" });
+        assert_eq!(extract_session_id(&env_sid), "test-session-1");
+
+        // String session alias
+        let env_s = json!({ "session": "test-session-2" });
+        assert_eq!(extract_session_id(&env_s), "test-session-2");
+
+        // String session_name alias
+        let env_sname = json!({ "session_name": "test-session-3" });
+        assert_eq!(extract_session_id(&env_sname), "test-session-3");
+
+        // Integer session_id
+        let env_int = json!({ "session_id": 42 });
+        assert_eq!(extract_session_id(&env_int), "42");
+
+        // Empty string defaults to "default"
+        let env_empty = json!({ "session_id": "   " });
+        assert_eq!(extract_session_id(&env_empty), "default");
+
+        // Missing defaults to "default"
+        let env_none = json!({});
+        assert_eq!(extract_session_id(&env_none), "default");
+    }
+
+    #[test]
+    fn test_extract_strip_ansi() {
+        // Booleans
+        assert!(extract_strip_ansi(&json!({ "strip_ansi": true })));
+        assert!(!extract_strip_ansi(&json!({ "strip_ansi": false })));
+
+        // camelCase alias
+        assert!(extract_strip_ansi(&json!({ "stripAnsi": true })));
+
+        // Strings
+        assert!(extract_strip_ansi(&json!({ "strip_ansi": "true" })));
+        assert!(extract_strip_ansi(&json!({ "strip_ansi": "TRUE" })));
+        assert!(extract_strip_ansi(&json!({ "strip_ansi": "1" })));
+        assert!(!extract_strip_ansi(&json!({ "strip_ansi": "false" })));
+        assert!(!extract_strip_ansi(&json!({ "strip_ansi": "0" })));
+
+        // Number
+        assert!(extract_strip_ansi(&json!({ "strip_ansi": 1 })));
+        assert!(!extract_strip_ansi(&json!({ "strip_ansi": 0 })));
+
+        // Default false
+        assert!(!extract_strip_ansi(&json!({})));
+    }
+
+    #[test]
+    fn test_extract_exec_runtime_dimensions_and_timeout() {
+        let env = json!({
+            "runtime": "bash",
+            "cols": 120,
+            "rows": 40,
+            "timeout_ms": 15000,
+        });
+        assert_eq!(extract_exec_runtime(&env), "bash");
+        assert_eq!(extract_exec_dimensions(&env), (120, 40));
+        assert_eq!(extract_exec_timeout_ms(&env), 15000);
+
+        // Defaults
+        let env_empty = json!({});
+        assert_eq!(extract_exec_runtime(&env_empty), "terminal");
+        assert_eq!(extract_exec_dimensions(&env_empty), (80, 24));
+        assert_eq!(extract_exec_timeout_ms(&env_empty), 30000);
+    }
+
+    #[test]
+    fn test_format_pty_command_line() {
+        let cmd = "echo test";
+        let marker = "__END_MARKER__";
+        let formatted = format_pty_command_line(cmd, marker);
+        assert!(formatted.contains(cmd));
+        assert!(formatted.contains(marker));
+        if cfg!(windows) {
+            assert!(formatted.contains("$LASTEXITCODE"));
+        } else {
+            assert!(formatted.contains("$?"));
+        }
     }
 }

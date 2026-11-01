@@ -1850,9 +1850,94 @@ mod tests {
         assert_eq!(nx0, 0);
         assert_eq!(ny0, 0);
 
+        let (nx_max, ny_max) = normalize_screen_coordinates(1920.0, 1080.0, 1920.0, 1080.0);
+        assert_eq!(nx_max, 65535);
+        assert_eq!(ny_max, 65535);
+
+        let (nx_q, ny_q) = normalize_screen_coordinates(480.0, 270.0, 1920.0, 1080.0);
+        assert_eq!(nx_q, 16384);
+        assert_eq!(ny_q, 16384);
+
         let (nx_clamp, ny_clamp) = normalize_screen_coordinates(5000.0, -100.0, 1920.0, 1080.0);
         assert_eq!(nx_clamp, 65535);
         assert_eq!(ny_clamp, 0);
+
+        // Fallback to 1920x1080 on non-positive screen dimensions
+        let (nx_fb0, ny_fb0) = normalize_screen_coordinates(960.0, 540.0, 0.0, 0.0);
+        assert_eq!(nx_fb0, 32768);
+        assert_eq!(ny_fb0, 32768);
+
+        let (nx_fb_neg, ny_fb_neg) = normalize_screen_coordinates(960.0, 540.0, -100.0, -100.0);
+        assert_eq!(nx_fb_neg, 32768);
+        assert_eq!(ny_fb_neg, 32768);
+    }
+
+    #[test]
+    fn test_compute_scaled_dimensions() {
+        // Unscaled
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, None, None),
+            (1920, 1080)
+        );
+
+        // Scaling factor
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, Some(0.5), None),
+            (960, 540)
+        );
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, Some(0.25), None),
+            (480, 270)
+        );
+
+        // Scaling factor bounds: >= 1.0 or <= 0.0 are ignored
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, Some(1.0), None),
+            (1920, 1080)
+        );
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, Some(1.5), None),
+            (1920, 1080)
+        );
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, Some(0.0), None),
+            (1920, 1080)
+        );
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, Some(-0.5), None),
+            (1920, 1080)
+        );
+
+        // Max width capping preserving aspect ratio
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, None, Some(800)),
+            (800, 450)
+        );
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, None, Some(3840)),
+            (1920, 1080)
+        );
+
+        // Combined scale factor and max width
+        // 1920 * 0.8 = 1536, 1080 * 0.8 = 864; then capped to max_width 1000:
+        // 864 * (1000 / 1536) = 562.5 -> rounds to 563
+        assert_eq!(
+            compute_scaled_dimensions(1920, 1080, Some(0.8), Some(1000)),
+            (1000, 563)
+        );
+
+        // Zero dimensions preserved
+        assert_eq!(
+            compute_scaled_dimensions(0, 0, Some(0.5), Some(800)),
+            (0, 0)
+        );
+        assert_eq!(compute_scaled_dimensions(0, 1080, None, None), (0, 1080));
+
+        // Clamped minimum dimension of at least 1
+        assert_eq!(
+            compute_scaled_dimensions(10, 10, Some(0.0001), None),
+            (1, 1)
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Local bridge proxy: a loopback HTTP/WebSocket endpoint the webview can use
+//! Local reverse proxy forwarding WebUI requests and WebSocket connections
 //! as if it were the chat server's own origin.
 //!
 //! It exists because the webview origin (`tauri://localhost`) cannot talk to
@@ -322,6 +322,8 @@ pub fn router(state: ProxyState) -> Router {
     Router::new()
         .route("/health", any(handle_health))
         .route("/proxy/csrf", any(handle_proxy_csrf))
+        .route("/proxy/clear_disk_cache", any(handle_clear_disk_cache))
+        .route("/proxy/cache/clear", any(handle_clear_disk_cache))
         .route("/benchmark/fcp", any(handle_benchmark_fcp))
         .route(LOGIN_PATH, any(handle_login))
         .route("/api/{*rest}", any(handle_api))
@@ -406,6 +408,19 @@ async fn handle_proxy_csrf(State(state): State<ProxyState>, headers: HeaderMap) 
         Err(err) => text_response(StatusCode::BAD_GATEWAY, err),
     };
     with_cors(response, origin.as_deref())
+}
+
+/// Manual clear cache handler exposing `/proxy/clear_disk_cache` and `/proxy/cache/clear`.
+async fn handle_clear_disk_cache(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref()) {
+        return with_cors(response, origin.as_deref());
+    }
+    state.cache().clear_disk_cache().await;
+    with_cors(
+        Json(json!({ "ok": true, "cleared": true })).into_response(),
+        origin.as_deref(),
+    )
 }
 
 async fn handle_login(

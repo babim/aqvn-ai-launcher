@@ -14,6 +14,9 @@ use tokio::sync::RwLock;
 /// Default maximum memory limit for AssetCache in RAM (32MB).
 pub const MAX_MEMORY_CACHE_BYTES: usize = 32 * 1024 * 1024;
 
+/// Default maximum disk cache quota (256MB).
+pub const MAX_DISK_CACHE_BYTES: u64 = 256 * 1024 * 1024;
+
 /// In-memory cached asset representation.
 #[derive(Clone, Debug)]
 pub struct CachedAsset {
@@ -51,10 +54,11 @@ struct CacheEntry {
     last_accessed: AtomicU64,
 }
 
-/// Asset caching engine: dual-layer (RAM + persistent disk) with bounded LRU memory eviction.
+/// Asset caching engine: dual-layer (RAM + persistent disk) with bounded LRU memory & disk eviction.
 pub struct AssetCache {
     base_dir: PathBuf,
     max_memory_bytes: usize,
+    max_disk_cache_bytes: AtomicU64,
     memory: RwLock<HashMap<(String, String), CacheEntry>>,
     current_memory_bytes: AtomicUsize,
     access_counter: AtomicU64,
@@ -68,7 +72,7 @@ impl Default for AssetCache {
 
 impl AssetCache {
     pub fn new(base_dir: PathBuf) -> Self {
-        Self::with_max_memory(base_dir, MAX_MEMORY_CACHE_BYTES)
+        Self::with_limits(base_dir, MAX_MEMORY_CACHE_BYTES, MAX_DISK_CACHE_BYTES)
     }
 
     /// Computes SHA-256 ETag for asset body bytes.
@@ -77,9 +81,26 @@ impl AssetCache {
     }
 
     pub fn with_max_memory(base_dir: PathBuf, max_memory_bytes: usize) -> Self {
+        Self::with_limits(base_dir, max_memory_bytes, MAX_DISK_CACHE_BYTES)
+    }
+
+    pub fn with_max_disk(base_dir: PathBuf, max_disk_cache_bytes: u64) -> Self {
+        Self::with_limits(base_dir, MAX_MEMORY_CACHE_BYTES, max_disk_cache_bytes)
+    }
+
+    pub fn with_max_disk_bytes(base_dir: PathBuf, max_disk_cache_bytes: u64) -> Self {
+        Self::with_limits(base_dir, MAX_MEMORY_CACHE_BYTES, max_disk_cache_bytes)
+    }
+
+    pub fn with_limits(
+        base_dir: PathBuf,
+        max_memory_bytes: usize,
+        max_disk_cache_bytes: u64,
+    ) -> Self {
         Self {
             base_dir,
             max_memory_bytes,
+            max_disk_cache_bytes: AtomicU64::new(max_disk_cache_bytes),
             memory: RwLock::new(HashMap::new()),
             current_memory_bytes: AtomicUsize::new(0),
             access_counter: AtomicU64::new(1),
@@ -133,6 +154,27 @@ impl AssetCache {
         self.current_memory_bytes.load(Ordering::Relaxed)
     }
 
+    /// Maximum disk cache quota in bytes (defaults to 256MB).
+    pub fn max_disk_cache_bytes(&self) -> u64 {
+        self.max_disk_cache_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Sets the maximum disk cache quota in bytes.
+    pub fn set_max_disk_cache_bytes(&self, bytes: u64) {
+        self.max_disk_cache_bytes.store(bytes, Ordering::Relaxed);
+    }
+
+    /// Returns current disk cache bytes consumption under `base_dir`.
+    pub async fn current_disk_cache_bytes(&self) -> u64 {
+        let base_dir = self.base_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            let (_, total) = scan_disk_cache(&base_dir);
+            total
+        })
+        .await
+        .unwrap_or(0)
+    }
+
     /// Checks whether an asset is currently present in in-memory RAM cache.
     pub async fn contains_in_memory(&self, origin: &str, path: &str) -> bool {
         let key = (origin.to_string(), path.to_string());
@@ -165,7 +207,7 @@ impl AssetCache {
         safe_path_under_root(&origin_base, path)
     }
 
-    /// Retrieves an asset from memory or disk cache.
+    /// Retrieves an asset from memory or disk cache, updating LRU recency for both tiers.
     pub async fn get(&self, origin: &str, path: &str) -> Option<CachedAsset> {
         let key = (origin.to_string(), path.to_string());
 
@@ -175,6 +217,11 @@ impl AssetCache {
             if let Some(entry) = mem.get(&key) {
                 let seq = self.access_counter.fetch_add(1, Ordering::Relaxed);
                 entry.last_accessed.store(seq, Ordering::Relaxed);
+                if let Some(disk_path) = self.disk_path(origin, path) {
+                    if disk_path.is_file() {
+                        touch_disk_file(&disk_path);
+                    }
+                }
                 return Some(entry.asset.clone());
             }
         }
@@ -186,6 +233,7 @@ impl AssetCache {
         }
 
         let body = tokio::fs::read(&disk_path).await.ok()?;
+        touch_disk_file(&disk_path);
 
         // Retrieve content type: first check companion .meta file, then derive from extension
         let meta_path = meta_file_path(&disk_path);
@@ -222,7 +270,7 @@ impl AssetCache {
         Some(asset)
     }
 
-    /// Stores an asset into both memory (bounded LRU) and persistent disk cache.
+    /// Stores an asset into both memory (bounded LRU) and persistent disk cache with quota enforcement.
     pub async fn put(&self, origin: &str, path: &str, content_type: Option<&str>, body: &[u8]) {
         let key = (origin.to_string(), path.to_string());
         let etag = compute_etag(body);
@@ -235,7 +283,19 @@ impl AssetCache {
         // 1. Store in memory with bounded LRU eviction
         self.put_memory(key, asset).await;
 
-        // 2. Store on disk
+        let max_disk = self.max_disk_cache_bytes();
+
+        // 2. Reject storing on disk if asset body alone exceeds disk quota
+        if body.len() as u64 > max_disk {
+            if let Some(disk_path) = self.disk_path(origin, path) {
+                let _ = tokio::fs::remove_file(&disk_path).await;
+                let _ = tokio::fs::remove_file(meta_file_path(&disk_path)).await;
+                let _ = tokio::fs::remove_file(etag_file_path(&disk_path)).await;
+            }
+            return;
+        }
+
+        // 3. Store on disk
         if let Some(disk_path) = self.disk_path(origin, path) {
             if let Some(parent) = disk_path.parent() {
                 let _ = tokio::fs::create_dir_all(parent).await;
@@ -247,6 +307,9 @@ impl AssetCache {
                 }
                 let etag_path = etag_file_path(&disk_path);
                 let _ = tokio::fs::write(&etag_path, etag.as_bytes()).await;
+
+                // 4. Automatic disk quota LRU pruning
+                self.prune_disk_cache().await;
             }
         }
     }
@@ -303,10 +366,65 @@ impl AssetCache {
         self.current_memory_bytes.store(current, Ordering::Relaxed);
     }
 
+    /// Enforces the disk cache quota by pruning oldest cached asset files (LRU)
+    /// until total disk usage is within `max_disk_cache_bytes`.
+    /// Returns the total bytes pruned.
+    pub async fn prune_disk_cache(&self) -> u64 {
+        let base_dir = self.base_dir.clone();
+        let max_bytes = self.max_disk_cache_bytes();
+
+        tokio::task::spawn_blocking(move || {
+            let (mut assets, mut current_total) = scan_disk_cache(&base_dir);
+            if current_total <= max_bytes {
+                return 0;
+            }
+
+            // Sort assets ascending by last_accessed (oldest first).
+            // Tie-break with primary_path for deterministic pruning order.
+            assets.sort_by(|a, b| {
+                a.last_accessed
+                    .cmp(&b.last_accessed)
+                    .then_with(|| a.primary_path.cmp(&b.primary_path))
+            });
+
+            let mut pruned_bytes: u64 = 0;
+            for asset in assets {
+                if current_total <= max_bytes {
+                    break;
+                }
+
+                let _ = std::fs::remove_file(&asset.primary_path);
+                let _ = std::fs::remove_file(&asset.meta_path);
+                let _ = std::fs::remove_file(&asset.etag_path);
+
+                current_total = current_total.saturating_sub(asset.total_size);
+                pruned_bytes = pruned_bytes.saturating_add(asset.total_size);
+            }
+
+            // Clean up any empty subdirectories under base_dir
+            cleanup_empty_dirs(&base_dir);
+
+            pruned_bytes
+        })
+        .await
+        .unwrap_or(0)
+    }
+
     /// Clears both memory and disk caches.
     pub async fn clear(&self) {
+        self.clear_disk_cache().await;
+    }
+
+    /// Clears the persistent disk cache under `base_dir`, pruning all stored asset files.
+    /// Also resets in-memory cache to maintain coherence.
+    pub async fn clear_disk_cache(&self) {
         self.clear_memory().await;
-        let _ = tokio::fs::remove_dir_all(&self.base_dir).await;
+        let base_dir = self.base_dir.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = std::fs::remove_dir_all(&base_dir);
+            let _ = std::fs::create_dir_all(&base_dir);
+        })
+        .await;
     }
 
     /// Clears only the in-memory cache, keeping the disk cache intact.
@@ -314,6 +432,117 @@ impl AssetCache {
         let mut mem = self.memory.write().await;
         mem.clear();
         self.current_memory_bytes.store(0, Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug)]
+struct ScannedAsset {
+    primary_path: PathBuf,
+    meta_path: PathBuf,
+    etag_path: PathBuf,
+    total_size: u64,
+    last_accessed: std::time::SystemTime,
+}
+
+fn scan_disk_cache(base_dir: &Path) -> (Vec<ScannedAsset>, u64) {
+    if !base_dir.is_dir() {
+        return (Vec::new(), 0);
+    }
+    let mut files = Vec::new();
+    collect_files_recursive(base_dir, &mut files);
+
+    let mut file_map: HashMap<PathBuf, (u64, std::time::SystemTime)> = HashMap::new();
+    for path in files {
+        if let Ok(meta) = std::fs::metadata(&path) {
+            let size = meta.len();
+            let ts = match (meta.modified(), meta.accessed()) {
+                (Ok(m), Ok(a)) => std::cmp::max(m, a),
+                (Ok(m), _) => m,
+                (_, Ok(a)) => a,
+                _ => std::time::SystemTime::UNIX_EPOCH,
+            };
+            file_map.insert(path, (size, ts));
+        }
+    }
+
+    let mut total_disk_bytes: u64 = file_map.values().map(|(size, _)| *size).sum();
+    let mut assets = Vec::new();
+
+    for (path, (size, ts)) in &file_map {
+        let path_str = path.to_string_lossy();
+        if path_str.ends_with(".meta") || path_str.ends_with(".etag") {
+            continue;
+        }
+
+        let meta_p = meta_file_path(path);
+        let etag_p = etag_file_path(path);
+
+        let meta_size = file_map.get(&meta_p).map(|(s, _)| *s).unwrap_or(0);
+        let etag_size = file_map.get(&etag_p).map(|(s, _)| *s).unwrap_or(0);
+
+        let total_size = size + meta_size + etag_size;
+
+        assets.push(ScannedAsset {
+            primary_path: path.clone(),
+            meta_path: meta_p,
+            etag_path: etag_p,
+            total_size,
+            last_accessed: *ts,
+        });
+    }
+
+    // Clean up any orphaned .meta or .etag files
+    for (path, (size, _)) in &file_map {
+        let path_str = path.to_string_lossy();
+        if path_str.ends_with(".meta") {
+            let primary = PathBuf::from(path_str.trim_end_matches(".meta"));
+            if !file_map.contains_key(&primary) {
+                let _ = std::fs::remove_file(path);
+                total_disk_bytes = total_disk_bytes.saturating_sub(*size);
+            }
+        } else if path_str.ends_with(".etag") {
+            let primary = PathBuf::from(path_str.trim_end_matches(".etag"));
+            if !file_map.contains_key(&primary) {
+                let _ = std::fs::remove_file(path);
+                total_disk_bytes = total_disk_bytes.saturating_sub(*size);
+            }
+        }
+    }
+
+    (assets, total_disk_bytes)
+}
+
+fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files_recursive(&path, out);
+        } else if path.is_file() {
+            out.push(path);
+        }
+    }
+}
+
+fn cleanup_empty_dirs(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            cleanup_empty_dirs(&path);
+            let _ = std::fs::remove_dir(&path);
+        }
+    }
+}
+
+fn touch_disk_file(path: &Path) {
+    if let Ok(file) = std::fs::File::options().write(true).open(path) {
+        let now = std::fs::FileTimes::new().set_modified(std::time::SystemTime::now());
+        let _ = file.set_times(now);
     }
 }
 
@@ -530,7 +759,7 @@ mod tests {
         cache.put(origin, "/a.css", None, &[1u8; 60]).await;
         assert_eq!(cache.current_memory_bytes(), 60);
 
-        // Try inserting oversized asset of 105 bytes
+        // Try inserting oversized asset of 105 bytes into 100-byte memory cache
         cache.put(origin, "/oversized.bin", None, &[9u8; 105]).await;
         assert_eq!(cache.current_memory_bytes(), 60);
         assert!(!cache.contains_in_memory(origin, "/oversized.bin").await);

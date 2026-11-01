@@ -424,6 +424,25 @@
               Select tone synthesized via Web Audio API.
             </div>
           </div>
+
+          <div class="form-group" style="margin-top: 18px;" id="cache-group">
+            <label data-i18n="cache_title">Disk Asset Cache / Bộ nhớ đệm tài sản (256MB)</label>
+            <div style="display: flex; gap: 12px; align-items: center; margin-top: 6px;">
+              <button
+                type="button"
+                id="clear-disk-cache-btn"
+                class="secondary-btn"
+                style="padding: 10px 16px; border: 1px solid #ef444455; border-radius: 8px; background: #0b1220; color: #f87171; cursor: pointer; white-space: nowrap; font: inherit; font-size: 0.9rem;"
+                data-i18n="clear_disk_cache_btn"
+              >
+                Clear Disk Cache / Xóa bộ nhớ đệm
+              </button>
+              <span id="cache-clear-status" class="help-text" style="margin-top: 0;"></span>
+            </div>
+            <div class="help-text" data-i18n="cache_help">
+              Enforces 256MB LRU quota. Clear cached static assets from disk to force clean re-fetch.
+            </div>
+          </div>
         </section>
 
         <section class="card">
@@ -606,7 +625,7 @@
               <button type="button" id="reset-hotkey-btn" data-i18n="reset_hotkey_btn">Reset Default</button>
             </div>
             <div class="help-text" data-i18n="global_hotkey_help">
-              Global hotkey to show/hide the window from anywhere (e.g., Alt+Space, Ctrl+Alt+A, Super+Space). On Linux X11 this uses XGrabKey; on Wayland use the system tray menu.
+              Global hotkey to show/hide the window from anywhere (e.g., Alt+Space, Ctrl+Alt+A, Super+Space). On Linux X11 này dùng XGrabKey; trên Wayland dùng biểu tượng khay hệ thống.
             </div>
           </div>
           <div style="margin-top: 12px;">

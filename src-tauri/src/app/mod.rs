@@ -1,4 +1,4 @@
-//! OS integration: tray icon, global hotkey, notifications, and
+//! Application shell actions: window visibility, Settings/Help dialogs, and
 //! external-link policy. Tray and hotkey are compiled out of mobile builds.
 
 pub mod context_menu;
@@ -153,4 +153,17 @@ pub fn set_tray_busy(app: AppHandle, busy: bool) -> Result<(), String> {
         let _ = (&app, busy);
         Ok(())
     }
+}
+
+/// Tauri IPC command to clear the proxy asset disk cache.
+#[tauri::command]
+pub async fn clear_disk_cache(app: AppHandle) -> Result<bool, String> {
+    if let Some(cache) = app.try_state::<std::sync::Arc<crate::proxy::cache::AssetCache>>() {
+        cache.clear_disk_cache().await;
+    } else {
+        crate::proxy::cache::AssetCache::default()
+            .clear_disk_cache()
+            .await;
+    }
+    Ok(true)
 }

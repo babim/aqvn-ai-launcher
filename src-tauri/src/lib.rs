@@ -1,5 +1,3 @@
-//! AQVN Workspace core library.
-
 pub mod app;
 pub mod config;
 #[cfg(not(target_os = "android"))]
@@ -121,6 +119,7 @@ pub fn run() {
             let (proxy_listener, proxy_state, proxy_info) =
                 tauri::async_runtime::block_on(proxy::server::bind_with_config(&initial_config))?;
             app.manage(proxy_info.clone());
+            app.manage(proxy_state.cache().clone());
 
             let serve_state = proxy_state.clone();
             tauri::async_runtime::spawn(async move {
@@ -288,7 +287,8 @@ pub fn run() {
             app::open_about,
             app::close_current_window,
             app::context_menu::show_context_menu,
-            app::context_menu::toggle_fullscreen
+            app::context_menu::toggle_fullscreen,
+            app::clear_disk_cache
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AQVN Workspace");

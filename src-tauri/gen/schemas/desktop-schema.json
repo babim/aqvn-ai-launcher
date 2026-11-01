@@ -387,6 +387,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the clear_disk_cache command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-disk-cache",
+          "markdownDescription": "Enables the clear_disk_cache command without any pre-configured scope."
+        },
+        {
           "description": "Enables the close_current_window command without any pre-configured scope.",
           "type": "string",
           "const": "allow-close-current-window",
@@ -433,6 +439,12 @@
           "type": "string",
           "const": "allow-toggle-fullscreen",
           "markdownDescription": "Enables the toggle_fullscreen command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_disk_cache command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-disk-cache",
+          "markdownDescription": "Denies the clear_disk_cache command without any pre-configured scope."
         },
         {
           "description": "Denies the close_current_window command without any pre-configured scope.",

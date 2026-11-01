@@ -9,6 +9,7 @@ fn main() {
             "close_current_window",
             "show_context_menu",
             "toggle_fullscreen",
+            "clear_disk_cache",
         ]));
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }

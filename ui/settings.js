@@ -45,6 +45,8 @@
   const taskChimeVolumeDisplay = document.getElementById('task-chime-volume-display');
   const taskChimeToneInput = document.getElementById('task-chime-tone');
   const previewChimeBtn = document.getElementById('preview-chime-btn');
+  const clearDiskCacheBtn = document.getElementById('clear-disk-cache-btn');
+  const cacheClearStatus = document.getElementById('cache-clear-status');
   const langToggleBtn = document.getElementById('lang-toggle-btn');
   const currentLangText = document.getElementById('current-lang-text');
   const serverUrlInput = document.getElementById('server-url');
@@ -96,6 +98,9 @@
       tone_bell: 'Chuông ngân (Bell)',
       tone_beep: 'Bíp (Beep)',
       tone_subtle: 'Nhẹ nhàng (Subtle)',
+      cache_title: 'Bộ nhớ đệm tài sản trên đĩa (Disk Asset Cache - 256MB)',
+      clear_disk_cache_btn: 'Xóa bộ nhớ đệm (Clear Disk Cache)',
+      cache_help: 'Giới hạn định mức 256MB LRU. Xóa các tệp tài sản tĩnh đã lưu trên đĩa để tải lại từ máy chủ.',
       server_title: 'Cấu hình máy chủ',
       server_url_label: 'Địa chỉ máy chủ (Server URL)',
       server_url_help: 'Địa chỉ máy chủ làm việc từ xa (upstream workspace server).',
@@ -161,6 +166,9 @@
       tone_bell: 'Bell',
       tone_beep: 'Beep',
       tone_subtle: 'Subtle',
+      cache_title: 'Disk Asset Cache (256MB Quota)',
+      clear_disk_cache_btn: 'Clear Disk Cache',
+      cache_help: 'Enforces 256MB LRU quota. Clear cached static assets from disk to force fresh retrieval.',
       server_title: 'Server Configuration',
       server_url_label: 'Server URL',
       server_url_help: 'Upstream workspace server endpoint.',
@@ -190,42 +198,96 @@
       rfc_port_label: 'RFC Port',
       ssh_port_label: 'SSH Port',
       allowed_paths_label: 'Allowed Paths',
-      allowed_paths_help: 'Directories accessible to the agent.',
+      allowed_paths_help: 'Directories on this machine accessible to the agent.',
       add_path_btn: 'Add Path',
       shortcuts_title: 'Keyboard Shortcuts',
       global_hotkey_label: 'Global Summon Shortcut',
       reset_hotkey_btn: 'Reset Default',
-      global_hotkey_help: 'Global hotkey to show/hide the window from anywhere (e.g., Alt+Space, Ctrl+Alt+A, Super+Space). On Linux X11 this uses XGrabKey; on Wayland use the system tray menu.',
+      global_hotkey_help: 'Global shortcut to toggle window visibility from anywhere (e.g. Alt+Space, Ctrl+Alt+A). Uses XGrabKey on Linux X11; use tray menu on Wayland.',
       view_help_link: 'View All Shortcuts & Help (F1) →',
       save_settings_btn: 'Save Settings',
       reset_defaults_btn: 'Reset to Defaults',
       save_success: 'Settings saved successfully.',
       save_error: 'Failed to save settings: ',
-      reset_status: 'Reset to defaults (click Save to persist).'
+      reset_status: 'Reset to default values (click Save to apply).'
     }
   };
 
   function setLanguage(lang) {
-    currentLang = lang === 'en' ? 'en' : 'vi';
-    if (appLanguageSelect) {
-      appLanguageSelect.value = currentLang;
-    }
+    if (!SETTINGS_I18N[lang]) lang = 'vi';
+    currentLang = lang;
+
+    if (appLanguageSelect) appLanguageSelect.value = lang;
     if (currentLangText) {
-      currentLangText.textContent = currentLang === 'vi' ? 'English' : 'Tiếng Việt';
+      currentLangText.textContent = lang === 'vi' ? 'Tiếng Việt' : 'English';
     }
-    const dict = SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi;
-    document.title = dict.page_title || 'AQVN Workspace — Settings';
+
+    const strings = SETTINGS_I18N[lang];
+    document.title = strings.page_title;
 
     document.querySelectorAll('[data-i18n]').forEach((el) => {
       const key = el.getAttribute('data-i18n');
-      if (dict[key]) {
-        el.textContent = dict[key];
+      if (strings[key]) {
+        el.textContent = strings[key];
       }
     });
 
+    renderServerProfiles();
+  }
+
+  function playPreviewChime(tone, volume) {
     try {
-      localStorage.setItem('aqvn_lang', currentLang);
-    } catch (e) {}
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(volume, now);
+      gain.connect(ctx.destination);
+
+      const t = tone || 'classic';
+      if (t === 'classic') {
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        osc1.type = 'sine';
+        osc2.type = 'sine';
+        osc1.frequency.setValueAtTime(587.33, now); // D5
+        osc2.frequency.setValueAtTime(880.00, now + 0.1); // A5
+        osc1.connect(gain);
+        osc2.connect(gain);
+        osc1.start(now);
+        osc1.stop(now + 0.15);
+        osc2.start(now + 0.1);
+        osc2.stop(now + 0.35);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      } else if (t === 'bell') {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1046.50, now); // C6
+        osc.connect(gain);
+        osc.start(now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+        osc.stop(now + 0.6);
+      } else if (t === 'beep') {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(783.99, now); // G5
+        osc.connect(gain);
+        osc.start(now);
+        gain.gain.setValueAtTime(volume, now);
+        osc.stop(now + 0.12);
+      } else if (t === 'subtle') {
+        const osc = ctx.createOscillator();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440.00, now); // A4
+        osc.connect(gain);
+        osc.start(now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        osc.stop(now + 0.25);
+      }
+    } catch (e) {
+      console.warn('Audio preview error:', e);
+    }
   }
 
   function renderServerProfiles() {
@@ -300,7 +362,6 @@
       renderServerProfiles();
     }
     newProfileInput.value = '';
-    newProfileInput.focus();
   }
 
   function renderAllowedPaths() {
@@ -313,120 +374,37 @@
       span.textContent = path;
       li.appendChild(span);
 
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = 'remove-path-btn';
-      removeBtn.textContent = 'Remove';
-      removeBtn.setAttribute('aria-label', `Remove path ${path}`);
-      removeBtn.addEventListener('click', () => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'remove-path-btn';
+      btn.textContent = 'Remove';
+      btn.setAttribute('aria-label', `Remove path ${path}`);
+      btn.addEventListener('click', () => {
         allowedPaths.splice(index, 1);
         renderAllowedPaths();
       });
-      li.appendChild(removeBtn);
 
+      li.appendChild(btn);
       allowedPathsList.appendChild(li);
     });
   }
 
   function addPath() {
     const val = allowedPathInput.value.trim();
-    if (!val) return;
-    if (!allowedPaths.includes(val)) {
+    if (val && !allowedPaths.includes(val)) {
       allowedPaths.push(val);
       renderAllowedPaths();
+      allowedPathInput.value = '';
     }
-    allowedPathInput.value = '';
-    allowedPathInput.focus();
   }
 
-  function showStatus(message, type = 'success') {
-    saveStatus.textContent = message;
+  function showStatus(msg, type) {
+    saveStatus.textContent = msg;
     saveStatus.className = `status-message ${type}`;
     saveStatus.style.display = 'block';
     setTimeout(() => {
-      if (type === 'success') {
-        saveStatus.style.display = 'none';
-      }
+      saveStatus.style.display = 'none';
     }, 4000);
-  }
-
-  function playPreviewChime(tone, volume) {
-    try {
-      const AudioCtx =
-        (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) ||
-        (typeof globalThis !== 'undefined' && (globalThis.AudioContext || globalThis.webkitAudioContext));
-      if (!AudioCtx) return null;
-      const ctx = new AudioCtx();
-      const now = typeof ctx.currentTime === 'number' ? ctx.currentTime : 0;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      const vol = typeof volume === 'number' && !isNaN(volume) ? Math.max(0, Math.min(1, volume)) : 0.5;
-      let peakGain = 0.2 * vol;
-      let duration = 0.2;
-
-      if (tone === 'bell') {
-        osc.type = 'sine';
-        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
-          osc.frequency.setValueAtTime(587.33, now);
-          osc.frequency.setValueAtTime(880, now + 0.08);
-        }
-        duration = 0.25;
-      } else if (tone === 'beep') {
-        osc.type = 'triangle';
-        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
-          osc.frequency.setValueAtTime(800, now);
-          osc.frequency.setValueAtTime(1200, now + 0.08);
-        }
-        duration = 0.16;
-      } else if (tone === 'subtle') {
-        osc.type = 'sine';
-        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
-          osc.frequency.setValueAtTime(330, now);
-          osc.frequency.setValueAtTime(440, now + 0.1);
-        }
-        peakGain = 0.15 * vol;
-        duration = 0.25;
-      } else {
-        // classic
-        osc.type = 'sine';
-        if (osc.frequency && typeof osc.frequency.setValueAtTime === 'function') {
-          osc.frequency.setValueAtTime(440, now);
-          osc.frequency.setValueAtTime(880, now + 0.1);
-        }
-        duration = 0.2;
-      }
-
-      if (gain.gain && typeof gain.gain.setValueAtTime === 'function') {
-        gain.gain.setValueAtTime(peakGain, now);
-        if (typeof gain.gain.exponentialRampToValueAtTime === 'function') {
-          gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-        } else if (typeof gain.gain.linearRampToValueAtTime === 'function') {
-          gain.gain.linearRampToValueAtTime(0.001, now + duration);
-        }
-      }
-
-      if (typeof osc.connect === 'function') osc.connect(gain);
-      if (gain && typeof gain.connect === 'function' && ctx.destination) gain.connect(ctx.destination);
-      if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
-        ctx.resume().catch(() => {});
-      }
-      if (typeof osc.start === 'function') osc.start(now);
-      if (typeof osc.stop === 'function') osc.stop(now + duration);
-
-      setTimeout(() => {
-        try {
-          if (typeof ctx.close === 'function') ctx.close();
-        } catch (e) {}
-      }, Math.round((duration + 0.1) * 1000));
-
-      return { ctx, osc, gain };
-    } catch (e) {
-      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-        console.warn('[AQVN Settings] Preview chime failed:', e);
-      }
-      return null;
-    }
   }
 
   async function loadSettings() {
@@ -434,18 +412,13 @@
       store = await window.bridge.getStore('settings.json');
 
       const serverUrl = await store.get('server_url');
-      serverUrlInput.value = serverUrl !== undefined ? serverUrl : DEFAULTS.server_url;
+      serverUrlInput.value = serverUrl || DEFAULTS.server_url;
 
-      const storedProfiles = await store.get('server_profiles');
-      if (Array.isArray(storedProfiles) && storedProfiles.length > 0) {
-        serverProfiles = [...storedProfiles];
-      } else if (window.bridge && typeof window.bridge.getServerProfiles === 'function') {
-        serverProfiles = await window.bridge.getServerProfiles();
+      const profiles = await store.get('server_profiles');
+      if (Array.isArray(profiles) && profiles.length > 0) {
+        serverProfiles = [...profiles];
       } else {
-        serverProfiles = [...DEFAULTS.server_profiles];
-      }
-      if (!serverProfiles.includes(serverUrlInput.value)) {
-        serverProfiles.unshift(serverUrlInput.value);
+        serverProfiles = [serverUrlInput.value || DEFAULTS.server_url];
       }
       renderServerProfiles();
 
@@ -742,6 +715,31 @@
   }
 
   // Event Listeners
+  if (clearDiskCacheBtn) {
+    clearDiskCacheBtn.addEventListener('click', async () => {
+      try {
+        if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+          await window.__TAURI__.core.invoke('clear_disk_cache');
+        } else if (window.__TAURI__ && typeof window.__TAURI__.invoke === 'function') {
+          await window.__TAURI__.invoke('clear_disk_cache');
+        } else {
+          const proxyPort = window.__AQVN_PROXY__ ? window.__AQVN_PROXY__.port || 55088 : 55088;
+          await fetch(`http://127.0.0.1:${proxyPort}/proxy/clear_disk_cache`, { method: 'POST' });
+        }
+        if (cacheClearStatus) {
+          cacheClearStatus.textContent = currentLang === 'vi' ? 'Đã xóa bộ nhớ đệm thành công!' : 'Disk cache cleared successfully!';
+          cacheClearStatus.style.color = '#34d399';
+          setTimeout(() => { cacheClearStatus.textContent = ''; }, 3000);
+        }
+      } catch (err) {
+        if (cacheClearStatus) {
+          cacheClearStatus.textContent = (currentLang === 'vi' ? 'Lỗi: ' : 'Error: ') + (err && err.message ? err.message : err);
+          cacheClearStatus.style.color = '#f87171';
+        }
+      }
+    });
+  }
+
   if (taskChimeVolumeInput) {
     taskChimeVolumeInput.addEventListener('input', () => {
       if (taskChimeVolumeDisplay) {

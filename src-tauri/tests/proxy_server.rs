@@ -1983,3 +1983,34 @@ async fn test_websocket_watchdog_timeout() {
         "active bridge must terminate once activity ceases"
     );
 }
+
+// ---------------------- clear_disk_cache API endpoint
+
+#[tokio::test]
+async fn test_proxy_clear_disk_cache_endpoint() {
+    let (_stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    // Cache an asset first
+    let asset_url = format!("{}/vendor/fonts/Inter-clear-test.woff2", proxy.base);
+    let resp1 = client()
+        .get(&asset_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("cache asset");
+    assert_eq!(resp1.status(), StatusCode::OK);
+
+    // Call /proxy/clear_disk_cache
+    let clear_url = format!("{}/proxy/clear_disk_cache", proxy.base);
+    let resp = client()
+        .post(&clear_url)
+        .header(header::ORIGIN, "tauri://localhost")
+        .send()
+        .await
+        .expect("clear disk cache request");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: Value = resp.json().await.expect("json body");
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["cleared"], true);
+}

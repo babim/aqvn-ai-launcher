@@ -2536,6 +2536,21 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     assert.match(js, /preview_chime_btn/, 'settings.js must define preview_chime_btn in i18n');
   });
 
+  test('VAL-CACHE-004: settings.html and settings.js support clear_disk_cache command in Settings', () => {
+    const htmlPath = new URL('../../ui/settings.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /id="clear-disk-cache-btn"/, 'settings.html must expose #clear-disk-cache-btn');
+    assert.match(html, /data-i18n="clear_disk_cache_btn"/, 'settings.html must have data-i18n="clear_disk_cache_btn"');
+
+    const jsPath = new URL('../../ui/settings.js', import.meta.url);
+    const js = fs.readFileSync(jsPath, 'utf8');
+
+    assert.match(js, /clear_disk_cache/, 'settings.js must reference clear_disk_cache');
+    assert.match(js, /clearDiskCacheBtn/, 'settings.js must bind clearDiskCacheBtn');
+    assert.match(js, /clear_disk_cache_btn/, 'settings.js must define clear_disk_cache_btn in i18n');
+  });
+
   test('help.html supports close_current_window and language switcher', () => {
     const htmlPath = new URL('../../ui/help.html', import.meta.url);
     const html = fs.readFileSync(htmlPath, 'utf8');

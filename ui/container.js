@@ -588,6 +588,7 @@
       if (key === 'f11' || code === 'F11') {
         if (typeof e.preventDefault === 'function') e.preventDefault();
         toggleFocusMode();
+        invokeIpc('toggle_fullscreen');
         return;
       }
     }
@@ -823,12 +824,17 @@
     return invokeIpc('open_about');
   }
 
+  function toggleFullscreen() {
+    return invokeIpc('toggle_fullscreen');
+  }
+
   var bridgeApi = {
     setTaskState: setTaskState,
     notifyTaskComplete: notifyTaskComplete,
     updateTrayBusy: updateTrayBusy,
     openAbout: openAbout,
     invokeIpc: invokeIpc,
+    toggleFullscreen: toggleFullscreen,
     hookIframe: hookIframe,
     installIframeRelay: observeIframes,
     handleWebSocketMessage: handleWebSocketMessage,

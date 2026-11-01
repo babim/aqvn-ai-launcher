@@ -203,7 +203,8 @@ pub fn run() {
             app::open_help,
             app::open_about,
             app::close_current_window,
-            app::context_menu::show_context_menu
+            app::context_menu::show_context_menu,
+            app::context_menu::toggle_fullscreen
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AQVN Workspace");

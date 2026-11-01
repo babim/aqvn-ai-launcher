@@ -9,7 +9,7 @@ pub mod notify;
 #[cfg(not(target_os = "android"))]
 pub mod tray;
 
-pub use context_menu::show_context_menu;
+pub use context_menu::{show_context_menu, toggle_fullscreen};
 
 use tauri::{AppHandle, Manager};
 

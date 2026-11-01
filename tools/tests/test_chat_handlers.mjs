@@ -2344,6 +2344,27 @@ describe('VAL-GATEWAY-006: settings.html and settings.js gateway scopes & master
     assert.equal(document.body.classList.contains('aqvn-focus-mode'), false, 'Ctrl+Shift+F turns off aqvn-focus-mode');
   });
 
+  test('VAL-WIN-007: container bridge dispatches toggle_fullscreen IPC on F11', () => {
+    const harness = createContainerHarness();
+    const { calls, docListeners } = harness;
+    const keydownListeners = docListeners['keydown'] || [];
+    let prevented = false;
+    const event = {
+      ctrlKey: false,
+      metaKey: false,
+      key: 'F11',
+      preventDefault: () => {
+        prevented = true;
+      }
+    };
+    for (const fn of keydownListeners) {
+      fn(event);
+    }
+    assert.equal(prevented, true, 'F11 calls preventDefault');
+    const toggleCalls = calls.filter((c) => c.command === 'toggle_fullscreen');
+    assert.equal(toggleCalls.length, 1, 'toggle_fullscreen IPC command must be dispatched on F11');
+  });
+
   test('settings.html and settings.js support language switcher and close to tray', () => {
     const htmlPath = new URL('../../ui/settings.html', import.meta.url);
     const html = fs.readFileSync(htmlPath, 'utf8');

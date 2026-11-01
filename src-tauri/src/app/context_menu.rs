@@ -52,6 +52,8 @@ pub const ID_ZOOM_OUT: &str = "zoom_out";
 pub const ID_RESET_ZOOM: &str = "reset_zoom";
 pub const ID_RELOAD: &str = "reload";
 pub const ID_HARD_REFRESH: &str = "hard_refresh";
+pub const ID_TOGGLE_FULLSCREEN: &str = "toggle_fullscreen";
+pub const ID_FULLSCREEN: &str = "fullscreen";
 pub const ID_HELP: &str = "help";
 pub const ID_ABOUT: &str = "about";
 
@@ -62,6 +64,8 @@ pub const LABEL_ZOOM_OUT: &str = "Zoom Out";
 pub const LABEL_RESET_ZOOM: &str = "Reset Zoom";
 pub const LABEL_RELOAD: &str = "Reload";
 pub const LABEL_HARD_REFRESH: &str = "Hard Refresh";
+pub const LABEL_TOGGLE_FULLSCREEN: &str = "Toggle Fullscreen";
+pub const LABEL_FULLSCREEN: &str = "Toggle Fullscreen";
 pub const LABEL_HELP: &str = "Help & Shortcuts";
 pub const LABEL_ABOUT: &str = "About AQVN Workspace";
 
@@ -91,6 +95,9 @@ pub fn build_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let hard_refresh = MenuItemBuilder::with_id(ID_HARD_REFRESH, LABEL_HARD_REFRESH)
         .accelerator("CmdOrCtrl+Shift+R")
         .build(app)?;
+    let toggle_fullscreen = MenuItemBuilder::with_id(ID_TOGGLE_FULLSCREEN, LABEL_TOGGLE_FULLSCREEN)
+        .accelerator("F11")
+        .build(app)?;
     let sep3 = PredefinedMenuItem::separator(app)?;
     let help = MenuItemBuilder::with_id(ID_HELP, LABEL_HELP)
         .accelerator("F1")
@@ -110,6 +117,7 @@ pub fn build_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &sep2,
             &reload,
             &hard_refresh,
+            &toggle_fullscreen,
             &sep3,
             &help,
             &sep4,
@@ -127,6 +135,7 @@ pub enum ContextMenuAction {
     ResetZoom,
     Reload,
     HardRefresh,
+    ToggleFullscreen,
     Help,
     About,
 }
@@ -141,6 +150,7 @@ impl ContextMenuAction {
             ID_RESET_ZOOM | "zoom_reset" => Some(Self::ResetZoom),
             ID_RELOAD => Some(Self::Reload),
             ID_HARD_REFRESH => Some(Self::HardRefresh),
+            ID_TOGGLE_FULLSCREEN | "fullscreen" => Some(Self::ToggleFullscreen),
             ID_HELP => Some(Self::Help),
             ID_ABOUT => Some(Self::About),
             _ => None,
@@ -184,6 +194,15 @@ pub fn dispatch_action(
         }
         ContextMenuAction::About => {
             super::open_about_window(app);
+            Ok(())
+        }
+        ContextMenuAction::ToggleFullscreen => {
+            let target_window = window.cloned().or_else(|| app.get_webview_window("main"));
+            if let Some(w) = target_window {
+                let is_fullscreen = w.is_fullscreen().map_err(|e| e.to_string())?;
+                w.set_fullscreen(!is_fullscreen)
+                    .map_err(|e| e.to_string())?;
+            }
             Ok(())
         }
         ContextMenuAction::ZoomIn | ContextMenuAction::ZoomOut | ContextMenuAction::ResetZoom => {
@@ -242,4 +261,15 @@ pub fn show_context_menu(window: tauri::WebviewWindow) -> Result<(), String> {
     let menu = build_context_menu(window.app_handle()).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Tauri command to toggle native OS window fullscreen state.
+#[tauri::command]
+pub fn toggle_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
+    let is_fullscreen = window.is_fullscreen().map_err(|e| e.to_string())?;
+    let new_state = !is_fullscreen;
+    window
+        .set_fullscreen(new_state)
+        .map_err(|e| e.to_string())?;
+    Ok(new_state)
 }

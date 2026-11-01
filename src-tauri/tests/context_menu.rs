@@ -514,3 +514,89 @@ fn test_native_window_accelerators_and_menu_event_dispatch() {
     );
     assert_eq!(ContextMenuAction::from_id("nonexistent"), None);
 }
+
+#[test]
+fn test_native_fullscreen_capability_and_binding() {
+    // VAL-WIN-007: Native window fullscreen capability and F11 command binding
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let caps_default =
+        std::fs::read_to_string(manifest_dir.join("capabilities/default.json")).unwrap();
+    let build_rs = std::fs::read_to_string(manifest_dir.join("build.rs")).unwrap();
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();
+    let ctx_rs = std::fs::read_to_string(manifest_dir.join("src/app/context_menu.rs")).unwrap();
+    let container_js = std::fs::read_to_string(manifest_dir.join("../ui/container.js")).unwrap();
+
+    // 1. Verify capabilities/default.json grants permissions
+    let parsed: serde_json::Value =
+        serde_json::from_str(&caps_default).expect("capabilities/default.json must be valid JSON");
+    let permissions = parsed["permissions"]
+        .as_array()
+        .expect("permissions must be an array")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(
+        permissions.contains(&"core:window:allow-set-fullscreen"),
+        "capabilities/default.json must grant core:window:allow-set-fullscreen"
+    );
+    assert!(
+        permissions.contains(&"core:window:allow-is-fullscreen"),
+        "capabilities/default.json must grant core:window:allow-is-fullscreen"
+    );
+    assert!(
+        permissions.contains(&"allow-toggle-fullscreen"),
+        "capabilities/default.json must grant allow-toggle-fullscreen"
+    );
+
+    // 2. Verify build.rs registers toggle_fullscreen in AppManifest
+    assert!(
+        build_rs.contains("\"toggle_fullscreen\""),
+        "build.rs must register toggle_fullscreen command in AppManifest"
+    );
+
+    // 3. Verify lib.rs registers toggle_fullscreen in invoke_handler
+    assert!(
+        lib_rs.contains("toggle_fullscreen"),
+        "src/lib.rs must register toggle_fullscreen in invoke_handler"
+    );
+
+    // 4. Verify context_menu.rs defines toggle_fullscreen command and binds F11
+    assert!(
+        ctx_rs.contains("pub fn toggle_fullscreen"),
+        "context_menu.rs must define pub fn toggle_fullscreen command"
+    );
+    assert!(
+        ctx_rs.contains("accelerator(\"F11\")"),
+        "context_menu.rs must bind accelerator F11 to Toggle Fullscreen"
+    );
+    assert!(
+        ctx_rs.contains("Toggle Fullscreen") || ctx_rs.contains("ID_TOGGLE_FULLSCREEN"),
+        "context_menu.rs must construct Toggle Fullscreen menu item"
+    );
+
+    // 5. Verify ContextMenuAction resolution for fullscreen
+    assert_eq!(
+        ContextMenuAction::from_id("toggle_fullscreen"),
+        Some(ContextMenuAction::ToggleFullscreen)
+    );
+    assert_eq!(
+        ContextMenuAction::from_id("fullscreen"),
+        Some(ContextMenuAction::ToggleFullscreen)
+    );
+    assert_eq!(
+        ContextMenuAction::ToggleFullscreen.js_action(),
+        None,
+        "ToggleFullscreen must be a native window action (js_action returns None)"
+    );
+
+    // 6. Verify container.js binds F11 and invokes toggle_fullscreen
+    assert!(
+        container_js.contains("toggle_fullscreen"),
+        "ui/container.js must invoke toggle_fullscreen command"
+    );
+    assert!(
+        container_js.contains("f11") || container_js.contains("F11"),
+        "ui/container.js must handle F11 key"
+    );
+}

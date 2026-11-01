@@ -13,6 +13,8 @@
     "core:default",
     "core:menu:default",
     "core:window:allow-close",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
     "core:webview:allow-set-webview-zoom",
     "shell:allow-open",
     "notification:allow-notify",
@@ -25,6 +27,7 @@
     "allow-show-context-menu",
     "allow-set-tray-busy",
     "allow-notify-task-complete",
-    "allow-close-current-window"
+    "allow-close-current-window",
+    "allow-toggle-fullscreen"
   ]
 }

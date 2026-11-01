@@ -135,3 +135,40 @@ fn android_compilation_parity_and_stubs_contract() {
         "src/connector/handlers/exec.rs must prefix _action"
     );
 }
+
+#[test]
+fn test_android_unit_test_harness_and_taskfile() {
+    let taskfile_path = Path::new("../Taskfile.yml");
+    let taskfile_content = fs::read_to_string(taskfile_path).expect("must read Taskfile.yml");
+
+    assert!(
+        taskfile_content.contains("test:android:"),
+        "Taskfile.yml must define test:android task"
+    );
+    assert!(
+        taskfile_content.contains("test:node:"),
+        "Taskfile.yml must define test:node task"
+    );
+
+    let harness_path =
+        Path::new("gen/android/app/src/test/java/net/aqvn/workspace/AndroidHarnessTest.kt");
+    assert!(
+        harness_path.exists(),
+        "src-tauri/gen/android/app/src/test/java/net/aqvn/workspace/AndroidHarnessTest.kt must exist"
+    );
+
+    let harness_content =
+        fs::read_to_string(harness_path).expect("must read AndroidHarnessTest.kt");
+    assert!(
+        harness_content.contains("class AndroidHarnessTest"),
+        "AndroidHarnessTest.kt must define AndroidHarnessTest class"
+    );
+    assert!(
+        harness_content.contains("Ipc"),
+        "AndroidHarnessTest.kt must test Ipc contract"
+    );
+    assert!(
+        harness_content.contains("PermissionHelper"),
+        "AndroidHarnessTest.kt must test PermissionHelper contract"
+    );
+}

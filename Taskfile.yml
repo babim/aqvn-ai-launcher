@@ -39,6 +39,20 @@ tasks:
     cmds:
       - cargo test
 
+  test:node:
+    desc: Run Node.js container bridge and chat handler tests
+    cmds:
+      - node --test tools/tests/test_chat_handlers.mjs
+
+  test:android:
+    desc: Run Android Kotlin unit tests via Gradle wrapper
+    dir: src-tauri/gen/android
+    env:
+      JAVA_HOME: '{{.JAVA_HOME_PATH}}'
+      PATH: '{{.PATH}}:{{.JAVA_HOME_PATH}}/bin'
+    cmds:
+      - ./gradlew :app:testUniversalDebugUnitTest
+
   lint:
     desc: Run clippy and format check
     dir: src-tauri

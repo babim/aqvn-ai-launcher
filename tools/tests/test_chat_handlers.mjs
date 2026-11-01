@@ -1575,6 +1575,11 @@ function createContainerHarness(options = {}) {
       addEventListener: (type, fn) => {
         (docListeners[type] = docListeners[type] || []).push(fn);
       },
+      dispatchEvent: (event) => {
+        const type = (event && event.type) || String(event);
+        (docListeners[type] || []).forEach((fn) => fn(event));
+        return true;
+      },
       postMessage: (data) => {
         (docListeners['message'] || []).forEach((fn) => fn({ data }));
       },
@@ -2708,6 +2713,221 @@ describe('VAL-HOTKEY-003 & VAL-HOTKEY-004: Container bridge shortcuts and IPC er
     }
     assert.equal(prevented, true, 'iframe F1 keydown calls preventDefault');
     assert.ok(harness.calls.some((c) => c.command === 'open_help'), 'iframe F1 relayed to open_help');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-UI-004: Connection Diagnostics Modal & Network Recovery Status */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-UI-004: Connection Diagnostics Modal and Network Recovery Status', () => {
+  test('VAL-UI-004: index.html defines interactive connection status badge and diagnostics modal', () => {
+    const html = readIndexHtml();
+
+    assert.match(
+      html,
+      /id="connection-status-badge"/,
+      'ui/index.html must expose interactive #connection-status-badge'
+    );
+    assert.match(
+      html,
+      /id="diagnostics-modal"/,
+      'ui/index.html must expose #diagnostics-modal dialog'
+    );
+    assert.match(
+      html,
+      /id="diagnostics-title"/,
+      'ui/index.html must expose #diagnostics-title'
+    );
+    assert.match(
+      html,
+      /id="diagnostics-latency"|id="diag-latency"/,
+      'ui/index.html must expose latency metric element'
+    );
+    assert.match(
+      html,
+      /id="diagnostics-proxy-port"|id="diag-proxy-port"/,
+      'ui/index.html must expose proxy port metric element'
+    );
+    assert.match(
+      html,
+      /id="diagnostics-active-profile"|id="diagnostics-server-profile"/,
+      'ui/index.html must expose active/server profile metric element'
+    );
+    assert.match(
+      html,
+      /id="reconnect-now-btn"|id="reconnect-btn"/,
+      'ui/index.html must expose manual reconnect button'
+    );
+    assert.match(
+      html,
+      /Reconnect Now/,
+      'reconnect button in index.html must label Reconnect Now action'
+    );
+    assert.match(
+      html,
+      /id="close-diagnostics-btn"/,
+      'ui/index.html must expose #close-diagnostics-btn'
+    );
+  });
+
+  test('VAL-UI-004: ui/container.js exposes connection status tracking across Connected, Reconnecting, and Offline', () => {
+    const harness = createContainerHarness();
+    const { bridge } = harness;
+
+    assert.equal(
+      typeof bridge.setConnectionStatus,
+      'function',
+      'bridge.setConnectionStatus must be function'
+    );
+    assert.equal(
+      typeof bridge.getConnectionStatus,
+      'function',
+      'bridge.getConnectionStatus must be function'
+    );
+
+    // Initial default or connected
+    const initial = bridge.getConnectionStatus();
+    assert.ok(
+      ['connected', 'reconnecting', 'offline'].includes(initial),
+      'initial status must be connected, reconnecting, or offline'
+    );
+
+    // Set connected
+    const resConnected = bridge.setConnectionStatus('connected');
+    assert.equal(resConnected, 'connected');
+    assert.equal(bridge.getConnectionStatus(), 'connected');
+
+    // Set reconnecting
+    const resReconnecting = bridge.setConnectionStatus('reconnecting');
+    assert.equal(resReconnecting, 'reconnecting');
+    assert.equal(bridge.getConnectionStatus(), 'reconnecting');
+
+    // Set offline
+    const resOffline = bridge.setConnectionStatus('offline');
+    assert.equal(resOffline, 'offline');
+    assert.equal(bridge.getConnectionStatus(), 'offline');
+  });
+
+  test('VAL-UI-004: clicking status badge opens Diagnostics modal displaying metrics', () => {
+    const harness = createContainerHarness({
+      localStorage: {
+        aqvn_active_profile: 'https://prod.workspace.aqvn'
+      }
+    });
+    const { bridge, elements, document, createElement } = harness;
+
+    // Set up proxy configuration
+    harness.context.window.__AQVN_PROXY__ = { port: 38451, url: 'http://[IP]:38451' };
+
+    // Register DOM mocks
+    const badge = createElement('connection-status-badge');
+    const modal = createElement('diagnostics-modal');
+    modal.hidden = true;
+    const title = createElement('diagnostics-title');
+    const latencyEl = createElement('diagnostics-latency');
+    const portEl = createElement('diagnostics-proxy-port');
+    const profileEl = createElement('diagnostics-active-profile');
+    const statusEl = createElement('diagnostics-connection-status');
+    const closeBtn = createElement('close-diagnostics-btn');
+    const reconnectBtn = createElement('reconnect-now-btn');
+
+    elements['connection-status-badge'] = badge;
+    elements['diagnostics-modal'] = modal;
+    elements['diagnostics-title'] = title;
+    elements['diagnostics-latency'] = latencyEl;
+    elements['diagnostics-proxy-port'] = portEl;
+    elements['diagnostics-active-profile'] = profileEl;
+    elements['diagnostics-connection-status'] = statusEl;
+    elements['close-diagnostics-btn'] = closeBtn;
+    elements['reconnect-now-btn'] = reconnectBtn;
+
+    bridge.installDiagnostics(document);
+
+    // Clicking status badge opens modal
+    badge.dispatch('click', { preventDefault: () => {} });
+
+    assert.equal(modal.hidden, false, 'modal.hidden must be false after badge click');
+    assert.equal(bridge.isDiagnosticsModalOpen(), true, 'isDiagnosticsModalOpen must return true');
+
+    // Check displayed metrics
+    assert.equal(portEl.textContent, '38451', 'proxy port metric must show 38451');
+    assert.equal(
+      profileEl.textContent,
+      'https://prod.workspace.aqvn',
+      'active profile metric must show configured profile'
+    );
+    assert.ok(latencyEl.textContent.length > 0, 'latency metric must be populated');
+
+    // Clicking close button closes modal
+    closeBtn.dispatch('click', { preventDefault: () => {} });
+    assert.equal(modal.hidden, true, 'modal.hidden must be true after close click');
+    assert.equal(bridge.isDiagnosticsModalOpen(), false, 'isDiagnosticsModalOpen must return false');
+  });
+
+  test('VAL-UI-004: Escape key closes Diagnostics modal when open', () => {
+    const harness = createContainerHarness();
+    const { bridge, elements, document, docListeners, createElement } = harness;
+
+    const modal = createElement('diagnostics-modal');
+    modal.hidden = true;
+    elements['diagnostics-modal'] = modal;
+    elements['close-diagnostics-btn'] = createElement('close-diagnostics-btn');
+
+    bridge.installDiagnostics(document);
+    bridge.openDiagnosticsModal();
+    assert.equal(bridge.isDiagnosticsModalOpen(), true);
+
+    const keydownListeners = docListeners['keydown'] || [];
+    let prevented = false;
+    for (const fn of keydownListeners) {
+      fn({
+        key: 'Escape',
+        preventDefault: () => {
+          prevented = true;
+        }
+      });
+    }
+
+    assert.equal(bridge.isDiagnosticsModalOpen(), false, 'Escape key must close diagnostics modal');
+  });
+
+  test('VAL-UI-004: clicking Reconnect Now triggers manual reconnect action and sets reconnecting state', async () => {
+    const harness = createContainerHarness();
+    const { bridge, elements, document, calls, createElement } = harness;
+
+    const modal = createElement('diagnostics-modal');
+    modal.hidden = false;
+    elements['diagnostics-modal'] = modal;
+    const badge = createElement('connection-status-badge');
+    elements['connection-status-badge'] = badge;
+    const reconnectBtn = createElement('reconnect-now-btn');
+    elements['reconnect-now-btn'] = reconnectBtn;
+
+    let reconnectEventDispatched = false;
+    harness.context.window.addEventListener('aqvn:reconnect', () => {
+      reconnectEventDispatched = true;
+    });
+
+    bridge.installDiagnostics(document);
+
+    // Initial state: connected
+    bridge.setConnectionStatus('connected');
+
+    // Trigger reconnect
+    const promise = bridge.reconnectNow();
+    assert.equal(
+      bridge.getConnectionStatus(),
+      'reconnecting',
+      'status must transition to reconnecting immediately on reconnectNow'
+    );
+    assert.equal(badge.dataset.state, 'reconnecting', 'badge state must be reconnecting');
+    assert.ok(reconnectEventDispatched, 'aqvn:reconnect window event must be dispatched');
+
+    await promise;
+
+    const reconnectCalls = calls.filter((c) => c.command === 'reconnect_network');
+    assert.equal(reconnectCalls.length, 1, 'reconnect_network IPC must be dispatched');
   });
 });
 

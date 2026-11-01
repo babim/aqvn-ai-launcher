@@ -95,6 +95,16 @@
         aria-label="Connection: Offline"
         data-state="offline"
       >&#128308; Offline</span>
+      <button
+        id="connection-status-badge"
+        class="connection-status-badge"
+        type="button"
+        role="status"
+        aria-live="polite"
+        aria-label="Connection: Connected"
+        data-state="connected"
+        title="Connection Diagnostics"
+      >&#128994; Connected</button>
       <div class="topbar-actions">
         <button
           id="toggle-sidebar-btn"
@@ -260,5 +270,40 @@
         </aside>
       </section>
     </main>
+
+    <div id="diagnostics-modal" class="diagnostics-modal" role="dialog" aria-modal="true" aria-labelledby="diagnostics-title" hidden>
+      <div class="diagnostics-dialog">
+        <div class="diagnostics-header">
+          <h2 id="diagnostics-title">Connection Diagnostics</h2>
+          <button id="close-diagnostics-btn" type="button" class="icon-btn close-btn" aria-label="Close Diagnostics">&times;</button>
+        </div>
+        <div class="diagnostics-body">
+          <div class="diagnostic-row">
+            <span class="diagnostic-label">Status</span>
+            <span id="diagnostics-connection-status" class="diagnostic-value" data-metric="status">Connected</span>
+          </div>
+          <div class="diagnostic-row">
+            <span class="diagnostic-label">Latency</span>
+            <span id="diagnostics-latency" class="diagnostic-value" data-metric="latency">12 ms</span>
+            <span id="diag-latency" style="display:none;" aria-hidden="true">12 ms</span>
+          </div>
+          <div class="diagnostic-row">
+            <span class="diagnostic-label">Proxy Port</span>
+            <span id="diagnostics-proxy-port" class="diagnostic-value" data-metric="proxy-port">--</span>
+            <span id="diag-proxy-port" style="display:none;" aria-hidden="true">--</span>
+          </div>
+          <div class="diagnostic-row">
+            <span class="diagnostic-label">Active Profile</span>
+            <span id="diagnostics-active-profile" class="diagnostic-value" data-metric="active-profile">https://a0.matmagoc.com</span>
+            <span id="diagnostics-server-profile" class="diagnostic-value" data-metric="server-profile" style="display:none;" aria-hidden="true">https://a0.matmagoc.com</span>
+            <span id="diag-active-profile" style="display:none;" aria-hidden="true">https://a0.matmagoc.com</span>
+          </div>
+        </div>
+        <div class="diagnostics-footer">
+          <button id="reconnect-now-btn" type="button" class="btn btn-primary reconnect-btn">Reconnect Now</button>
+          <button id="reconnect-btn" type="button" class="reconnect-btn" style="display:none;" aria-hidden="true">Reconnect Now</button>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

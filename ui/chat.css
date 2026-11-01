@@ -88,6 +88,161 @@ body {
   color: var(--muted);
 }
 
+.connection-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+
+.connection-status-badge:hover {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.connection-status-badge[data-state="connected"] {
+  color: var(--ok);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.connection-status-badge[data-state="reconnecting"] {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.connection-status-badge[data-state="offline"] {
+  color: var(--muted);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.diagnostics-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+}
+
+.diagnostics-modal[hidden] {
+  display: none !important;
+}
+
+.diagnostics-dialog {
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 440px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.diagnostics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.diagnostics-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.diagnostics-header .close-btn {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.diagnostics-header .close-btn:hover {
+  color: var(--ink);
+}
+
+.diagnostics-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.diagnostic-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.88rem;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.diagnostic-label {
+  color: var(--muted);
+}
+
+.diagnostic-value {
+  color: var(--ink);
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.diagnostic-value[data-state="connected"] {
+  color: var(--ok);
+}
+
+.diagnostic-value[data-state="reconnecting"] {
+  color: #fbbf24;
+}
+
+.diagnostic-value[data-state="offline"] {
+  color: var(--muted);
+}
+
+.diagnostics-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.diagnostics-footer .btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.diagnostics-footer .btn-primary {
+  background: var(--accent);
+  color: #0b1220;
+  border: none;
+  font-weight: 600;
+}
+
+.diagnostics-footer .btn-primary:hover {
+  filter: brightness(1.1);
+}
+
 .msg-queued {
   opacity: 0.75;
   border-left: 2px dashed #fbbf24;

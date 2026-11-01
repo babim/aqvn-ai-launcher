@@ -1,6 +1,7 @@
 //! Native OS context menu and action dispatching (VAL-UI-002 and VAL-UI-003).
 
 use std::sync::atomic::{AtomicU32, Ordering};
+#[cfg(not(target_os = "android"))]
 use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem};
 use tauri::{AppHandle, Manager};
 
@@ -70,6 +71,7 @@ pub const LABEL_HELP: &str = "Help & Shortcuts";
 pub const LABEL_ABOUT: &str = "About AQVN Workspace";
 
 /// Builds the native OS context menu.
+#[cfg(not(target_os = "android"))]
 pub fn build_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let settings = MenuItemBuilder::with_id(ID_SETTINGS, LABEL_SETTINGS)
         .accelerator("CmdOrCtrl+,")
@@ -197,11 +199,18 @@ pub fn dispatch_action(
             Ok(())
         }
         ContextMenuAction::ToggleFullscreen => {
-            let target_window = window.cloned().or_else(|| app.get_webview_window("main"));
-            if let Some(w) = target_window {
-                let is_fullscreen = w.is_fullscreen().map_err(|e| e.to_string())?;
-                w.set_fullscreen(!is_fullscreen)
-                    .map_err(|e| e.to_string())?;
+            #[cfg(not(target_os = "android"))]
+            {
+                let target_window = window.cloned().or_else(|| app.get_webview_window("main"));
+                if let Some(w) = target_window {
+                    let is_fullscreen = w.is_fullscreen().map_err(|e| e.to_string())?;
+                    w.set_fullscreen(!is_fullscreen)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            #[cfg(target_os = "android")]
+            {
+                let _ = (app, window);
             }
             Ok(())
         }
@@ -258,18 +267,33 @@ pub fn handle_menu_id(
 /// Tauri command to trigger native OS context menu popup on the target window.
 #[tauri::command]
 pub fn show_context_menu(window: tauri::WebviewWindow) -> Result<(), String> {
-    let menu = build_context_menu(window.app_handle()).map_err(|e| e.to_string())?;
-    window.popup_menu(&menu).map_err(|e| e.to_string())?;
+    #[cfg(not(target_os = "android"))]
+    {
+        let menu = build_context_menu(window.app_handle()).map_err(|e| e.to_string())?;
+        window.popup_menu(&menu).map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = window;
+    }
     Ok(())
 }
 
 /// Tauri command to toggle native OS window fullscreen state.
 #[tauri::command]
 pub fn toggle_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
-    let is_fullscreen = window.is_fullscreen().map_err(|e| e.to_string())?;
-    let new_state = !is_fullscreen;
-    window
-        .set_fullscreen(new_state)
-        .map_err(|e| e.to_string())?;
-    Ok(new_state)
+    #[cfg(not(target_os = "android"))]
+    {
+        let is_fullscreen = window.is_fullscreen().map_err(|e| e.to_string())?;
+        let new_state = !is_fullscreen;
+        window
+            .set_fullscreen(new_state)
+            .map_err(|e| e.to_string())?;
+        Ok(new_state)
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = window;
+        Ok(false)
+    }
 }

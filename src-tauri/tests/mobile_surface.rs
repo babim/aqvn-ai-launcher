@@ -92,3 +92,46 @@ fn cargo_toml_mobile_deps_exclude_desktop_features() {
         "Cargo.toml must gate desktop-only deps behind target cfg"
     );
 }
+
+#[test]
+fn android_compilation_parity_and_stubs_contract() {
+    let lib_rs = fs::read_to_string("src/lib.rs").expect("must read src/lib.rs");
+    assert!(
+        lib_rs.contains("#[cfg(not(target_os = \"android\"))]\npub mod connector;"),
+        "src/lib.rs must gate connector module behind #[cfg(not(target_os = \"android\"))]"
+    );
+    assert!(
+        lib_rs.contains("#[cfg(not(target_os = \"android\"))]\n            connector::handlers::files::set_workspace_path"),
+        "src/lib.rs must gate initial workspace path setup behind #[cfg(not(target_os = \"android\"))]"
+    );
+
+    let context_menu_rs =
+        fs::read_to_string("src/app/context_menu.rs").expect("must read src/app/context_menu.rs");
+    assert!(
+        context_menu_rs.contains("#[cfg(not(target_os = \"android\"))]\nuse tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem};"),
+        "src/app/context_menu.rs must gate tauri::menu imports behind #[cfg(not(target_os = \"android\"))]"
+    );
+    assert!(
+        context_menu_rs.contains("window.popup_menu"),
+        "src/app/context_menu.rs must reference popup_menu"
+    );
+    assert!(
+        context_menu_rs.contains("#[cfg(target_os = \"android\")]"),
+        "src/app/context_menu.rs must provide android stubs"
+    );
+
+    let exec_rs = fs::read_to_string("src/connector/handlers/exec.rs")
+        .expect("must read src/connector/handlers/exec.rs");
+    assert!(
+        exec_rs.contains("pub fn reset_session(_session_id: &str)"),
+        "src/connector/handlers/exec.rs must prefix _session_id"
+    );
+    assert!(
+        exec_rs.contains("_chunk_tx: Option<mpsc::Sender<String>>"),
+        "src/connector/handlers/exec.rs must prefix _chunk_tx"
+    );
+    assert!(
+        exec_rs.contains("let _action = envelope"),
+        "src/connector/handlers/exec.rs must prefix _action"
+    );
+}

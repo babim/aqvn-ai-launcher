@@ -4,14 +4,20 @@
 //! managing local stateful PTY shell sessions using `portable-pty`.
 //! Streams standard output and exit codes back via `connector_exec_op_result`.
 
+#[cfg(not(target_os = "android"))]
 use crate::connector::handlers::files::current_sandbox;
 use crate::connector::protocol::{extract_id_and_op_id, MSG_TYPE_EXEC_OP_RESULT, RUNTIME_TERMINAL};
 use serde_json::{json, Value};
+#[cfg(not(target_os = "android"))]
 use std::collections::HashMap;
+#[cfg(not(target_os = "android"))]
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "android"))]
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, Mutex as TokioMutex};
+use tokio::sync::mpsc;
+#[cfg(not(target_os = "android"))]
+use tokio::sync::Mutex as TokioMutex;
 
 #[cfg(not(target_os = "android"))]
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
@@ -640,12 +646,12 @@ pub async fn get_or_create_session(
 }
 
 /// Terminates and removes a specific PTY session by ID.
-pub fn reset_session(session_id: &str) {
+pub fn reset_session(_session_id: &str) {
     #[cfg(not(target_os = "android"))]
     {
         if let Ok(mut lock) = SESSIONS.lock() {
             if let Some(map) = lock.as_mut() {
-                if let Some(session_arc) = map.remove(session_id) {
+                if let Some(session_arc) = map.remove(_session_id) {
                     tokio::spawn(async move {
                         let mut s = session_arc.lock().await;
                         s.kill();
@@ -803,12 +809,12 @@ pub async fn handle_exec_op(envelope: &Value) -> String {
 /// Handles incoming `connector_exec_op` with an optional chunk streaming channel.
 pub async fn handle_exec_op_streaming(
     envelope: &Value,
-    chunk_tx: Option<mpsc::Sender<String>>,
+    _chunk_tx: Option<mpsc::Sender<String>>,
 ) -> String {
     let (id, op_id) = extract_id_and_op_id(envelope, "exec-op-auto");
     let session_id = extract_session_id(envelope);
 
-    let action = envelope
+    let _action = envelope
         .get("action")
         .or_else(|| envelope.get("operation"))
         .and_then(Value::as_str)
@@ -827,6 +833,9 @@ pub async fn handle_exec_op_streaming(
 
     #[cfg(not(target_os = "android"))]
     {
+        let action = _action;
+        let chunk_tx = _chunk_tx;
+
         // Automatically reap idle / dead sessions periodically or on requests
         let _ = reap_idle_sessions(DEFAULT_MAX_IDLE_DURATION).await;
 

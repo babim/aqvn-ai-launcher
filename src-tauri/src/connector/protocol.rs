@@ -907,6 +907,8 @@ pub struct ConnectorComputerUseOp {
     #[serde(default)]
     pub active_window: Option<bool>,
     #[serde(default)]
+    pub show_cursor: Option<bool>,
+    #[serde(default)]
     pub params: Option<Value>,
 }
 

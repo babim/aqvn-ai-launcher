@@ -679,3 +679,280 @@ async fn test_windows_sendinput_compiles_or_simulates() {
         simulate_windows_sendinput("hotkey", &json!({"keys": ["Ctrl", "C"]})).expect("sim hotkey");
     assert_eq!(sim_hk.len(), 4, "Ctrl down, C down, C up, Ctrl up");
 }
+
+#[tokio::test]
+async fn test_computer_use_multi_display_and_cursor_overlay() {
+    let _lock = TEST_GATEWAY_MUTEX.lock().await;
+    use aqvn_workspace_lib::connector::handlers::computer_use::{
+        self, clear_test_display_captures, list_displays, set_cursor_position,
+        set_test_display_capture, set_test_displays, set_test_screen_capture, DisplayInfo,
+    };
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use base64::Engine;
+    use std::io::Cursor;
+
+    // Reset test state at start
+    set_test_displays(None);
+    set_test_screen_capture(None);
+    clear_test_display_captures();
+
+    // 1. Default list_displays returns primary display
+    let default_displays = list_displays();
+    assert!(
+        !default_displays.is_empty(),
+        "must have at least one display"
+    );
+    assert_eq!(default_displays[0].id, 0);
+    assert!(default_displays[0].is_primary);
+
+    // Also via JSON-RPC / envelope action "list_displays"
+    let list_disp_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-list-disp-1",
+        "action": "list_displays",
+    });
+    let reply_str = computer_use::handle_computer_use_op(&list_disp_op).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse list_displays reply");
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["action"], "list_displays");
+    assert!(reply["data"]["displays"].is_array());
+    assert!(!reply["data"]["displays"].as_array().unwrap().is_empty());
+
+    // 2. Multi-display configuration override
+    let mock_monitors = vec![
+        DisplayInfo {
+            id: 0,
+            name: "Primary Monitor (4K)".to_string(),
+            width: 3840,
+            height: 2160,
+            scale_factor: 2.0,
+            is_primary: true,
+        },
+        DisplayInfo {
+            id: 1,
+            name: "Secondary Monitor (1080p)".to_string(),
+            width: 1920,
+            height: 1080,
+            scale_factor: 1.0,
+            is_primary: false,
+        },
+    ];
+    set_test_displays(Some(mock_monitors.clone()));
+
+    let updated_displays = list_displays();
+    assert_eq!(updated_displays.len(), 2);
+    assert_eq!(updated_displays[0].id, 0);
+    assert_eq!(updated_displays[0].width, 3840);
+    assert_eq!(updated_displays[1].id, 1);
+    assert_eq!(updated_displays[1].width, 1920);
+
+    // Verify op dispatch returns both monitors
+    let op_displays_reply_str = computer_use::handle_computer_use_op(&list_disp_op).await;
+    let op_displays_reply: Value = serde_json::from_str(&op_displays_reply_str).unwrap();
+    assert_eq!(
+        op_displays_reply["data"]["displays"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    // 3. Screen capture targeting display_id
+    // Set per-display test capture image buffers
+    let mut img_disp0 = image::RgbaImage::new(400, 300);
+    for pixel in img_disp0.pixels_mut() {
+        *pixel = image::Rgba([10, 20, 30, 255]); // dark blue
+    }
+    let mut disp0_png = Vec::new();
+    img_disp0
+        .write_to(&mut Cursor::new(&mut disp0_png), image::ImageFormat::Png)
+        .unwrap();
+    let disp0_b64 = BASE64_STANDARD.encode(&disp0_png);
+
+    let mut img_disp1 = image::RgbaImage::new(600, 450);
+    for pixel in img_disp1.pixels_mut() {
+        *pixel = image::Rgba([40, 50, 60, 255]); // greenish blue
+    }
+    let mut disp1_png = Vec::new();
+    img_disp1
+        .write_to(&mut Cursor::new(&mut disp1_png), image::ImageFormat::Png)
+        .unwrap();
+    let disp1_b64 = BASE64_STANDARD.encode(&disp1_png);
+
+    set_test_display_capture(
+        0,
+        Some(json!({
+            "data": disp0_b64,
+            "width": 400,
+            "height": 300,
+        })),
+    );
+    set_test_display_capture(
+        1,
+        Some(json!({
+            "data": disp1_b64,
+            "width": 600,
+            "height": 450,
+        })),
+    );
+
+    // Capture Display 0
+    let cap_disp0_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-cap-disp-0",
+        "action": "capture",
+        "display_id": 0,
+    });
+    let reply_disp0_str = computer_use::handle_computer_use_op(&cap_disp0_op).await;
+    let reply_disp0: Value = serde_json::from_str(&reply_disp0_str).unwrap();
+    assert_eq!(reply_disp0["success"], true);
+    assert_eq!(reply_disp0["data"]["display_id"], 0);
+    assert_eq!(reply_disp0["data"]["width"], 400);
+    assert_eq!(reply_disp0["data"]["height"], 300);
+
+    // Capture Display 1
+    let cap_disp1_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-cap-disp-1",
+        "action": "capture",
+        "display_id": 1,
+    });
+    let reply_disp1_str = computer_use::handle_computer_use_op(&cap_disp1_op).await;
+    let reply_disp1: Value = serde_json::from_str(&reply_disp1_str).unwrap();
+    assert_eq!(reply_disp1["success"], true);
+    assert_eq!(reply_disp1["data"]["display_id"], 1);
+    assert_eq!(reply_disp1["data"]["width"], 600);
+    assert_eq!(reply_disp1["data"]["height"], 450);
+
+    // Capture invalid display_id: 99 returns error
+    let cap_invalid_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-cap-invalid",
+        "action": "capture",
+        "display_id": 99,
+    });
+    let reply_invalid_str = computer_use::handle_computer_use_op(&cap_invalid_op).await;
+    let reply_invalid: Value = serde_json::from_str(&reply_invalid_str).unwrap();
+    assert_eq!(reply_invalid["success"], false);
+    assert!(reply_invalid["error"].as_str().unwrap().contains("99"));
+
+    // 4. Visual crosshair cursor overlay rendering when show_cursor is true
+    clear_test_display_captures();
+    // Solid white 800x600 image
+    let mut white_img = image::RgbaImage::new(800, 600);
+    for pixel in white_img.pixels_mut() {
+        *pixel = image::Rgba([255, 255, 255, 255]);
+    }
+    let mut white_png = Vec::new();
+    white_img
+        .write_to(&mut Cursor::new(&mut white_png), image::ImageFormat::Png)
+        .unwrap();
+    let white_b64 = BASE64_STANDARD.encode(&white_png);
+
+    set_test_screen_capture(Some(json!({
+        "data": white_b64,
+        "width": 800,
+        "height": 600,
+    })));
+
+    // Set simulated cursor position at (400.0, 300.0)
+    set_cursor_position(400.0, 300.0);
+
+    // 4a. Capture without show_cursor (show_cursor: false)
+    let no_cursor_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-no-cursor",
+        "action": "capture",
+        "show_cursor": false,
+    });
+    let no_cursor_reply_str = computer_use::handle_computer_use_op(&no_cursor_op).await;
+    let no_cursor_reply: Value = serde_json::from_str(&no_cursor_reply_str).unwrap();
+    assert_eq!(no_cursor_reply["success"], true);
+    assert_eq!(no_cursor_reply["data"]["show_cursor"], false);
+
+    let no_cursor_b64 = no_cursor_reply["screenshot"].as_str().unwrap();
+    let no_cursor_bytes = BASE64_STANDARD.decode(no_cursor_b64).unwrap();
+    let no_cursor_img = image::load_from_memory(&no_cursor_bytes)
+        .unwrap()
+        .to_rgba8();
+    // Center pixel at (400, 300) remains untouched white
+    assert_eq!(
+        no_cursor_img.get_pixel(400, 300),
+        &image::Rgba([255, 255, 255, 255])
+    );
+
+    // 4b. Capture with show_cursor: true
+    let with_cursor_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-with-cursor",
+        "action": "capture",
+        "show_cursor": true,
+    });
+    let with_cursor_reply_str = computer_use::handle_computer_use_op(&with_cursor_op).await;
+    let with_cursor_reply: Value = serde_json::from_str(&with_cursor_reply_str).unwrap();
+    assert_eq!(with_cursor_reply["success"], true);
+    assert_eq!(with_cursor_reply["data"]["show_cursor"], true);
+
+    let with_cursor_b64 = with_cursor_reply["screenshot"].as_str().unwrap();
+    let with_cursor_bytes = BASE64_STANDARD.decode(with_cursor_b64).unwrap();
+    let with_cursor_img = image::load_from_memory(&with_cursor_bytes)
+        .unwrap()
+        .to_rgba8();
+
+    // Center pixel at cursor position (400, 300) has crosshair red color
+    let center_pixel = with_cursor_img.get_pixel(400, 300);
+    assert_eq!(
+        center_pixel,
+        &image::Rgba([255, 0, 0, 255]),
+        "Center cursor must be red"
+    );
+
+    // Horizontal arm pixel at (406, 300) is red
+    assert_eq!(
+        with_cursor_img.get_pixel(406, 300),
+        &image::Rgba([255, 0, 0, 255]),
+        "Horizontal arm must be red"
+    );
+
+    // Vertical arm pixel at (400, 306) is red
+    assert_eq!(
+        with_cursor_img.get_pixel(400, 306),
+        &image::Rgba([255, 0, 0, 255]),
+        "Vertical arm must be red"
+    );
+
+    // Distant pixel at (50, 50) is still white
+    assert_eq!(
+        with_cursor_img.get_pixel(50, 50),
+        &image::Rgba([255, 255, 255, 255])
+    );
+
+    // 4c. Scaled capture with show_cursor: true (scale = 0.5)
+    let scaled_cursor_op = json!({
+        "type": MSG_TYPE_COMPUTER_USE_OP,
+        "id": "req-cu-scaled-cursor",
+        "action": "capture",
+        "show_cursor": true,
+        "scale": 0.5,
+    });
+    let scaled_reply_str = computer_use::handle_computer_use_op(&scaled_cursor_op).await;
+    let scaled_reply: Value = serde_json::from_str(&scaled_reply_str).unwrap();
+    assert_eq!(scaled_reply["success"], true);
+    assert_eq!(scaled_reply["data"]["width"], 400);
+    assert_eq!(scaled_reply["data"]["height"], 300);
+
+    let scaled_b64 = scaled_reply["screenshot"].as_str().unwrap();
+    let scaled_bytes = BASE64_STANDARD.decode(scaled_b64).unwrap();
+    let scaled_img = image::load_from_memory(&scaled_bytes).unwrap().to_rgba8();
+    // (400, 300) scaled by 0.5 -> (200, 150)
+    assert_eq!(
+        scaled_img.get_pixel(200, 150),
+        &image::Rgba([255, 0, 0, 255]),
+        "Scaled cursor at (200, 150) must be red"
+    );
+
+    // Cleanup
+    set_test_displays(None);
+    set_test_screen_capture(None);
+    clear_test_display_captures();
+}

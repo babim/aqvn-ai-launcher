@@ -23,6 +23,20 @@ static TEST_SCREEN_DIMS: RwLock<Option<(f64, f64)>> = RwLock::new(None);
 static SIMULATED_CURSOR: RwLock<(f64, f64)> = RwLock::new((0.0, 0.0));
 static INJECTED_EVENTS_LOG: RwLock<Vec<Value>> = RwLock::new(Vec::new());
 static LAST_WINDOWS_INPUTS: RwLock<Vec<SimulatedWindowsInput>> = RwLock::new(Vec::new());
+static TEST_DISPLAYS: RwLock<Option<Vec<DisplayInfo>>> = RwLock::new(None);
+static TEST_PER_DISPLAY_CAPTURE: RwLock<Option<std::collections::HashMap<u32, Value>>> =
+    RwLock::new(None);
+
+/// Display monitor information.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DisplayInfo {
+    pub id: u32,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    pub is_primary: bool,
+}
 
 // Win32 MOUSEEVENTF flags
 pub const WIN_MOUSEEVENTF_MOVE: u32 = 0x0001;
@@ -702,6 +716,127 @@ pub fn set_test_screen_capture(capture: Option<Value>) {
     }
 }
 
+/// Sets test displays list override.
+pub fn set_test_displays(displays: Option<Vec<DisplayInfo>>) {
+    if let Ok(mut lock) = TEST_DISPLAYS.write() {
+        *lock = displays;
+    }
+}
+
+/// Sets test screen capture override for a specific display_id.
+pub fn set_test_display_capture(display_id: u32, capture: Option<Value>) {
+    if let Ok(mut lock) = TEST_PER_DISPLAY_CAPTURE.write() {
+        let map = lock.get_or_insert_with(std::collections::HashMap::new);
+        if let Some(c) = capture {
+            map.insert(display_id, c);
+        } else {
+            map.remove(&display_id);
+        }
+    }
+}
+
+/// Clears all per-display test capture overrides.
+pub fn clear_test_display_captures() {
+    if let Ok(mut lock) = TEST_PER_DISPLAY_CAPTURE.write() {
+        *lock = None;
+    }
+}
+
+/// Enumerates active displays / monitors on host OS.
+pub fn list_displays() -> Vec<DisplayInfo> {
+    if let Ok(lock) = TEST_DISPLAYS.read() {
+        if let Some(ref list) = *lock {
+            return list.clone();
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let script = r#"
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.Screen]::AllScreens | ForEach-Object -Begin { $i = 0 } -Process {
+                [PSCustomObject]@{
+                    id = $i
+                    name = $_.DeviceName
+                    width = $_.Bounds.Width
+                    height = $_.Bounds.Height
+                    scale_factor = 1.0
+                    is_primary = $_.Primary
+                }
+                $i++
+            } | ConvertTo-Json -Compress
+        "#;
+        if let Ok(output) = Command::new("powershell")
+            .args(["-Command", script])
+            .output()
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if let Ok(screens) = serde_json::from_str::<Vec<DisplayInfo>>(&text) {
+                    if !screens.is_empty() {
+                        return screens;
+                    }
+                } else if let Ok(screen) = serde_json::from_str::<DisplayInfo>(&text) {
+                    return vec![screen];
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var("DISPLAY").is_ok() && which_executable("xrandr").is_some() {
+            if let Ok(output) = Command::new("xrandr").args(["--current"]).output() {
+                if output.status.success() {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    let mut list = Vec::new();
+                    let mut id = 0;
+                    for line in text.lines() {
+                        if line.contains(" connected") {
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if !parts.is_empty() {
+                                let name = parts[0].to_string();
+                                let is_primary = line.contains("primary");
+                                for part in &parts[1..] {
+                                    if let Some((w_s, rest)) = part.split_once('x') {
+                                        let h_s = rest.split('+').next().unwrap_or(rest);
+                                        if let (Ok(w), Ok(h)) =
+                                            (w_s.parse::<u32>(), h_s.parse::<u32>())
+                                        {
+                                            list.push(DisplayInfo {
+                                                id,
+                                                name: name.clone(),
+                                                width: w,
+                                                height: h,
+                                                scale_factor: 1.0,
+                                                is_primary,
+                                            });
+                                            id += 1;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !list.is_empty() {
+                        return list;
+                    }
+                }
+            }
+        }
+    }
+
+    vec![DisplayInfo {
+        id: 0,
+        name: "Primary Display".to_string(),
+        width: 1920,
+        height: 1080,
+        scale_factor: 1.0,
+        is_primary: true,
+    }]
+}
+
 /// Sets the simulated cursor coordinates.
 pub fn set_cursor_position(x: f64, y: f64) {
     if let Ok(mut lock) = SIMULATED_CURSOR.write() {
@@ -788,6 +923,67 @@ pub fn compute_scaled_dimensions(
     (target_w, target_h)
 }
 
+/// Renders a visual crosshair cursor overlay centered at `(cx, cy)` on the RGBA image buffer.
+pub fn render_crosshair_cursor(img: &mut image::RgbaImage, cx: i32, cy: i32) {
+    let width = img.width() as i32;
+    let height = img.height() as i32;
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let crosshair_color = image::Rgba([255, 0, 0, 255]);
+    let border_color = image::Rgba([0, 0, 0, 200]);
+
+    let arm_len: i32 = 12;
+    let gap: i32 = 2;
+    let dot_r: i32 = 1;
+
+    let mut draw_pixel = |x: i32, y: i32, color: image::Rgba<u8>| {
+        if x >= 0 && x < width && y >= 0 && y < height {
+            img.put_pixel(x as u32, y as u32, color);
+        }
+    };
+
+    // Border around arms
+    for d in (-arm_len - 1)..=(arm_len + 1) {
+        if i32::abs(d) > gap {
+            draw_pixel(cx + d, cy - 1, border_color);
+            draw_pixel(cx + d, cy + 1, border_color);
+            draw_pixel(cx - 1, cy + d, border_color);
+            draw_pixel(cx + 1, cy + d, border_color);
+        }
+    }
+    // Border around center dot
+    for dy in (-dot_r - 1)..=(dot_r + 1) {
+        for dx in (-dot_r - 1)..=(dot_r + 1) {
+            if i32::abs(dx) > dot_r || i32::abs(dy) > dot_r {
+                draw_pixel(cx + dx, cy + dy, border_color);
+            }
+        }
+    }
+
+    // Horizontal arm
+    for dx in -arm_len..=arm_len {
+        if i32::abs(dx) > gap {
+            draw_pixel(cx + dx, cy, crosshair_color);
+        }
+    }
+
+    // Vertical arm
+    for dy in -arm_len..=arm_len {
+        if i32::abs(dy) > gap {
+            draw_pixel(cx, cy + dy, crosshair_color);
+        }
+    }
+
+    // Center dot
+    for dy in -dot_r..=dot_r {
+        for dx in -dot_r..=dot_r {
+            draw_pixel(cx + dx, cy + dy, crosshair_color);
+        }
+    }
+}
+
 fn process_and_encode_image(
     image_bytes: &[u8],
     orig_w: u32,
@@ -795,26 +991,41 @@ fn process_and_encode_image(
     format: &str,
     scale: Option<f64>,
     max_width: Option<u32>,
+    cursor_overlay: Option<(f64, f64)>,
 ) -> (String, u32, u32) {
     let (target_w, target_h) = compute_scaled_dimensions(orig_w, orig_h, scale, max_width);
     let is_jpeg = format.eq_ignore_ascii_case("jpeg") || format.eq_ignore_ascii_case("jpg");
 
-    if target_w == orig_w && target_h == orig_h && !is_jpeg {
+    if target_w == orig_w && target_h == orig_h && !is_jpeg && cursor_overlay.is_none() {
         return (BASE64_STANDARD.encode(image_bytes), orig_w, orig_h);
     }
 
     if let Ok(img) = image::load_from_memory(image_bytes) {
-        let resized = img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle);
+        let mut rgba = if target_w != orig_w || target_h != orig_h {
+            img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle)
+                .to_rgba8()
+        } else {
+            img.to_rgba8()
+        };
+
+        if let Some(cursor_pos) = cursor_overlay {
+            let scale_x = target_w as f64 / (orig_w.max(1) as f64);
+            let scale_y = target_h as f64 / (orig_h.max(1) as f64);
+            let cx = (cursor_pos.0 * scale_x).round() as i32;
+            let cy = (cursor_pos.1 * scale_y).round() as i32;
+            render_crosshair_cursor(&mut rgba, cx, cy);
+        }
+
         let mut buf = Vec::new();
         if is_jpeg {
-            let rgb = resized.to_rgb8();
+            let rgb = image::DynamicImage::ImageRgba8(rgba).to_rgb8();
             if rgb
                 .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Jpeg)
                 .is_ok()
             {
                 return (BASE64_STANDARD.encode(&buf), target_w, target_h);
             }
-        } else if resized
+        } else if rgba
             .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
             .is_ok()
         {
@@ -832,28 +1043,42 @@ fn process_and_encode_b64(
     format: &str,
     scale: Option<f64>,
     max_width: Option<u32>,
+    cursor_overlay: Option<(f64, f64)>,
 ) -> (String, u32, u32) {
     let (target_w, target_h) = compute_scaled_dimensions(orig_w, orig_h, scale, max_width);
     let is_jpeg = format.eq_ignore_ascii_case("jpeg") || format.eq_ignore_ascii_case("jpg");
 
-    if target_w == orig_w && target_h == orig_h && !is_jpeg {
+    if target_w == orig_w && target_h == orig_h && !is_jpeg && cursor_overlay.is_none() {
         return (b64_data.to_string(), orig_w, orig_h);
     }
 
     if let Ok(bytes) = BASE64_STANDARD.decode(b64_data.trim()) {
         if let Ok(img) = image::load_from_memory(&bytes) {
-            let resized =
-                img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle);
+            let mut rgba = if target_w != orig_w || target_h != orig_h {
+                img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle)
+                    .to_rgba8()
+            } else {
+                img.to_rgba8()
+            };
+
+            if let Some(cursor_pos) = cursor_overlay {
+                let scale_x = target_w as f64 / (orig_w.max(1) as f64);
+                let scale_y = target_h as f64 / (orig_h.max(1) as f64);
+                let cx = (cursor_pos.0 * scale_x).round() as i32;
+                let cy = (cursor_pos.1 * scale_y).round() as i32;
+                render_crosshair_cursor(&mut rgba, cx, cy);
+            }
+
             let mut buf = Vec::new();
             if is_jpeg {
-                let rgb = resized.to_rgb8();
+                let rgb = image::DynamicImage::ImageRgba8(rgba).to_rgb8();
                 if rgb
                     .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Jpeg)
                     .is_ok()
                 {
                     return (BASE64_STANDARD.encode(&buf), target_w, target_h);
                 }
-            } else if resized
+            } else if rgba
                 .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
                 .is_ok()
             {
@@ -865,17 +1090,101 @@ fn process_and_encode_b64(
     (b64_data.to_string(), target_w, target_h)
 }
 
-/// Performs native screen capture or window capture on host OS.
-pub fn capture_screen_native(
+/// Performs screen capture honoring display_id, scale, max_width, and optional show_cursor.
+pub fn capture_screen(
     format: &str,
     active_window: bool,
-    _display_id: Option<u32>,
+    display_id: Option<u32>,
     scale: Option<f64>,
     max_width: Option<u32>,
+    show_cursor: bool,
 ) -> (String, u32, u32) {
-    // 1. Check test override
+    let cursor_overlay = if show_cursor {
+        Some(current_cursor_position())
+    } else {
+        None
+    };
+
+    // 1. Check test overrides
+    // 1a. Check per-display test override
+    if let Some(did) = display_id {
+        if let Ok(lock) = TEST_PER_DISPLAY_CAPTURE.read() {
+            if let Some(ref map) = *lock {
+                if let Some(val) = map.get(&did) {
+                    let data = val
+                        .get("data")
+                        .or_else(|| val.get("screenshot"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(FALLBACK_PNG_BASE64)
+                        .to_string();
+                    let width = val
+                        .get("width")
+                        .and_then(|v| v.as_u64())
+                        .map(|w| w as u32)
+                        .unwrap_or(1920);
+                    let height = val
+                        .get("height")
+                        .and_then(|v| v.as_u64())
+                        .map(|h| h as u32)
+                        .unwrap_or(1080);
+                    return process_and_encode_b64(
+                        &data,
+                        width,
+                        height,
+                        format,
+                        scale,
+                        max_width,
+                        cursor_overlay,
+                    );
+                }
+            }
+        }
+    }
+
+    // 1b. Check global TEST_SCREEN_CAPTURE (which may also contain a "displays" map/array)
     if let Ok(lock) = TEST_SCREEN_CAPTURE.read() {
         if let Some(ref val) = *lock {
+            if let Some(did) = display_id {
+                if let Some(disp_map) = val.get("displays") {
+                    let key = did.to_string();
+                    let target = disp_map.get(&key).or_else(|| {
+                        if let Some(arr) = disp_map.as_array() {
+                            arr.iter()
+                                .find(|d| d.get("id").and_then(Value::as_u64) == Some(did as u64))
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(disp_val) = target {
+                        let data = disp_val
+                            .get("data")
+                            .or_else(|| disp_val.get("screenshot"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(FALLBACK_PNG_BASE64)
+                            .to_string();
+                        let width = disp_val
+                            .get("width")
+                            .and_then(|v| v.as_u64())
+                            .map(|w| w as u32)
+                            .unwrap_or(1920);
+                        let height = disp_val
+                            .get("height")
+                            .and_then(|v| v.as_u64())
+                            .map(|h| h as u32)
+                            .unwrap_or(1080);
+                        return process_and_encode_b64(
+                            &data,
+                            width,
+                            height,
+                            format,
+                            scale,
+                            max_width,
+                            cursor_overlay,
+                        );
+                    }
+                }
+            }
+
             let data = val
                 .get("data")
                 .or_else(|| val.get("screenshot"))
@@ -886,13 +1195,41 @@ pub fn capture_screen_native(
                 .get("width")
                 .and_then(|v| v.as_u64())
                 .map(|w| w as u32)
-                .unwrap_or(1920);
+                .unwrap_or_else(|| {
+                    if let Some(did) = display_id {
+                        list_displays()
+                            .iter()
+                            .find(|d| d.id == did)
+                            .map(|d| d.width)
+                            .unwrap_or(1920)
+                    } else {
+                        1920
+                    }
+                });
             let height = val
                 .get("height")
                 .and_then(|v| v.as_u64())
                 .map(|h| h as u32)
-                .unwrap_or(1080);
-            return process_and_encode_b64(&data, width, height, format, scale, max_width);
+                .unwrap_or_else(|| {
+                    if let Some(did) = display_id {
+                        list_displays()
+                            .iter()
+                            .find(|d| d.id == did)
+                            .map(|d| d.height)
+                            .unwrap_or(1080)
+                    } else {
+                        1080
+                    }
+                });
+            return process_and_encode_b64(
+                &data,
+                width,
+                height,
+                format,
+                scale,
+                max_width,
+                cursor_overlay,
+            );
         }
     }
 
@@ -904,13 +1241,32 @@ pub fn capture_screen_native(
         cmd.arg("-x");
         if active_window {
             cmd.arg("-w");
+        } else if let Some(did) = display_id {
+            cmd.args(["-D", &(did + 1).to_string()]);
         }
         cmd.arg(&tmp_file);
         if let Ok(status) = cmd.status() {
             if status.success() {
                 if let Ok(bytes) = std::fs::read(&tmp_file) {
                     let _ = std::fs::remove_file(&tmp_file);
-                    return process_and_encode_image(&bytes, 1920, 1080, format, scale, max_width);
+                    let (w, h) = if let Some(did) = display_id {
+                        list_displays()
+                            .iter()
+                            .find(|d| d.id == did)
+                            .map(|d| (d.width, d.height))
+                            .unwrap_or((1920, 1080))
+                    } else {
+                        (1920, 1080)
+                    };
+                    return process_and_encode_image(
+                        &bytes,
+                        w,
+                        h,
+                        format,
+                        scale,
+                        max_width,
+                        cursor_overlay,
+                    );
                 }
             }
         }
@@ -918,25 +1274,50 @@ pub fn capture_screen_native(
 
     #[cfg(target_os = "windows")]
     {
-        // On Windows, use PowerShell CopyFromScreen if available
-        let script = r#"
+        let did_arg = display_id.map(|d| d.to_string()).unwrap_or_default();
+        let script = format!(
+            r#"
             Add-Type -AssemblyName System.Windows.Forms,System.Drawing
-            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $did = '{did_arg}'
+            if ($did -ne '' -and [int]$did -lt [System.Windows.Forms.Screen]::AllScreens.Count) {{
+                $screen = [System.Windows.Forms.Screen]::AllScreens[[int]$did]
+            }} else {{
+                $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+            }}
+            $bounds = $screen.Bounds
             $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
             $g = [System.Drawing.Graphics]::FromImage($bmp)
             $g.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
             $ms = New-Object System.IO.MemoryStream
             $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
             [Convert]::ToBase64String($ms.ToArray())
-        "#;
+            "#
+        );
         if let Ok(output) = Command::new("powershell")
-            .args(["-Command", script])
+            .args(["-Command", &script])
             .output()
         {
             if output.status.success() {
                 let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !text.is_empty() {
-                    return process_and_encode_b64(&text, 1920, 1080, format, scale, max_width);
+                    let (w, h) = if let Some(did) = display_id {
+                        list_displays()
+                            .iter()
+                            .find(|d| d.id == did)
+                            .map(|d| (d.width, d.height))
+                            .unwrap_or((1920, 1080))
+                    } else {
+                        (1920, 1080)
+                    };
+                    return process_and_encode_b64(
+                        &text,
+                        w,
+                        h,
+                        format,
+                        scale,
+                        max_width,
+                        cursor_overlay,
+                    );
                 }
             }
         }
@@ -944,7 +1325,6 @@ pub fn capture_screen_native(
 
     #[cfg(target_os = "linux")]
     {
-        // Try ffmpeg / scrot / xwd if display is set
         if std::env::var("DISPLAY").is_ok() {
             if which_executable("scrot").is_some() {
                 let tmp_file =
@@ -958,8 +1338,23 @@ pub fn capture_screen_native(
                     if status.success() {
                         if let Ok(bytes) = std::fs::read(&tmp_file) {
                             let _ = std::fs::remove_file(&tmp_file);
+                            let (w, h) = if let Some(did) = display_id {
+                                list_displays()
+                                    .iter()
+                                    .find(|d| d.id == did)
+                                    .map(|d| (d.width, d.height))
+                                    .unwrap_or((1920, 1080))
+                            } else {
+                                (1920, 1080)
+                            };
                             return process_and_encode_image(
-                                &bytes, 1920, 1080, format, scale, max_width,
+                                &bytes,
+                                w,
+                                h,
+                                format,
+                                scale,
+                                max_width,
+                                cursor_overlay,
                             );
                         }
                     }
@@ -994,6 +1389,7 @@ pub fn capture_screen_native(
                             format,
                             scale,
                             max_width,
+                            cursor_overlay,
                         );
                     }
                 }
@@ -1003,7 +1399,35 @@ pub fn capture_screen_native(
 
     // 3. Fallback valid PNG base64 for headless / CI
     let _ = active_window;
-    process_and_encode_b64(FALLBACK_PNG_BASE64, 1920, 1080, format, scale, max_width)
+    let (target_w, target_h) = if let Some(did) = display_id {
+        list_displays()
+            .iter()
+            .find(|d| d.id == did)
+            .map(|d| (d.width, d.height))
+            .unwrap_or((1920, 1080))
+    } else {
+        (1920, 1080)
+    };
+    process_and_encode_b64(
+        FALLBACK_PNG_BASE64,
+        target_w,
+        target_h,
+        format,
+        scale,
+        max_width,
+        cursor_overlay,
+    )
+}
+
+/// Performs native screen capture or window capture on host OS.
+pub fn capture_screen_native(
+    format: &str,
+    active_window: bool,
+    display_id: Option<u32>,
+    scale: Option<f64>,
+    max_width: Option<u32>,
+) -> (String, u32, u32) {
+    capture_screen(format, active_window, display_id, scale, max_width, false)
 }
 
 fn inject_mouse_move(x: f64, y: f64) {
@@ -1351,6 +1775,14 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(Value::as_u64)
                 .map(|v| v as u32);
 
+            let show_cursor = envelope
+                .get("show_cursor")
+                .or_else(|| params_obj.and_then(|p| p.get("show_cursor")))
+                .or_else(|| envelope.get("cursor"))
+                .or_else(|| params_obj.and_then(|p| p.get("cursor")))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
             let scale = envelope
                 .get("scale")
                 .or_else(|| params_obj.and_then(|p| p.get("scale")))
@@ -1362,22 +1794,63 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
                 .map(|v| v as u32);
 
-            let (b64, width, height) =
-                capture_screen_native(format, active_win, display_id, scale, max_width);
+            if let Some(did) = display_id {
+                let displays = list_displays();
+                let has_test_cap = {
+                    let per_disp = TEST_PER_DISPLAY_CAPTURE
+                        .read()
+                        .ok()
+                        .map(|m| {
+                            m.as_ref()
+                                .map(|map| map.contains_key(&did))
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false);
+                    let glob_disp = TEST_SCREEN_CAPTURE
+                        .read()
+                        .ok()
+                        .map(|m| {
+                            m.as_ref()
+                                .and_then(|v| {
+                                    v.get("displays").and_then(|d| d.get(did.to_string()))
+                                })
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+                    per_disp || glob_disp
+                };
+                if !has_test_cap && !displays.is_empty() && !displays.iter().any(|d| d.id == did) {
+                    return make_error_reply(
+                        id,
+                        action,
+                        format!("display_id {did} not found in available displays"),
+                    );
+                }
+            }
 
-            make_ok_reply(
-                id,
-                action,
-                json!({
-                    "captured": true,
-                    "format": format,
-                    "data": b64.clone(),
-                    "width": width,
-                    "height": height,
-                    "active_window": active_win,
-                }),
-                Some(b64),
-            )
+            let (b64, width, height) = capture_screen(
+                format,
+                active_win,
+                display_id,
+                scale,
+                max_width,
+                show_cursor,
+            );
+
+            let mut data_obj = json!({
+                "captured": true,
+                "format": format,
+                "data": b64.clone(),
+                "width": width,
+                "height": height,
+                "active_window": active_win,
+                "show_cursor": show_cursor,
+            });
+            if let Some(did) = display_id {
+                data_obj["display_id"] = json!(did);
+            }
+
+            make_ok_reply(id, action, data_obj, Some(b64))
         }
 
         "active_window" | "capture_active_window" => {
@@ -1398,7 +1871,16 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                 .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
                 .map(|v| v as u32);
 
-            let (b64, width, height) = capture_screen_native(format, true, None, scale, max_width);
+            let show_cursor = envelope
+                .get("show_cursor")
+                .or_else(|| params_obj.and_then(|p| p.get("show_cursor")))
+                .or_else(|| envelope.get("cursor"))
+                .or_else(|| params_obj.and_then(|p| p.get("cursor")))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
+            let (b64, width, height) =
+                capture_screen(format, true, None, scale, max_width, show_cursor);
 
             make_ok_reply(
                 id,
@@ -1411,6 +1893,7 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
                     "height": height,
                     "active_window": true,
                     "title": "AQVN Workspace",
+                    "show_cursor": show_cursor,
                 }),
                 Some(b64),
             )
@@ -1809,23 +2292,17 @@ pub async fn handle_computer_use_op(envelope: &Value) -> String {
             )
         }
 
-        "screens" | "displays" | "monitors" => make_ok_reply(
-            id,
-            action,
-            json!({
-                "displays": [
-                    {
-                        "id": 0,
-                        "name": "Primary Display",
-                        "width": 1920,
-                        "height": 1080,
-                        "scale_factor": 1.0,
-                        "is_primary": true,
-                    }
-                ]
-            }),
-            None,
-        ),
+        "screens" | "displays" | "monitors" | "list_displays" | "list_screens" => {
+            let displays = list_displays();
+            make_ok_reply(
+                id,
+                action,
+                json!({
+                    "displays": displays,
+                }),
+                None,
+            )
+        }
 
         other => make_error_reply(
             id,
@@ -1973,5 +2450,59 @@ mod tests {
         assert_eq!(key_evts.len(), 2);
         assert_eq!(key_evts[0].vk, WIN_VK_RETURN);
         assert_eq!(key_evts[1].flags, WIN_KEYEVENTF_KEYUP);
+    }
+
+    #[test]
+    fn test_render_crosshair_cursor() {
+        let mut img = image::RgbaImage::new(100, 100);
+        for pixel in img.pixels_mut() {
+            *pixel = image::Rgba([0, 0, 0, 255]);
+        }
+        render_crosshair_cursor(&mut img, 50, 50);
+
+        // Center pixel is red
+        assert_eq!(img.get_pixel(50, 50), &image::Rgba([255, 0, 0, 255]));
+        // Horizontal arm at (50 + 6, 50) is red
+        assert_eq!(img.get_pixel(56, 50), &image::Rgba([255, 0, 0, 255]));
+        // Vertical arm at (50, 50 + 6) is red
+        assert_eq!(img.get_pixel(50, 56), &image::Rgba([255, 0, 0, 255]));
+        // Arm border at (56, 51) is border color
+        assert_eq!(img.get_pixel(56, 51), &image::Rgba([0, 0, 0, 200]));
+        // Distant pixel is unchanged black
+        assert_eq!(img.get_pixel(10, 10), &image::Rgba([0, 0, 0, 255]));
+    }
+
+    #[test]
+    fn test_list_displays_and_display_overrides() {
+        set_test_displays(None);
+        let default_displays = list_displays();
+        assert!(!default_displays.is_empty());
+        assert_eq!(default_displays[0].id, 0);
+
+        set_test_displays(Some(vec![
+            DisplayInfo {
+                id: 0,
+                name: "Monitor A".to_string(),
+                width: 1920,
+                height: 1080,
+                scale_factor: 1.0,
+                is_primary: true,
+            },
+            DisplayInfo {
+                id: 1,
+                name: "Monitor B".to_string(),
+                width: 2560,
+                height: 1440,
+                scale_factor: 1.25,
+                is_primary: false,
+            },
+        ]));
+
+        let displays = list_displays();
+        assert_eq!(displays.len(), 2);
+        assert_eq!(displays[0].id, 0);
+        assert_eq!(displays[1].id, 1);
+        assert_eq!(displays[1].width, 2560);
+        set_test_displays(None);
     }
 }

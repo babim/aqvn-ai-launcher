@@ -181,6 +181,7 @@ impl AppConfig {
     }
 
     /// Builds a unified Sandbox merging workspace_path and allowed_paths.
+    #[cfg(not(target_os = "android"))]
     pub fn build_sandbox(&self) -> crate::rfc::sandbox::Sandbox {
         crate::rfc::sandbox::Sandbox::from_allowed_paths(&self.unified_allowed_paths())
     }

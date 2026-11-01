@@ -118,6 +118,45 @@ pub fn parse_file_mode(envelope: &Value) -> String {
         .to_lowercase()
 }
 
+/// Extracts final chunk indicator (boolean or "true"/"1"), defaulting to false.
+pub fn parse_file_final(envelope: &Value) -> bool {
+    envelope
+        .get("final")
+        .or_else(|| envelope.get("is_final"))
+        .is_some_and(|v| {
+            v.as_bool().unwrap_or_else(|| {
+                v.as_str()
+                    .map(|s| s.eq_ignore_ascii_case("true") || s == "1")
+                    .unwrap_or(false)
+            })
+        })
+}
+
+/// Extracts expected SHA-256 hash if present.
+pub fn parse_expected_sha256(envelope: &Value) -> Option<String> {
+    envelope
+        .get("expected_sha256")
+        .or_else(|| envelope.get("expected_checksum"))
+        .or_else(|| envelope.get("sha256"))
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_string())
+}
+
+/// Computes the SHA-256 checksum of an entire file on disk.
+pub fn compute_file_sha256(path: &Path) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
 fn make_error_reply(
     id: &str,
     op_id: &str,
@@ -460,6 +499,52 @@ fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
         0
     };
 
+    let is_final = parse_file_final(envelope);
+    let maybe_expected_sha256 = parse_expected_sha256(envelope);
+
+    let maybe_file_sha256 = if is_final
+        || (maybe_offset.is_none() && mode != "append" && maybe_expected_sha256.is_some())
+    {
+        let computed = match compute_file_sha256(&jailed) {
+            Ok(h) => h,
+            Err(err) => {
+                return make_error_reply(
+                    id,
+                    op_id,
+                    "write",
+                    Some(raw_path),
+                    format!("failed to compute file SHA-256: {err}"),
+                );
+            }
+        };
+
+        if let Some(ref expected) = maybe_expected_sha256 {
+            let clean_expected = expected
+                .trim()
+                .strip_prefix("sha256:")
+                .unwrap_or(expected.trim());
+            if !clean_expected.is_empty() && !clean_expected.eq_ignore_ascii_case(&computed) {
+                let mut err_reply: Value = serde_json::from_str(&make_error_reply(
+                    id,
+                    op_id,
+                    "write",
+                    Some(raw_path),
+                    format!(
+                        "SHA-256 checksum mismatch: expected {clean_expected}, calculated {computed}"
+                    ),
+                ))
+                .unwrap_or_default();
+                err_reply["file_sha256"] = json!(&computed);
+                err_reply["expected_sha256"] = json!(clean_expected);
+                return err_reply.to_string();
+            }
+        }
+
+        Some(computed)
+    } else {
+        None
+    };
+
     let mut res = json!({
         "type": MSG_TYPE_FILE_OP_RESULT,
         "op": MSG_TYPE_FILE_OP_RESULT,
@@ -488,6 +573,14 @@ fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
             res["total_size"] = json!(total_size);
             data_payload["total_size"] = json!(total_size);
         }
+    }
+    if is_final {
+        res["final"] = json!(true);
+        data_payload["final"] = json!(true);
+    }
+    if let Some(ref file_sha256) = maybe_file_sha256 {
+        res["file_sha256"] = json!(file_sha256);
+        data_payload["file_sha256"] = json!(file_sha256);
     }
     res["data"] = data_payload.clone();
     res["result"] = data_payload;

@@ -161,6 +161,30 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
+    /// Returns unified allowed paths merging workspace_path with allowed_paths, removing duplicates.
+    pub fn unified_allowed_paths(&self) -> Vec<String> {
+        let mut unified = Vec::new();
+        let ws = self.workspace_path.trim();
+        if !ws.is_empty() {
+            unified.push(ws.to_string());
+        }
+        for p in &self.allowed_paths {
+            let trimmed = p.trim();
+            if !trimmed.is_empty() && !unified.iter().any(|u| u == trimmed) {
+                unified.push(trimmed.to_string());
+            }
+        }
+        if unified.is_empty() {
+            unified.push(DEFAULT_WORKSPACE_PATH.to_string());
+        }
+        unified
+    }
+
+    /// Builds a unified Sandbox merging workspace_path and allowed_paths.
+    pub fn build_sandbox(&self) -> crate::rfc::sandbox::Sandbox {
+        crate::rfc::sandbox::Sandbox::from_allowed_paths(&self.unified_allowed_paths())
+    }
+
     /// Loads configuration from tauri-plugin-store settings.json.
     /// Missing fields fall back to default values.
     pub fn load_from_store<R: Runtime>(app: &AppHandle<R>) -> Result<Self, String> {

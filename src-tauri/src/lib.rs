@@ -57,7 +57,7 @@ pub fn run() {
             let initial_config =
                 config::AppConfig::load_from_store(app.handle()).unwrap_or_default();
             #[cfg(not(target_os = "android"))]
-            connector::handlers::files::set_workspace_path(Some(&initial_config.workspace_path));
+            connector::handlers::files::sync_from_app_config(&initial_config);
             let watcher = config::ConfigWatcher::new(initial_config.clone());
             app.manage(watcher.clone());
 
@@ -145,7 +145,7 @@ pub fn run() {
                         }
                         last = next.clone();
                         #[cfg(not(target_os = "android"))]
-                        connector::handlers::files::set_workspace_path(Some(&last.workspace_path));
+                        connector::handlers::files::sync_from_app_config(&last);
                         poll_watcher.update(next);
                     }
 

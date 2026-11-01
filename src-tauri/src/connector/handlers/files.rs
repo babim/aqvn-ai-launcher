@@ -20,6 +20,7 @@ use std::sync::RwLock;
 
 static CUSTOM_SANDBOX: RwLock<Option<Sandbox>> = RwLock::new(None);
 static CONFIGURED_WORKSPACE_PATH: RwLock<Option<String>> = RwLock::new(None);
+static CONFIGURED_ALLOWED_PATHS: RwLock<Option<Vec<String>>> = RwLock::new(None);
 
 /// Overrides the active sandbox for testing or custom configuration.
 pub fn set_test_sandbox(sandbox: Option<Sandbox>) {
@@ -52,15 +53,63 @@ pub fn get_workspace_path() -> String {
     DEFAULT_SANDBOX.to_string()
 }
 
-/// Returns the currently active sandbox (custom test override or configured `workspace_path`).
+/// Dynamically updates the active allowed paths for the sandbox.
+pub fn set_allowed_paths(paths: Option<&[String]>) {
+    if let Ok(mut lock) = CONFIGURED_ALLOWED_PATHS.write() {
+        *lock = paths.map(|p| p.to_vec());
+    }
+}
+
+/// Binds the active allowed paths for the sandbox.
+pub fn bind_allowed_paths(paths: &[String]) {
+    set_allowed_paths(Some(paths));
+}
+
+/// Gets the currently configured allowed paths or empty vec if none set.
+pub fn get_allowed_paths() -> Vec<String> {
+    if let Ok(lock) = CONFIGURED_ALLOWED_PATHS.read() {
+        if let Some(ref paths) = *lock {
+            return paths.clone();
+        }
+    }
+    Vec::new()
+}
+
+/// Returns unified allowed paths merging `workspace_path` and `allowed_paths`, removing duplicates.
+pub fn unified_allowed_paths() -> Vec<String> {
+    let ws = get_workspace_path();
+    let mut unified = Vec::new();
+    let ws_trimmed = ws.trim();
+    if !ws_trimmed.is_empty() {
+        unified.push(ws_trimmed.to_string());
+    }
+    for p in get_allowed_paths() {
+        let trimmed = p.trim();
+        if !trimmed.is_empty() && !unified.iter().any(|u| u == trimmed) {
+            unified.push(trimmed.to_string());
+        }
+    }
+    if unified.is_empty() {
+        unified.push(DEFAULT_SANDBOX.to_string());
+    }
+    unified
+}
+
+/// Synchronizes both workspace_path and allowed_paths from an `AppConfig`.
+pub fn sync_from_app_config(config: &crate::config::AppConfig) {
+    set_workspace_path(Some(&config.workspace_path));
+    set_allowed_paths(Some(&config.allowed_paths));
+}
+
+/// Returns the currently active sandbox (custom test override or unified `workspace_path` and `allowed_paths`).
 pub fn current_sandbox() -> Sandbox {
     if let Ok(lock) = CUSTOM_SANDBOX.read() {
         if let Some(ref sb) = *lock {
             return sb.clone();
         }
     }
-    let ws_path = get_workspace_path();
-    Sandbox::from_allowed_paths(&[ws_path])
+    let unified = unified_allowed_paths();
+    Sandbox::from_allowed_paths(&unified)
 }
 
 /// Normalizes path strings: empty or `.` becomes `/a0`, relative paths get `/a0/` prefix.

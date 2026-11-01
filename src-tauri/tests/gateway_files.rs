@@ -671,6 +671,7 @@ async fn test_remote_tree_snapshot_generation() {
         ping_interval_secs: 25,
         reconnect_delay_ms: 200,
         workspace_path: temp_dir.to_string_lossy().to_string(),
+        ..Default::default()
     };
 
     let client = GatewayClient::new(client_config);
@@ -1105,4 +1106,185 @@ async fn test_chunked_file_sha256_verification() {
 
     set_test_sandbox(None);
     let _ = std::fs::remove_dir_all(&sandbox_dir);
+}
+
+#[tokio::test]
+async fn test_unified_sandbox_allowed_paths() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    set_test_sandbox(None);
+
+    // 1. Create two separate directories: workspace and secondary allowed path
+    let (ws_dir, _) = create_temp_sandbox();
+    let ws_str = ws_dir.to_string_lossy().to_string();
+
+    let (allowed_dir, _) = create_temp_sandbox();
+    let allowed_str = allowed_dir.to_string_lossy().to_string();
+
+    let (forbidden_dir, _) = create_temp_sandbox();
+
+    // 2. Configure unified paths
+    files::set_workspace_path(Some(&ws_str));
+    files::set_allowed_paths(Some(std::slice::from_ref(&allowed_str)));
+
+    assert_eq!(files::get_workspace_path(), ws_str);
+    assert_eq!(files::get_allowed_paths(), vec![allowed_str.clone()]);
+
+    let unified = files::unified_allowed_paths();
+    assert!(
+        unified.contains(&ws_str),
+        "unified paths must include workspace"
+    );
+    assert!(
+        unified.contains(&allowed_str),
+        "unified paths must include allowed path"
+    );
+
+    let active_sandbox = files::current_sandbox();
+    let roots = active_sandbox.canonical_roots().expect("canonical roots");
+    let ws_canonical = std::fs::canonicalize(&ws_dir).expect("canonicalize ws");
+    let allowed_canonical = std::fs::canonicalize(&allowed_dir).expect("canonicalize allowed");
+
+    assert!(
+        roots.contains(&ws_canonical),
+        "sandbox roots must contain workspace"
+    );
+    assert!(
+        roots.contains(&allowed_canonical),
+        "sandbox roots must contain allowed path"
+    );
+
+    // 3. Write and read in workspace root (relative path)
+    let ws_file = "ws_file.txt";
+    let write_ws = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-u-ws-w",
+        "action": "write",
+        "path": ws_file,
+        "content": "content in workspace\n"
+    });
+    let reply_ws_w: Value = serde_json::from_str(&files::handle_file_op(&write_ws).await).unwrap();
+    assert_eq!(reply_ws_w["success"], true);
+    assert!(ws_dir.join(ws_file).is_file());
+
+    let read_ws = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-u-ws-r",
+        "action": "read",
+        "path": ws_file
+    });
+    let reply_ws_r: Value = serde_json::from_str(&files::handle_file_op(&read_ws).await).unwrap();
+    assert_eq!(reply_ws_r["success"], true);
+    assert_eq!(reply_ws_r["content"], "content in workspace\n");
+
+    // 4. Write and read in secondary allowed path (absolute path)
+    let allowed_file_path = allowed_dir.join("allowed_file.txt");
+    let allowed_file_str = allowed_file_path.to_string_lossy().to_string();
+
+    let write_allowed = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-u-al-w",
+        "action": "write",
+        "path": allowed_file_str,
+        "content": "content in secondary allowed path\n"
+    });
+    let reply_al_w: Value =
+        serde_json::from_str(&files::handle_file_op(&write_allowed).await).unwrap();
+    assert_eq!(reply_al_w["success"], true);
+    assert!(allowed_file_path.is_file());
+
+    let read_allowed = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-u-al-r",
+        "action": "read",
+        "path": allowed_file_str
+    });
+    let reply_al_r: Value =
+        serde_json::from_str(&files::handle_file_op(&read_allowed).await).unwrap();
+    assert_eq!(reply_al_r["success"], true);
+    assert_eq!(reply_al_r["content"], "content in secondary allowed path\n");
+
+    // 5. List and stat on secondary allowed directory
+    let list_allowed = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-u-al-list",
+        "action": "files_list",
+        "path": allowed_str
+    });
+    let reply_al_list: Value =
+        serde_json::from_str(&files::handle_file_op(&list_allowed).await).unwrap();
+    assert_eq!(reply_al_list["success"], true);
+    let entries = reply_al_list["entries"].as_array().expect("entries array");
+    assert!(entries.iter().any(|e| e["name"] == "allowed_file.txt"));
+
+    let stat_allowed = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-u-al-stat",
+        "action": "files_stat",
+        "path": allowed_file_str
+    });
+    let reply_al_stat: Value =
+        serde_json::from_str(&files::handle_file_op(&stat_allowed).await).unwrap();
+    assert_eq!(reply_al_stat["success"], true);
+    assert_eq!(reply_al_stat["is_file"], true);
+
+    // 6. Access outside sandbox must be rejected
+    let forbidden_file = forbidden_dir.join("forbidden.txt");
+    let forbidden_file_str = forbidden_file.to_string_lossy().to_string();
+
+    let write_forbidden = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-u-fb-w",
+        "action": "write",
+        "path": forbidden_file_str,
+        "content": "illegal content"
+    });
+    let reply_fb_w: Value =
+        serde_json::from_str(&files::handle_file_op(&write_forbidden).await).unwrap();
+    assert_eq!(reply_fb_w["success"], false);
+    assert_eq!(reply_fb_w["status"], "error");
+    assert!(reply_fb_w["error"]
+        .as_str()
+        .unwrap()
+        .contains("outside the allowed sandbox"));
+
+    // 7. Path traversal escaping secondary root must be rejected
+    let traversal_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-u-trav",
+        "action": "read",
+        "path": format!("{}/../forbidden.txt", allowed_str)
+    });
+    let reply_trav: Value =
+        serde_json::from_str(&files::handle_file_op(&traversal_op).await).unwrap();
+    assert_eq!(reply_fb_w["success"], false);
+    assert_eq!(reply_trav["status"], "error");
+    assert!(reply_trav["error"]
+        .as_str()
+        .unwrap()
+        .contains("outside the allowed sandbox"));
+
+    // 8. Test sync_from_app_config with duplicate paths
+    let config = AppConfig {
+        workspace_path: ws_str.clone(),
+        allowed_paths: vec![allowed_str.clone(), ws_str.clone()],
+        ..Default::default()
+    };
+    let app_unified = config.unified_allowed_paths();
+    assert_eq!(
+        app_unified.len(),
+        2,
+        "must deduplicate workspace_path in allowed_paths"
+    );
+    assert_eq!(app_unified[0], ws_str);
+    assert_eq!(app_unified[1], allowed_str);
+
+    files::sync_from_app_config(&config);
+    assert_eq!(files::unified_allowed_paths().len(), 2);
+
+    // 9. Reset and clean up
+    files::set_workspace_path(None);
+    files::set_allowed_paths(None);
+    let _ = std::fs::remove_dir_all(&ws_dir);
+    let _ = std::fs::remove_dir_all(&allowed_dir);
+    let _ = std::fs::remove_dir_all(&forbidden_dir);
 }

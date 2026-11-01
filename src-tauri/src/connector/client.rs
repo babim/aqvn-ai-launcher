@@ -123,6 +123,8 @@ pub struct GatewayConfig {
     pub reconnect_delay_ms: u64,
     #[serde(default = "crate::config::default_workspace_path")]
     pub workspace_path: String,
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
 }
 
 impl Default for GatewayConfig {
@@ -140,6 +142,7 @@ impl Default for GatewayConfig {
             ping_interval_secs: DEFAULT_PING_INTERVAL_SECS,
             reconnect_delay_ms: DEFAULT_RECONNECT_DELAY_MS,
             workspace_path: crate::config::DEFAULT_WORKSPACE_PATH.to_string(),
+            allowed_paths: Vec::new(),
         }
     }
 }
@@ -159,6 +162,7 @@ impl GatewayConfig {
             scope_browser: app_config.scope_browser,
             scope_desktop: app_config.scope_desktop,
             workspace_path: app_config.workspace_path.clone(),
+            allowed_paths: app_config.allowed_paths.clone(),
             ..Default::default()
         }
     }
@@ -242,6 +246,7 @@ impl GatewayClient {
         let connected = Arc::new(AtomicBool::new(false));
 
         crate::connector::handlers::files::set_workspace_path(Some(&self.config.workspace_path));
+        crate::connector::handlers::files::set_allowed_paths(Some(&self.config.allowed_paths));
 
         let handle = GatewayHandle {
             connected: Arc::clone(&connected),
@@ -742,7 +747,7 @@ pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
 
     loop {
         let app_config = receiver.borrow_and_update().clone();
-        crate::connector::handlers::files::set_workspace_path(Some(&app_config.workspace_path));
+        crate::connector::handlers::files::sync_from_app_config(&app_config);
         if let Some((handle, join_handle)) = current.take() {
             handle.stop();
             let _ = join_handle.await;

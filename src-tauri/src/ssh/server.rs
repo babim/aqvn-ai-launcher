@@ -14,8 +14,8 @@ use russh::{Channel, ChannelId, CryptoVec};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
@@ -27,6 +27,122 @@ const BIND_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 /// Default geometry when a client opens a shell without a PTY request.
 const DEFAULT_COLS: u32 = 80;
 const DEFAULT_ROWS: u32 = 24;
+
+/// Tracks consecutive failed authentication attempts and enforces IP lockout.
+#[derive(Debug, Clone)]
+pub struct LockoutTracker {
+    max_attempts: usize,
+    lockout_duration: Duration,
+    entries: Arc<Mutex<HashMap<IpAddr, LockoutEntry>>>,
+}
+
+#[derive(Debug, Clone)]
+struct LockoutEntry {
+    consecutive_failures: usize,
+    locked_until: Option<Instant>,
+}
+
+impl Default for LockoutTracker {
+    fn default() -> Self {
+        Self::new(5, Duration::from_secs(900))
+    }
+}
+
+impl LockoutTracker {
+    pub fn new(max_attempts: usize, lockout_duration: Duration) -> Self {
+        Self {
+            max_attempts,
+            lockout_duration,
+            entries: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn max_attempts(&self) -> usize {
+        self.max_attempts
+    }
+
+    pub fn lockout_duration(&self) -> Duration {
+        self.lockout_duration
+    }
+
+    pub fn is_locked(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let mut map = match self.entries.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(entry) = map.get_mut(&ip) {
+            if let Some(until) = entry.locked_until {
+                if now < until {
+                    return true;
+                }
+                entry.locked_until = None;
+                entry.consecutive_failures = 0;
+            }
+        }
+        false
+    }
+
+    pub fn record_failure(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let mut map = match self.entries.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let entry = map.entry(ip).or_insert(LockoutEntry {
+            consecutive_failures: 0,
+            locked_until: None,
+        });
+
+        if let Some(until) = entry.locked_until {
+            if now < until {
+                return true;
+            }
+            entry.locked_until = None;
+            entry.consecutive_failures = 0;
+        }
+
+        entry.consecutive_failures += 1;
+        if entry.consecutive_failures >= self.max_attempts {
+            entry.locked_until = Some(now + self.lockout_duration);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn record_success(&self, ip: IpAddr) {
+        let mut map = match self.entries.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        map.remove(&ip);
+    }
+
+    pub fn failed_attempts(&self, ip: IpAddr) -> usize {
+        let map = match self.entries.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        map.get(&ip).map(|e| e.consecutive_failures).unwrap_or(0)
+    }
+
+    pub fn unlock(&self, ip: IpAddr) {
+        let mut map = match self.entries.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        map.remove(&ip);
+    }
+
+    pub fn reset(&self) {
+        let mut map = match self.entries.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        map.clear();
+    }
+}
 
 /// Rendered client-side when the denylist refuses a command line.
 fn refusal_text(reason: &str) -> Vec<u8> {
@@ -47,16 +163,36 @@ pub struct ClientHandler {
     channels: HashMap<ChannelId, ChannelState>,
     /// Geometry requested before the shell was spawned.
     pending_geometry: HashMap<ChannelId, (u32, u32)>,
+    peer_ip: IpAddr,
+    lockout: LockoutTracker,
 }
 
 impl ClientHandler {
     pub fn new(config: &AppConfig) -> Self {
+        Self::with_lockout(
+            config,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            LockoutTracker::default(),
+        )
+    }
+
+    pub fn with_lockout(config: &AppConfig, peer_ip: IpAddr, lockout: LockoutTracker) -> Self {
         Self {
             password: config.ssh_password.clone(),
             cwd: session_cwd(&config.unified_allowed_paths()),
             channels: HashMap::new(),
             pending_geometry: HashMap::new(),
+            peer_ip,
+            lockout,
         }
+    }
+
+    pub fn peer_ip(&self) -> IpAddr {
+        self.peer_ip
+    }
+
+    pub fn lockout(&self) -> &LockoutTracker {
+        &self.lockout
     }
 
     pub fn cwd(&self) -> &std::path::Path {
@@ -162,9 +298,18 @@ impl Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
+        if self.lockout.is_locked(self.peer_ip) {
+            return Ok(Auth::Reject {
+                proceed_with_methods: None,
+            });
+        }
+
         if self.password_matches(password) {
+            self.lockout.record_success(self.peer_ip);
             return Ok(Auth::Accept);
         }
+
+        self.lockout.record_failure(self.peer_ip);
         Ok(Auth::Reject {
             proceed_with_methods: None,
         })
@@ -348,13 +493,34 @@ fn non_zero(value: u32, fallback: u32) -> u32 {
 /// russh server factory: one handler per client connection.
 pub struct SshServer {
     config: AppConfig,
+    lockout: LockoutTracker,
+}
+
+impl SshServer {
+    pub fn new(config: AppConfig) -> Self {
+        Self {
+            config,
+            lockout: LockoutTracker::default(),
+        }
+    }
+
+    pub fn with_lockout(config: AppConfig, lockout: LockoutTracker) -> Self {
+        Self { config, lockout }
+    }
+
+    pub fn lockout(&self) -> &LockoutTracker {
+        &self.lockout
+    }
 }
 
 impl Server for SshServer {
     type Handler = ClientHandler;
 
-    fn new_client(&mut self, _peer_addr: Option<SocketAddr>) -> Self::Handler {
-        ClientHandler::new(&self.config)
+    fn new_client(&mut self, peer_addr: Option<SocketAddr>) -> Self::Handler {
+        let peer_ip = peer_addr
+            .map(|addr| addr.ip())
+            .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        ClientHandler::with_lockout(&self.config, peer_ip, self.lockout.clone())
     }
 }
 
@@ -399,10 +565,18 @@ fn server_config() -> Result<Arc<russh::server::Config>, String> {
 
 /// Serves connections until the listener is dropped.
 pub async fn serve(listener: TcpListener, config: AppConfig) -> Result<(), String> {
+    serve_with_lockout(listener, config, LockoutTracker::default()).await
+}
+
+pub async fn serve_with_lockout(
+    listener: TcpListener,
+    config: AppConfig,
+    lockout: LockoutTracker,
+) -> Result<(), String> {
     if let Ok(address) = listener.local_addr() {
         println!("SSH bridge listening on {address} (user root, PTY {SHELL_PROGRAM})");
     }
-    let mut server = SshServer { config };
+    let mut server = SshServer::with_lockout(config, lockout);
     let ssh_config = server_config()?;
     server
         .run_on_socket(ssh_config, &listener)
@@ -422,6 +596,7 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
 /// (toggle, port, password, allowed paths) while the process keeps running.
 pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
     let mut receiver = watcher.subscribe();
+    let lockout = LockoutTracker::default();
     loop {
         let config = receiver.borrow_and_update().clone();
         let listener = match bind_if_enabled(&config).await {
@@ -441,6 +616,7 @@ pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
             }
         };
 
+        let lockout_clone = lockout.clone();
         tokio::select! {
             changed = receiver.changed() => {
                 if changed.is_err() {
@@ -448,7 +624,7 @@ pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
                 }
                 // Dropping `serve` closes the listener before the next bind.
             }
-            result = serve(listener, config) => {
+            result = serve_with_lockout(listener, config, lockout_clone) => {
                 return result;
             }
         }

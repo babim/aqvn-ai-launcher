@@ -10,14 +10,17 @@ use crate::rfc::dispatch::{self, DispatchContext, DispatchError, RfcCall};
 use crate::rfc::sandbox::Sandbox;
 use axum::{
     body::Body,
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{header, HeaderValue, Method, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::any,
     Json, Router,
 };
 use serde_json::Value;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
 /// Route segment used in the method-not-allowed message.
@@ -29,20 +32,122 @@ const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 /// empty password fails closed before any socket exists.
 const BIND_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
+/// Sliding-window rate limiter per client IP.
+#[derive(Clone)]
+pub struct RateLimiter {
+    max_requests: usize,
+    window: Duration,
+    clients: Arc<Mutex<HashMap<IpAddr, VecDeque<Instant>>>>,
+}
+
+impl RateLimiter {
+    pub fn new(max_requests: usize, window: Duration) -> Self {
+        Self {
+            max_requests,
+            window,
+            clients: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn default_rfc() -> Self {
+        Self::new(60, Duration::from_secs(60))
+    }
+
+    pub fn max_requests(&self) -> usize {
+        self.max_requests
+    }
+
+    pub fn window(&self) -> Duration {
+        self.window
+    }
+
+    /// Checks if a request from `ip` is permitted within the sliding window.
+    /// Returns true if permitted (and records timestamp), false if throttled.
+    pub fn check_and_record(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let cutoff = now.checked_sub(self.window).unwrap_or(now);
+        let mut map = match self.clients.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let timestamps = map.entry(ip).or_default();
+        while let Some(&front) = timestamps.front() {
+            if front < cutoff {
+                timestamps.pop_front();
+            } else {
+                break;
+            }
+        }
+        if timestamps.len() >= self.max_requests {
+            return false;
+        }
+        timestamps.push_back(now);
+        true
+    }
+
+    pub fn reset(&self) {
+        let mut map = match self.clients.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        map.clear();
+    }
+}
+
+/// Extracts client IP address from socket ConnectInfo or standard HTTP headers.
+fn extract_client_ip(request: &Request<Body>) -> IpAddr {
+    if let Some(ConnectInfo(addr)) = request.extensions().get::<ConnectInfo<SocketAddr>>() {
+        return addr.ip();
+    }
+    if let Some(forwarded) = request
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(first) = forwarded.split(',').next() {
+            if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                return ip;
+            }
+        }
+    }
+    if let Some(real_ip) = request
+        .headers()
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Ok(ip) = real_ip.trim().parse::<IpAddr>() {
+            return ip;
+        }
+    }
+    IpAddr::V4(Ipv4Addr::LOCALHOST)
+}
+
 /// Per-generation server state, cloned per request.
 #[derive(Clone)]
 pub struct RfcState {
     password: String,
     context: DispatchContext,
+    rate_limiter: RateLimiter,
+}
+
+impl RfcState {
+    pub fn rate_limiter(&self) -> &RateLimiter {
+        &self.rate_limiter
+    }
 }
 
 pub fn build_state(config: &AppConfig) -> RfcState {
+    build_state_with_rate_limiter(config, RateLimiter::default_rfc())
+}
+
+pub fn build_state_with_rate_limiter(config: &AppConfig, rate_limiter: RateLimiter) -> RfcState {
     RfcState {
         password: config.rfc_password.clone(),
         context: DispatchContext {
             sandbox: Sandbox::from_allowed_paths(&config.unified_allowed_paths()),
             ssh_password: config.ssh_password.clone(),
         },
+        rate_limiter,
     }
 }
 
@@ -54,6 +159,14 @@ pub fn router(state: RfcState) -> Router {
 }
 
 async fn handle_rfc(State(state): State<RfcState>, request: Request<Body>) -> Response {
+    let client_ip = extract_client_ip(&request);
+    if !state.rate_limiter.check_and_record(client_ip) {
+        return text_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too Many Requests: rate limit exceeded (>60 req/min)",
+        );
+    }
+
     if request.method() != Method::POST {
         return html_error(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -178,7 +291,11 @@ pub async fn serve(listener: TcpListener, state: RfcState) -> std::io::Result<()
     if let Ok(address) = listener.local_addr() {
         println!("RFC server listening on http://{address}/api/rfc");
     }
-    axum::serve(listener, router(state)).await
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
 }
 
 /// Setup-hook entry point. Does nothing when the master toggle is off.
@@ -196,6 +313,7 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
 /// the process.
 pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
     let mut receiver = watcher.subscribe();
+    let rate_limiter = RateLimiter::default_rfc();
     loop {
         let config = receiver.borrow_and_update().clone();
         if !config.rfc_enabled {
@@ -217,7 +335,7 @@ pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
             }
         };
 
-        let state = build_state(&config);
+        let state = build_state_with_rate_limiter(&config, rate_limiter.clone());
         tokio::select! {
             changed = receiver.changed() => {
                 if changed.is_err() {

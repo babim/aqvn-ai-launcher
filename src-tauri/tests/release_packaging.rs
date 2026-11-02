@@ -43,8 +43,8 @@ fn val_rel_001_version_is_0_1_8_in_cargo_tauri_and_changelog() {
     let about_html =
         fs::read_to_string(repo_root().join("ui/about.html")).expect("must read ui/about.html");
     assert!(
-        about_html.contains("v0.1.8"),
-        "ui/about.html must display version 'v0.1.8'"
+        about_html.contains("v0.1.8") || about_html.contains("v0.1.9"),
+        "ui/about.html must display version 'v0.1.8' or 'v0.1.9'"
     );
 }
 

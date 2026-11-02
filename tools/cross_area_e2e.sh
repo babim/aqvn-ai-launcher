@@ -17,9 +17,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MISSION_DIR="${AQVN_CROSS_MISSION_DIR:-/home/babim/.factory/missions/c82a03df-dfc7-438f-b44b-9089dcc40a8f}"
+TMP="${AQVN_CROSS_TMP:-${TMPDIR:-/tmp}/aqvn-cross}"
+MISSION_DIR="${AQVN_CROSS_MISSION_DIR:-$TMP/mission}"
 EVIDENCE="$MISSION_DIR/evidence/cross-area-integration"
-TMP="${AQVN_CROSS_TMP:-/tmp/aqvn-cross}"
 RIG_DIR="$TMP/rig"
 SANDBOX="$TMP/workspace"
 DISPLAY_NUM="${AQVN_CROSS_DISPLAY:-:97}"

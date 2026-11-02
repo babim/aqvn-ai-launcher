@@ -2931,3 +2931,43 @@ describe('VAL-UI-004: Connection Diagnostics Modal and Network Recovery Status',
   });
 });
 
+describe('VAL-RES-007: Settings save button handler deduplication', () => {
+  test('VAL-RES-007: settings.js deduplicates save button handler and registers submit listener on form', () => {
+    const jsPath = new URL('../../ui/settings.js', import.meta.url);
+    const js = fs.readFileSync(jsPath, 'utf8');
+
+    assert.doesNotMatch(
+      js,
+      /saveBtn\.addEventListener\(\s*['"]click['"]\s*,\s*saveSettings\s*\)/,
+      'settings.js must not register duplicate click listener on saveBtn'
+    );
+    assert.match(
+      js,
+      /settingsForm\.addEventListener\(\s*['"]submit['"]\s*,\s*saveSettings\s*\)/,
+      'settings.js must register submit listener on settingsForm'
+    );
+  });
+
+  test('VAL-RES-007: tools/cross_area_e2e.sh defaults to TMPDIR without hardcoded user paths', () => {
+    const shPath = new URL('../cross_area_e2e.sh', import.meta.url);
+    const sh = fs.readFileSync(shPath, 'utf8');
+
+    assert.doesNotMatch(
+      sh,
+      /\/home\/babim/,
+      'cross_area_e2e.sh must not contain hardcoded user path /home/babim'
+    );
+    assert.doesNotMatch(
+      sh,
+      /\/home\/[a-zA-Z0-9_-]+/,
+      'cross_area_e2e.sh must not contain hardcoded /home/<user> paths'
+    );
+    assert.match(
+      sh,
+      /TMPDIR/,
+      'cross_area_e2e.sh must default temporary / mission directories using TMPDIR'
+    );
+  });
+});
+
+

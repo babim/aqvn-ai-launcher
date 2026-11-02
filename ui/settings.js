@@ -811,7 +811,6 @@
   }
 
   settingsForm.addEventListener('submit', saveSettings);
-  saveBtn.addEventListener('click', saveSettings);
   resetBtn.addEventListener('click', resetDefaults);
 
   window.addEventListener('keydown', (e) => {

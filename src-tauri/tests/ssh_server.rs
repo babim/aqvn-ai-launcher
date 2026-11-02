@@ -588,3 +588,73 @@ fn pty_shell_resizes_to_client_geometry() {
 
     let _ = std::fs::remove_dir_all(&temp);
 }
+
+// ---------------------------------------------------------------- VAL-RES-002
+
+#[test]
+fn val_res_002_ssh_exponential_backoff_constants() {
+    assert_eq!(ssh::server::INITIAL_BACKOFF, Duration::from_secs(1));
+    assert_eq!(ssh::server::MAX_BACKOFF, Duration::from_secs(10));
+    assert_eq!(ssh::server::BACKOFF_FACTOR, 2.0);
+
+    let next = ssh::server::compute_backoff(Duration::from_secs(1), 2.0, Duration::from_secs(10));
+    assert_eq!(next, Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn val_res_002_ssh_supervisor_auto_recovers_on_transient_socket_collision() {
+    let cwd = temp_dir("resilience-recovery");
+
+    // Occupy an ephemeral port
+    let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe");
+    let busy_port = probe.local_addr().expect("probe addr").port();
+
+    let config = base_config(busy_port, &cwd);
+    let watcher = ConfigWatcher::new(config);
+    let sup_watcher = watcher.clone();
+
+    // Spawn supervisor with fast backoff for the test
+    let supervisor = tokio::spawn(async move {
+        ssh::server::run_supervised_with_backoff(
+            sup_watcher,
+            Duration::from_millis(50),
+            Duration::from_millis(300),
+        )
+        .await
+    });
+
+    // Let the supervisor attempt to bind and fail
+    tokio::time::sleep(Duration::from_millis(120)).await;
+
+    // Verify supervisor did not exit!
+    assert!(
+        !supervisor.is_finished(),
+        "SSH supervisor must not terminate on transient socket collision"
+    );
+
+    // Release port
+    drop(probe);
+
+    // Wait for the supervisor to recover and start listening
+    wait_until_listening(busy_port).await;
+
+    // Verify we can connect and authenticate over SSH
+    let mut session = connect(busy_port).await;
+    let mut channel = open_shell(&mut session, 80, 24).await;
+    let out = run_command(&mut channel, "echo ssh-recovered", "ssh-recovered").await;
+    assert!(
+        out.contains("ssh-recovered"),
+        "SSH bridge must serve after recovery"
+    );
+
+    drop(channel);
+    drop(session);
+
+    assert!(
+        !supervisor.is_finished(),
+        "supervisor must remain active after recovering from socket error"
+    );
+
+    supervisor.abort();
+    let _ = std::fs::remove_dir_all(&cwd);
+}

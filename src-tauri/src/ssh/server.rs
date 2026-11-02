@@ -604,25 +604,61 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
     serve(listener, config).await
 }
 
+/// Initial exponential backoff delay for supervisor auto-recovery.
+pub const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+/// Maximum exponential backoff delay for supervisor auto-recovery.
+pub const MAX_BACKOFF: Duration = Duration::from_secs(10);
+/// Exponential backoff growth factor.
+pub const BACKOFF_FACTOR: f64 = 2.0;
+
+/// Computes next backoff step with multiplier capped at `max`.
+pub fn compute_backoff(current: Duration, factor: f64, max: Duration) -> Duration {
+    let next_millis = (current.as_millis() as f64 * factor).round() as u64;
+    Duration::from_millis(next_millis).min(max)
+}
+
 /// Long-running supervisor: rebinds whenever the configuration changes
 /// (toggle, port, password, allowed paths) while the process keeps running.
+/// On transient listener or runtime socket errors, backs off exponentially
+/// (1s..10s) and retries without exiting the background task.
 pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
+    run_supervised_with_backoff(watcher, INITIAL_BACKOFF, MAX_BACKOFF).await
+}
+
+pub async fn run_supervised_with_backoff(
+    watcher: ConfigWatcher,
+    initial_backoff: Duration,
+    max_backoff: Duration,
+) -> Result<(), String> {
     let mut receiver = watcher.subscribe();
     let lockout = LockoutTracker::default();
+    let mut current_backoff = initial_backoff;
+
     loop {
         let config = receiver.borrow_and_update().clone();
         let listener = match bind_if_enabled(&config).await {
-            Ok(Some(listener)) => listener,
+            Ok(Some(listener)) => {
+                current_backoff = initial_backoff;
+                listener
+            }
             Ok(None) => {
+                current_backoff = initial_backoff;
                 if receiver.changed().await.is_err() {
                     return Ok(());
                 }
                 continue;
             }
             Err(err) => {
-                eprintln!("{err}");
-                if receiver.changed().await.is_err() {
-                    return Ok(());
+                eprintln!("SSH supervisor bind error: {err}; backing off for {current_backoff:?}");
+                tokio::select! {
+                    changed = receiver.changed() => {
+                        if changed.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    _ = tokio::time::sleep(current_backoff) => {
+                        current_backoff = compute_backoff(current_backoff, BACKOFF_FACTOR, max_backoff);
+                    }
                 }
                 continue;
             }
@@ -637,7 +673,21 @@ pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
                 // Dropping `serve` closes the listener before the next bind.
             }
             result = serve_with_lockout(listener, config, lockout_clone) => {
-                return result;
+                if let Err(err) = result {
+                    eprintln!("SSH server runtime socket error: {err}; backing off for {current_backoff:?}");
+                    tokio::select! {
+                        changed = receiver.changed() => {
+                            if changed.is_err() {
+                                return Ok(());
+                            }
+                        }
+                        _ = tokio::time::sleep(current_backoff) => {
+                            current_backoff = compute_backoff(current_backoff, BACKOFF_FACTOR, max_backoff);
+                        }
+                    }
+                } else {
+                    current_backoff = initial_backoff;
+                }
             }
         }
     }

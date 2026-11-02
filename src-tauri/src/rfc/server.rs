@@ -323,15 +323,40 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
         .map_err(|err| format!("RFC server error: {err}"))
 }
 
+/// Initial exponential backoff delay for supervisor auto-recovery.
+pub const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+/// Maximum exponential backoff delay for supervisor auto-recovery.
+pub const MAX_BACKOFF: Duration = Duration::from_secs(10);
+/// Exponential backoff growth factor.
+pub const BACKOFF_FACTOR: f64 = 2.0;
+
+/// Computes next backoff step with multiplier capped at `max`.
+pub fn compute_backoff(current: Duration, factor: f64, max: Duration) -> Duration {
+    let next_millis = (current.as_millis() as f64 * factor).round() as u64;
+    Duration::from_millis(next_millis).min(max)
+}
+
 /// Long-running supervisor: restarts the listener whenever the configuration
 /// changes (password, allowed paths, port, master toggle) without restarting
-/// the process.
+/// the process. On transient socket or listener errors, backs off exponentially
+/// and retries without exiting the background task.
 pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
+    run_supervised_with_backoff(watcher, INITIAL_BACKOFF, MAX_BACKOFF).await
+}
+
+pub async fn run_supervised_with_backoff(
+    watcher: ConfigWatcher,
+    initial_backoff: Duration,
+    max_backoff: Duration,
+) -> Result<(), String> {
     let mut receiver = watcher.subscribe();
     let rate_limiter = RateLimiter::default_rfc();
+    let mut current_backoff = initial_backoff;
+
     loop {
         let config = receiver.borrow_and_update().clone();
         if !config.rfc_enabled {
+            current_backoff = initial_backoff;
             if receiver.changed().await.is_err() {
                 return Ok(());
             }
@@ -339,12 +364,25 @@ pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
         }
 
         let listener = match bind_if_enabled(&config).await {
-            Ok(Some(listener)) => listener,
-            Ok(None) => continue,
+            Ok(Some(listener)) => {
+                current_backoff = initial_backoff;
+                listener
+            }
+            Ok(None) => {
+                current_backoff = initial_backoff;
+                continue;
+            }
             Err(err) => {
-                eprintln!("{err}");
-                if receiver.changed().await.is_err() {
-                    return Ok(());
+                eprintln!("RFC supervisor bind error: {err}; backing off for {current_backoff:?}");
+                tokio::select! {
+                    changed = receiver.changed() => {
+                        if changed.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    _ = tokio::time::sleep(current_backoff) => {
+                        current_backoff = compute_backoff(current_backoff, BACKOFF_FACTOR, max_backoff);
+                    }
                 }
                 continue;
             }
@@ -359,7 +397,21 @@ pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
                 // Dropping `serve` closes the listener before the next bind.
             }
             result = serve(listener, state) => {
-                return result.map_err(|err| format!("RFC server error: {err}"));
+                if let Err(err) = result {
+                    eprintln!("RFC server runtime socket error: {err}; backing off for {current_backoff:?}");
+                    tokio::select! {
+                        changed = receiver.changed() => {
+                            if changed.is_err() {
+                                return Ok(());
+                            }
+                        }
+                        _ = tokio::time::sleep(current_backoff) => {
+                            current_backoff = compute_backoff(current_backoff, BACKOFF_FACTOR, max_backoff);
+                        }
+                    }
+                } else {
+                    current_backoff = initial_backoff;
+                }
             }
         }
     }

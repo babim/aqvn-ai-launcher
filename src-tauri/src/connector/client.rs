@@ -25,6 +25,45 @@ use tokio_tungstenite::tungstenite::Message;
 
 pub const DEFAULT_PING_INTERVAL_SECS: u64 = 25;
 pub const DEFAULT_RECONNECT_DELAY_MS: u64 = 500;
+pub const MIN_RECONNECT_DELAY_MS: u64 = 500;
+pub const MAX_RECONNECT_DELAY_MS: u64 = 15000;
+pub const RECONNECT_JITTER_MS: u64 = 500;
+
+/// Deterministic backoff computation with injected jitter:
+/// `delay_{n+1} = min(max_delay, delay_n * 1.5 + jitter)`
+/// If current_delay_ms is 0, returns `min_delay_ms + jitter` (initial retry attempt).
+pub fn compute_jitter_backoff(
+    current_delay_ms: u64,
+    min_delay_ms: u64,
+    max_delay_ms: u64,
+    jitter_ms: u64,
+) -> u64 {
+    let max_delay = max_delay_ms.max(min_delay_ms);
+    let next = if current_delay_ms == 0 {
+        min_delay_ms.saturating_add(jitter_ms)
+    } else {
+        let base = current_delay_ms.max(min_delay_ms);
+        ((base as f64 * 1.5) as u64).saturating_add(jitter_ms)
+    };
+    next.clamp(min_delay_ms, max_delay)
+}
+
+/// Computes the next reconnect delay using decorrelated jitter exponential backoff:
+/// `delay_{n+1} = min(max_delay, delay_n * 1.5 + rand(0, min(500, min_delay)))`
+pub fn next_decorrelated_jitter_delay(
+    current_delay_ms: u64,
+    min_delay_ms: u64,
+    max_delay_ms: u64,
+) -> u64 {
+    use rand::Rng;
+    let jitter_cap = RECONNECT_JITTER_MS.min(min_delay_ms);
+    let jitter = if jitter_cap > 0 {
+        rand::thread_rng().gen_range(0..=jitter_cap)
+    } else {
+        0
+    };
+    compute_jitter_backoff(current_delay_ms, min_delay_ms, max_delay_ms, jitter)
+}
 
 /// Resolves the upstream Socket.IO WebSocket endpoint (`/socket.io/?EIO=4&transport=websocket`).
 pub fn build_ws_url(base_url: &str) -> Result<String, String> {
@@ -270,11 +309,14 @@ impl GatewayClient {
         handshake_tx: watch::Sender<bool>,
         mut shutdown_rx: watch::Receiver<bool>,
     ) {
+        let mut current_delay_ms = 0u64;
+
         loop {
             if *shutdown_rx.borrow() {
                 break;
             }
 
+            let serve_start = tokio::time::Instant::now();
             let _ = self
                 .connect_and_serve(&connected, &handshake_tx, &mut shutdown_rx)
                 .await;
@@ -288,13 +330,23 @@ impl GatewayClient {
                 break;
             }
 
+            // Reset backoff baseline if connection was healthy/established for at least 15s
+            if serve_start.elapsed() >= Duration::from_secs(15) {
+                current_delay_ms = 0;
+            }
+
+            let min_delay = self.config.reconnect_delay_ms.max(1);
+            let max_delay = MAX_RECONNECT_DELAY_MS.max(min_delay);
+            let next_delay = next_decorrelated_jitter_delay(current_delay_ms, min_delay, max_delay);
+            current_delay_ms = next_delay;
+
             tokio::select! {
                 _ = shutdown_rx.changed() => {
                     if *shutdown_rx.borrow() {
                         break;
                     }
                 }
-                _ = tokio::time::sleep(Duration::from_millis(self.config.reconnect_delay_ms)) => {}
+                _ = tokio::time::sleep(Duration::from_millis(next_delay)) => {}
             }
         }
     }

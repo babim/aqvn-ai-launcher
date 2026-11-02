@@ -37,6 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Web Audio Chime Volume & Tone Customization**: Added `task_chime_volume` (0.0..=1.0) and `task_chime_tone` (classic, bell, beep, subtle) in `ui/settings.html`, `ui/settings.js`, and `ui/container.js` with live audio preview and Web Audio synthesis (`VAL-UX-002`).
   - **System Tray Server Profiles Submenu & Workspace Launcher**: Added "Server Profiles" submenu with dynamic checkmark selection switching active server without restarting, and "Open Workspace Folder" launcher opening the system file manager at `workspace_path` (`VAL-UX-003`).
   - **Comprehensive Zero-Regression Verification**: Verified all 220+ Rust unit and integration tests and 80 Node.js test cases with zero regressions, strict clippy with warnings denied, and rustfmt check passing (`VAL-R4-CROSS-001`).
+- **Remote Control & Operator Experience Polish**:
+  - **PTY Child Exit Code Tracking**: Captured child process exit status on shell termination rather than hardcoded 0.
+  - **Fail-Closed CWD Sandbox Enforcement**: Denied execution and returned error reply when requested working directory escapes sandbox root.
+  - **Windows PowerShell Error Handling**: Combined `$LASTEXITCODE` and `$?` in `format_pty_command_line` to reliably capture native cmdlet errors.
+  - **Multi-Root Remote Tree Snapshot**: Updated `generate_remote_tree_update` to traverse all configured canonical roots.
+  - **File Patch SHA-256 Verification & Rollback**: Added `expected_sha256` validation and automatic rollback in `op_patch` on checksum mismatch.
+  - **Stale Browser Temp Profile Pruning**: Added startup cleanup of temporary CDP user-data-dir profiles (`aqvn-cdp-profile-*`) in `/tmp`.
+  - **Rate Limiter & Lockout Cache Sweeper**: Automatically pruned expired IP entries in RFC RateLimiter and SSH LockoutTracker.
+  - **Double-Zoom Mitigation & Panel Hotkey Relay**: Stopped zoom key event propagation and permitted `Alt+S` and `Alt+C` shortcut relay from child iframes.
+  - **Connection Diagnostics Reconnect & Badge Unification**: Added `reconnect_network` IPC command, unified topbar status badge, and wired `aqvn:reconnect` to Socket.IO.
+  - **Desktop Notification Toggle**: Added user-configurable `task_notification_enabled` setting with toggle switch in Settings.
+  - **Diagnostics Modal Focus Trap**: Enforced keyboard `Tab` focus trap within modal dialogs.
+  - **macOS Mouse Scroll Implementation**: Implemented native macOS wheel scrolling via AppleScript System Events.
 
 ## [0.1.8] - 2026-10-31
 

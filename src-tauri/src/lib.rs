@@ -143,6 +143,7 @@ pub fn run() {
             let (proxy_listener, proxy_state, proxy_info) =
                 tauri::async_runtime::block_on(proxy::server::bind_with_config(&initial_config))?;
             app.manage(proxy_info.clone());
+            app.manage(proxy_state.clone());
             app.manage(proxy_state.cache().clone());
 
             let serve_state = proxy_state.clone();
@@ -178,9 +179,17 @@ pub fn run() {
                 });
 
                 // Outbound Gateway Hub client: connects to upstream /ws
+                let (gateway_manager, rx_reconnect) = connector::client::GatewayManager::new();
+                app.manage(gateway_manager.clone());
                 let gateway_supervisor = watcher.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(err) = connector::client::run_supervised(gateway_supervisor).await {
+                    if let Err(err) = connector::client::run_supervised_with_reconnect(
+                        gateway_supervisor,
+                        gateway_manager,
+                        rx_reconnect,
+                    )
+                    .await
+                    {
                         eprintln!("Gateway supervisor error: {err}");
                     }
                 });

@@ -9,7 +9,7 @@ pub mod client;
 pub mod handlers;
 pub mod protocol;
 
-pub use client::{GatewayClient, GatewayConfig, GatewayHandle};
+pub use client::{GatewayClient, GatewayConfig, GatewayHandle, GatewayManager};
 pub use protocol::{
     AuthPayload, ConnectorBrowserOp, ConnectorBrowserOpResult, ConnectorGatewayControl,
     ConnectorGatewayControlResult, ConnectorHello, ConnectorHelloAck, ConnectorRemoteTreeUpdate,

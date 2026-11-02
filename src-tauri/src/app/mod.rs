@@ -170,6 +170,19 @@ pub async fn clear_disk_cache(app: AppHandle) -> Result<bool, String> {
 
 /// Tauri IPC command to trigger a network reconnect.
 #[tauri::command]
-pub fn reconnect_network() -> Result<(), String> {
+pub async fn reconnect_network<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Some(gw_mgr) = app.try_state::<crate::connector::client::GatewayManager>() {
+            let _ = gw_mgr.abort_and_reconnect().await;
+        }
+    }
+
+    if let Some(proxy_state) = app.try_state::<crate::proxy::server::ProxyState>() {
+        proxy_state.refresh().await;
+    } else if let Some(cache) = app.try_state::<std::sync::Arc<crate::proxy::cache::AssetCache>>() {
+        cache.clear().await;
+    }
+
     Ok(())
 }

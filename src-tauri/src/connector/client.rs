@@ -265,6 +265,18 @@ impl GatewayHandle {
     pub fn stop(&self) {
         let _ = self.shutdown_tx.send(true);
     }
+
+    pub fn new_for_test(
+        connected: Arc<AtomicBool>,
+        handshake_rx: watch::Receiver<bool>,
+        shutdown_tx: watch::Sender<bool>,
+    ) -> Self {
+        Self {
+            connected,
+            handshake_rx,
+            shutdown_tx,
+        }
+    }
 }
 
 /// Outbound gateway client.
@@ -301,6 +313,19 @@ impl GatewayClient {
         });
 
         (handle, join_handle)
+    }
+
+    /// Spawns the client connection, returns the handle and an AbortHandle to cancel the active task.
+    pub fn start_with_abort_handle(
+        &self,
+    ) -> (
+        GatewayHandle,
+        tokio::task::AbortHandle,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (handle, join_handle) = self.start();
+        let abort_handle = join_handle.abort_handle();
+        (handle, abort_handle, join_handle)
     }
 
     async fn run_loop(
@@ -794,15 +819,96 @@ impl GatewayClient {
     }
 }
 
-/// Supervisor running in background, watching configuration changes.
+/// Supervisor running in background, watching configuration changes and reconnect signals.
 pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
+    let (manager, rx_reconnect) = GatewayManager::new();
+    run_supervised_with_reconnect(watcher, manager, rx_reconnect).await
+}
+
+/// Active session tracking for Gateway supervisor with explicit abort and reconnect capability.
+#[derive(Clone)]
+pub struct GatewayManager {
+    reconnect_tx: tokio::sync::mpsc::UnboundedSender<()>,
+    active_handle: Arc<tokio::sync::Mutex<Option<GatewayHandle>>>,
+    active_abort: Arc<tokio::sync::Mutex<Option<tokio::task::AbortHandle>>>,
+    reconnect_counter: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl GatewayManager {
+    pub fn new() -> (Self, tokio::sync::mpsc::UnboundedReceiver<()>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (
+            Self {
+                reconnect_tx: tx,
+                active_handle: Arc::new(tokio::sync::Mutex::new(None)),
+                active_abort: Arc::new(tokio::sync::Mutex::new(None)),
+                reconnect_counter: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            },
+            rx,
+        )
+    }
+
+    /// Triggers an immediate abort of the active gateway session task and triggers reconnect.
+    pub async fn abort_and_reconnect(&self) -> Result<(), String> {
+        let mut abort_guard = self.active_abort.lock().await;
+        if let Some(abort_handle) = abort_guard.take() {
+            abort_handle.abort();
+        }
+        let mut handle_guard = self.active_handle.lock().await;
+        if let Some(handle) = handle_guard.take() {
+            handle.stop();
+        }
+        self.reconnect_counter.fetch_add(1, Ordering::SeqCst);
+        let _ = self.reconnect_tx.send(());
+        Ok(())
+    }
+
+    pub fn reconnect_count(&self) -> usize {
+        self.reconnect_counter.load(Ordering::SeqCst)
+    }
+
+    pub async fn active_handle(&self) -> Option<GatewayHandle> {
+        self.active_handle.lock().await.clone()
+    }
+
+    pub async fn set_session(&self, handle: GatewayHandle, abort: tokio::task::AbortHandle) {
+        let mut abort_guard = self.active_abort.lock().await;
+        *abort_guard = Some(abort);
+        let mut handle_guard = self.active_handle.lock().await;
+        *handle_guard = Some(handle);
+    }
+
+    pub async fn clear_session(&self) {
+        let mut abort_guard = self.active_abort.lock().await;
+        *abort_guard = None;
+        let mut handle_guard = self.active_handle.lock().await;
+        *handle_guard = None;
+    }
+
+    pub fn reconnect_tx(&self) -> tokio::sync::mpsc::UnboundedSender<()> {
+        self.reconnect_tx.clone()
+    }
+}
+
+/// Supervisor running in background, watching configuration changes and handling explicit reconnect triggers.
+pub async fn run_supervised_with_reconnect(
+    watcher: ConfigWatcher,
+    manager: GatewayManager,
+    mut rx_reconnect: tokio::sync::mpsc::UnboundedReceiver<()>,
+) -> Result<(), String> {
     let mut receiver = watcher.subscribe();
-    let mut current: Option<(GatewayHandle, tokio::task::JoinHandle<()>)> = None;
+    let mut current: Option<(
+        GatewayHandle,
+        tokio::task::AbortHandle,
+        tokio::task::JoinHandle<()>,
+    )> = None;
 
     loop {
         let app_config = receiver.borrow_and_update().clone();
         crate::connector::handlers::files::sync_from_app_config(&app_config);
-        if let Some((handle, join_handle)) = current.take() {
+        if let Some((handle, abort_handle, join_handle)) = current.take() {
+            manager.clear_session().await;
+            abort_handle.abort();
             handle.stop();
             let _ = join_handle.await;
         }
@@ -810,15 +916,41 @@ pub async fn run_supervised(watcher: ConfigWatcher) -> Result<(), String> {
         let config = GatewayConfig::from_app_config(&app_config);
         if config.enabled {
             let client = GatewayClient::new(config);
-            current = Some(client.start());
+            let (handle, abort_handle, join_handle) = client.start_with_abort_handle();
+            manager
+                .set_session(handle.clone(), abort_handle.clone())
+                .await;
+            current = Some((handle, abort_handle, join_handle));
         }
 
-        if receiver.changed().await.is_err() {
-            if let Some((handle, join_handle)) = current.take() {
-                handle.stop();
-                let _ = join_handle.await;
+        tokio::select! {
+            changed = receiver.changed() => {
+                if changed.is_err() {
+                    if let Some((handle, abort_handle, join_handle)) = current.take() {
+                        manager.clear_session().await;
+                        abort_handle.abort();
+                        handle.stop();
+                        let _ = join_handle.await;
+                    }
+                    return Ok(());
+                }
             }
-            return Ok(());
+            Some(()) = rx_reconnect.recv() => {
+                // Abort and restart active outbound gateway client session immediately
+                if let Some((handle, abort_handle, join_handle)) = current.take() {
+                    manager.clear_session().await;
+                    abort_handle.abort();
+                    handle.stop();
+                    let _ = join_handle.await;
+                }
+                let config = GatewayConfig::from_app_config(&app_config);
+                if config.enabled {
+                    let client = GatewayClient::new(config);
+                    let (handle, abort_handle, join_handle) = client.start_with_abort_handle();
+                    manager.set_session(handle.clone(), abort_handle.clone()).await;
+                    current = Some((handle, abort_handle, join_handle));
+                }
+            }
         }
     }
 }

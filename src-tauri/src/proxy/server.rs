@@ -96,6 +96,13 @@ impl ProxyState {
     pub async fn replace(&self, upstream: Upstream) {
         *self.upstream.write().await = Arc::new(upstream);
     }
+
+    /// Refreshes the proxy state: resets cookie jar and clears cache.
+    pub async fn refresh(&self) {
+        self.cache.clear().await;
+        let up = self.upstream.read().await.clone();
+        up.reset_jar().await;
+    }
 }
 
 /// Binds loopback on an ephemeral port (port 0) directly without checking fixed port range.

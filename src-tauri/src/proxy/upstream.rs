@@ -382,6 +382,13 @@ impl Upstream {
         self.cookie_path.as_deref()
     }
 
+    /// Clears all cookies, runtime id, and CSRF token in memory and persists the empty jar.
+    pub async fn reset_jar(&self) {
+        let mut jar = self.jar.lock().await;
+        jar.invalidate();
+        self.persist_jar(&jar);
+    }
+
     fn persist_jar(&self, jar: &CookieJar) {
         if let Some(path) = &self.cookie_path {
             if let Err(err) = jar.save_to_file(path) {

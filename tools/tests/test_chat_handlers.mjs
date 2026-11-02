@@ -106,7 +106,7 @@ __harness__.exports = (function () {
     'setConnection', 'sendMessage', 'queueOutbox', 'readOutbox',
     'flushOutbox', 'applyZoom', 'readZoom', 'clampZoom', 'hardRefresh',
     'reloadCanvas', 'writeOutbox', 'OUTBOX_MAX_ENTRIES', 'OUTBOX_MAX_BYTES',
-    'showChat'
+    'showChat', 'cycleTheme', 'applyTheme', 'readTheme', 'THEMES'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -156,9 +156,11 @@ __harness__.exports = (function () {
   };
 
   const docListeners = {};
+  const docElement = createElementMock('html');
   const documentMock = {
     title: '',
     readyState: 'loading',
+    documentElement: docElement,
     body: { classList: createClassList(), style: {} },
     getElementById: getEl,
     createElement: () => createElementMock('el'),
@@ -233,10 +235,11 @@ __harness__.exports = (function () {
   const dom = context.__harness__.exports.dom;
   [
     'connection', 'chatError', 'sessionNotice', 'loginView', 'chatView',
-    'password', 'username', 'input', 'status', 'stop'
+    'password', 'username', 'input', 'status', 'stop', 'theme-toggle-btn'
   ].forEach((id) => {
     dom[id] = getEl(id);
   });
+  dom.themeToggleBtn = getEl('theme-toggle-btn');
 
   return {
     exports: context.__harness__.exports,
@@ -2969,5 +2972,97 @@ describe('VAL-RES-007: Settings save button handler deduplication', () => {
     );
   });
 });
+
+describe('VAL-THEME-001 & VAL-THEME-002: 4-Theme engine and persistence', () => {
+  test('VAL-THEME-001: ui/chat.css defines 4 themes with distinct OKLCH palettes', () => {
+    const cssPath = new URL('../../ui/chat.css', import.meta.url);
+    const css = fs.readFileSync(cssPath, 'utf8');
+
+    assert.match(css, /:root|\[data-theme=["']aqvn-dark["']\]/, 'CSS must support aqvn-dark');
+    assert.match(css, /\[data-theme=["']oled-black["']\]/, 'CSS must support oled-black');
+    assert.match(css, /\[data-theme=["']cyberpunk-terminal["']\]/, 'CSS must support cyberpunk-terminal');
+    assert.match(css, /\[data-theme=["']clean-studio-light["']\]/, 'CSS must support clean-studio-light');
+    assert.match(css, /oklch\(/, 'CSS must use OKLCH color palettes');
+    assert.match(css, /\[data-theme=["']clean-studio-light["']\][^{]*\{[^}]*color-scheme:\s*light/i, 'clean-studio-light must declare light color-scheme');
+  });
+
+  test('VAL-THEME-001: ui/index.html exposes topbar theme toggle button', () => {
+    const htmlPath = new URL('../../ui/index.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /id="theme-toggle-btn"/, 'ui/index.html must expose #theme-toggle-btn in topbar');
+  });
+
+  test('VAL-THEME-001: clicking topbar theme toggle cycles through all 4 themes', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { exports, document } = harness;
+    const dom = exports.dom;
+
+    assert.ok(dom.themeToggleBtn, 'dom.themeToggleBtn must exist');
+    const initialTheme = document.documentElement.getAttribute('data-theme') || 'aqvn-dark';
+    assert.equal(initialTheme, 'aqvn-dark', 'Initial theme must be aqvn-dark');
+
+    // 1st click -> oled-black
+    dom.themeToggleBtn.dispatch('click', {});
+    assert.equal(document.documentElement.getAttribute('data-theme'), 'oled-black');
+    assert.equal(harness.store['aqvn_theme'], 'oled-black');
+
+    // 2nd click -> cyberpunk-terminal
+    dom.themeToggleBtn.dispatch('click', {});
+    assert.equal(document.documentElement.getAttribute('data-theme'), 'cyberpunk-terminal');
+    assert.equal(harness.store['aqvn_theme'], 'cyberpunk-terminal');
+
+    // 3rd click -> clean-studio-light
+    dom.themeToggleBtn.dispatch('click', {});
+    assert.equal(document.documentElement.getAttribute('data-theme'), 'clean-studio-light');
+    assert.equal(harness.store['aqvn_theme'], 'clean-studio-light');
+
+    // 4th click -> wraps back to aqvn-dark
+    dom.themeToggleBtn.dispatch('click', {});
+    assert.equal(document.documentElement.getAttribute('data-theme'), 'aqvn-dark');
+    assert.equal(harness.store['aqvn_theme'], 'aqvn-dark');
+  });
+
+  test('VAL-THEME-001: ui/settings.html exposes theme dropdown in General section', () => {
+    const htmlPath = new URL('../../ui/settings.html', import.meta.url);
+    const html = fs.readFileSync(htmlPath, 'utf8');
+
+    assert.match(html, /id="app-theme"/, 'ui/settings.html must expose #app-theme');
+    assert.match(html, /value="aqvn-dark"/, 'ui/settings.html options must include aqvn-dark');
+    assert.match(html, /value="oled-black"/, 'ui/settings.html options must include oled-black');
+    assert.match(html, /value="cyberpunk-terminal"/, 'ui/settings.html options must include cyberpunk-terminal');
+    assert.match(html, /value="clean-studio-light"/, 'ui/settings.html options must include clean-studio-light');
+  });
+
+  test('VAL-THEME-002: theme choice persists in settings.json and localStorage across reloads', async () => {
+    const jsPath = new URL('../../ui/settings.js', import.meta.url);
+    const js = fs.readFileSync(jsPath, 'utf8');
+
+    assert.match(js, /app_theme/, 'settings.js must handle app_theme setting');
+    assert.match(js, /aqvn_theme/, 'settings.js must persist aqvn_theme to localStorage');
+
+    const harness = createHarness();
+    harness.store['aqvn_theme'] = 'cyberpunk-terminal';
+    harness.exports.init();
+    assert.equal(
+      harness.document.documentElement.getAttribute('data-theme'),
+      'cyberpunk-terminal',
+      'chat.js must restore persisted theme on init'
+    );
+  });
+
+  test('VAL-THEME-002: index.html and settings.html restore theme in head to eliminate flicker', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    const settingsHtml = fs.readFileSync(new URL('../../ui/settings.html', import.meta.url), 'utf8');
+
+    const headIndex = indexHtml.slice(0, indexHtml.indexOf('</head>'));
+    const headSettings = settingsHtml.slice(0, settingsHtml.indexOf('</head>'));
+
+    assert.match(headIndex, /aqvn_theme.*data-theme/s, 'index.html head must apply theme synchronously');
+    assert.match(headSettings, /aqvn_theme.*data-theme/s, 'settings.html head must apply theme synchronously');
+  });
+});
+
 
 

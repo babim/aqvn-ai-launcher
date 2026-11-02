@@ -1343,6 +1343,49 @@
   }
 
 
+  var THEMES = ['aqvn-dark', 'oled-black', 'cyberpunk-terminal', 'clean-studio-light'];
+  var THEME_KEY = 'aqvn_theme';
+
+  function readTheme() {
+    try {
+      var stored = window.localStorage.getItem(THEME_KEY);
+      if (stored && THEMES.indexOf(stored) !== -1) {
+        return stored;
+      }
+    } catch (err) {}
+    return THEMES[0];
+  }
+
+  function applyTheme(theme) {
+    if (THEMES.indexOf(theme) === -1) {
+      theme = THEMES[0];
+    }
+    state.theme = theme;
+    if (document.documentElement) {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+    try {
+      window.localStorage.setItem(THEME_KEY, theme);
+    } catch (err) {}
+    if (window.bridge && typeof window.bridge.getStore === 'function') {
+      window.bridge.getStore('settings.json').then(function (store) {
+        if (store) {
+          store.set('app_theme', theme).then(function () {
+            if (typeof store.save === 'function') store.save();
+          }).catch(function () {});
+        }
+      }).catch(function () {});
+    }
+    return theme;
+  }
+
+  function cycleTheme() {
+    var cur = state.theme || readTheme();
+    var idx = THEMES.indexOf(cur);
+    var next = THEMES[(idx + 1) % THEMES.length];
+    return applyTheme(next);
+  }
+
   function renderSidebarServers() {
     if (!dom.sidebarServerSelect) {
       return;
@@ -1371,9 +1414,12 @@
     dom.closeCanvasBtn = byId('close-canvas-btn');
     dom.sidebarServerSelect = byId('sidebar-server-select');
     dom.hardRefreshBtn = byId('hard-refresh-btn');
+    dom.themeToggleBtn = byId('theme-toggle-btn');
 
     state.sidebarWidth = SIDEBAR_DEFAULT;
     state.canvasWidth = CANVAS_DEFAULT;
+
+    applyTheme(readTheme());
 
     setSidebarCollapsed(readCollapsed(SIDEBAR_KEY));
     setCanvasCollapsed(readCollapsed(CANVAS_KEY));
@@ -1390,6 +1436,11 @@
     if (dom.closeCanvasBtn) {
       dom.closeCanvasBtn.addEventListener('click', function () {
         setCanvasCollapsed(true);
+      });
+    }
+    if (dom.themeToggleBtn) {
+      dom.themeToggleBtn.addEventListener('click', function () {
+        cycleTheme();
       });
     }
     if (dom.sidebarServerSelect) {
@@ -1715,6 +1766,8 @@
           if (u) state.serverUrl = u;
           var p = await store.get('server_profiles');
           if (Array.isArray(p) && p.length > 0) state.serverProfiles = p;
+          var t = await store.get('app_theme');
+          if (t) applyTheme(t);
         }
       } catch (err) {}
       if (dom.serverUrl) dom.serverUrl.value = state.serverUrl;

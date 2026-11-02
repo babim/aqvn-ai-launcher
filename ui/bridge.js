@@ -84,6 +84,13 @@
           } catch (e) {}
           return 'classic';
         }
+        if (key === 'app_theme') {
+          try {
+            const raw = localStorage.getItem('aqvn_theme');
+            if (raw) return raw;
+          } catch (e) {}
+          return 'aqvn-dark';
+        }
       }
       return undefined;
     }
@@ -106,6 +113,9 @@
           }
           if (key === 'task_chime_tone') {
             localStorage.setItem('aqvn_task_chime_tone', String(value));
+          }
+          if (key === 'app_theme') {
+            localStorage.setItem('aqvn_theme', String(value));
           }
         } catch (e) {}
       }

@@ -7,6 +7,12 @@
     <script>
       // Distinct title proves the Rust sync fires per navigation, not once.
       document.title = "AQVN Workspace — Settings";
+      (function() {
+        try {
+          var t = localStorage.getItem('aqvn_theme') || 'aqvn-dark';
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {}
+      })();
     </script>
     <style>
       :root {
@@ -337,6 +343,25 @@
               </select>
               <div class="help-text" style="margin-top: 0;" data-i18n="language_help">
                 Select interface language / Chọn ngôn ngữ hiển thị giao diện.
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 18px;">
+            <label for="app-theme" data-i18n="theme_label">Color Theme / Giao diện màu sắc</label>
+            <div style="display: flex; gap: 12px; align-items: center; margin-top: 6px;">
+              <select
+                id="app-theme"
+                name="app_theme"
+                style="padding: 10px 14px; border: 1px solid #1e2f45; border-radius: 8px; background: #070d16; color: #e6edf7; font: inherit; font-size: 0.9rem; cursor: pointer; min-width: 160px;"
+              >
+                <option value="aqvn-dark">AQVN Dark (Default)</option>
+                <option value="oled-black">OLED Black</option>
+                <option value="cyberpunk-terminal">Cyberpunk Terminal</option>
+                <option value="clean-studio-light">Clean Studio Light</option>
+              </select>
+              <div class="help-text" style="margin-top: 0;" data-i18n="theme_help">
+                Select color palette / Chọn bảng màu chủ đạo cho giao diện.
               </div>
             </div>
           </div>

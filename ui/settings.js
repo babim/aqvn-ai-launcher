@@ -29,7 +29,8 @@
     task_notification_enabled: true,
     task_chime_volume: 0.5,
     task_chime_tone: 'classic',
-    app_language: 'vi'
+    app_language: 'vi',
+    app_theme: 'aqvn-dark'
   };
 
   let store = null;
@@ -39,6 +40,7 @@
 
   // DOM Elements
   const appLanguageSelect = document.getElementById('app-language');
+  const appThemeSelect = document.getElementById('app-theme');
   const closeToTrayInput = document.getElementById('close-to-tray');
   const showMenuBarInput = document.getElementById('show-menu-bar');
   const taskChimeEnabledInput = document.getElementById('task-chime-enabled');
@@ -85,6 +87,8 @@
       general_title: 'Cấu hình chung',
       language_label: 'Ngôn ngữ hiển thị (Display Language)',
       language_help: 'Chọn ngôn ngữ hiển thị cho giao diện cài đặt và tài liệu.',
+      theme_label: 'Giao diện màu sắc (Color Theme)',
+      theme_help: 'Chọn bảng màu chủ đạo cho giao diện ứng dụng.',
       close_to_tray_label: 'Chạy ngầm ở khay hệ thống (Close to Tray)',
       close_to_tray_help: 'Tiếp tục chạy ngầm trong khay hệ thống khi đóng cửa sổ thay vì tắt hoàn toàn ứng dụng.',
       show_menu_bar_label: 'Hiển thị thanh menu (Show Menu Bar)',
@@ -155,6 +159,8 @@
       general_title: 'General Configuration',
       language_label: 'Display Language',
       language_help: 'Select interface language for settings and help documentation.',
+      theme_label: 'Color Theme',
+      theme_help: 'Select the color palette for the workspace interface.',
       close_to_tray_label: 'Close to Tray (Keep running in background)',
       close_to_tray_help: 'Keep the app running in the system tray when closing the window instead of exiting completely.',
       show_menu_bar_label: 'Show Menu Bar (Top Window Menu)',
@@ -530,6 +536,17 @@
         savedLocalLang = localStorage.getItem('aqvn_lang');
       } catch (e) {}
       setLanguage(appLanguage || savedLocalLang || DEFAULTS.app_language);
+
+      const appTheme = await store.get('app_theme');
+      let savedLocalTheme = null;
+      try {
+        savedLocalTheme = localStorage.getItem('aqvn_theme');
+      } catch (e) {}
+      const activeTheme = appTheme || savedLocalTheme || DEFAULTS.app_theme;
+      if (appThemeSelect) {
+        appThemeSelect.value = activeTheme;
+      }
+      document.documentElement.setAttribute('data-theme', activeTheme);
     } catch (err) {
       console.error('Failed to load settings from store:', err);
       // Fall back to defaults
@@ -563,6 +580,12 @@
         fallbackLang = localStorage.getItem('aqvn_lang') || DEFAULTS.app_language;
       } catch (e) {}
       setLanguage(fallbackLang);
+      let fallbackTheme = DEFAULTS.app_theme;
+      try {
+        fallbackTheme = localStorage.getItem('aqvn_theme') || DEFAULTS.app_theme;
+      } catch (e) {}
+      if (appThemeSelect) appThemeSelect.value = fallbackTheme;
+      document.documentElement.setAttribute('data-theme', fallbackTheme);
     }
   }
 
@@ -668,6 +691,9 @@
       const appLanguage = appLanguageSelect ? appLanguageSelect.value : currentLang;
       await store.set('app_language', appLanguage);
 
+      const appTheme = appThemeSelect ? appThemeSelect.value : DEFAULTS.app_theme;
+      await store.set('app_theme', appTheme);
+
       await store.save();
 
       if (window.bridge && typeof window.bridge.saveServerProfiles === 'function') {
@@ -682,7 +708,10 @@
         localStorage.setItem('aqvn_task_chime_volume', String(taskChimeVolume));
         localStorage.setItem('aqvn_task_chime_tone', taskChimeTone);
         localStorage.setItem('aqvn_lang', appLanguage);
+        localStorage.setItem('aqvn_theme', appTheme);
       } catch (e) {}
+
+      document.documentElement.setAttribute('data-theme', appTheme);
 
       renderServerProfiles();
       const saveMsg = (SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi).save_success + ' [backend: ' + window.bridge.backendDescription() + ']';
@@ -721,6 +750,8 @@
       if (taskChimeVolumeDisplay) taskChimeVolumeDisplay.textContent = '50%';
     }
     if (taskChimeToneInput) taskChimeToneInput.value = DEFAULTS.task_chime_tone;
+    if (appThemeSelect) appThemeSelect.value = DEFAULTS.app_theme;
+    document.documentElement.setAttribute('data-theme', DEFAULTS.app_theme);
     setLanguage(DEFAULTS.app_language);
     showStatus((SETTINGS_I18N[currentLang] || SETTINGS_I18N.vi).reset_status, 'success');
   }
@@ -823,6 +854,15 @@
   if (appLanguageSelect) {
     appLanguageSelect.addEventListener('change', (e) => {
       setLanguage(e.target.value);
+    });
+  }
+  if (appThemeSelect) {
+    appThemeSelect.addEventListener('change', (e) => {
+      const selected = e.target.value;
+      document.documentElement.setAttribute('data-theme', selected);
+      try {
+        localStorage.setItem('aqvn_theme', selected);
+      } catch (err) {}
     });
   }
   if (langToggleBtn) {

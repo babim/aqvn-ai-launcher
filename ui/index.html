@@ -76,6 +76,14 @@
         });
       })();
     </script>
+    <script>
+      (function() {
+        try {
+          var t = localStorage.getItem('aqvn_theme') || 'aqvn-dark';
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {}
+      })();
+    </script>
     <link rel="stylesheet" href="chat.css" />
     <script src="vendor/socket.io.min.js"></script>
     <script src="bridge.js"></script>
@@ -130,6 +138,13 @@
           title="Hard refresh (Ctrl+Shift+R / F5)"
           aria-label="Hard refresh"
         >&#8635;</button>
+        <button
+          id="theme-toggle-btn"
+          type="button"
+          class="icon-btn"
+          title="Toggle color theme"
+          aria-label="Toggle color theme"
+        >&#127912;</button>
         <a class="nav" id="open-settings" href="settings.html">Settings</a>
       </div>
     </header>

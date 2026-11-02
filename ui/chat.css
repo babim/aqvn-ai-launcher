@@ -1,15 +1,62 @@
-:root {
+:root,
+[data-theme="aqvn-dark"] {
   color-scheme: dark;
-  --bg: #070d16;
-  --panel: #0b1220;
-  --panel-2: #0f1a2b;
-  --line: #1e2f45;
-  --ink: #e6edf7;
-  --muted: #93a4bd;
-  --accent: #22d3ee;
-  --accent-soft: #132c46;
-  --danger: #f87171;
-  --ok: #34d399;
+  --bg: oklch(0.14 0.03 240);
+  --bg-radial: oklch(0.22 0.05 240);
+  --panel: oklch(0.17 0.03 240);
+  --panel-2: oklch(0.20 0.04 240);
+  --line: oklch(0.28 0.04 240);
+  --ink: oklch(0.94 0.02 240);
+  --muted: oklch(0.70 0.03 240);
+  --accent: oklch(0.82 0.14 210);
+  --accent-soft: oklch(0.26 0.06 235);
+  --danger: oklch(0.68 0.19 25);
+  --ok: oklch(0.80 0.16 155);
+}
+
+[data-theme="oled-black"] {
+  color-scheme: dark;
+  --bg: oklch(0 0 0);
+  --bg-radial: oklch(0.08 0 0);
+  --panel: oklch(0.06 0 0);
+  --panel-2: oklch(0.12 0 0);
+  --line: oklch(0.30 0 0);
+  --ink: oklch(0.98 0 0);
+  --muted: oklch(0.65 0 0);
+  --accent: oklch(0.90 0.05 240);
+  --accent-soft: oklch(0.18 0 0);
+  --danger: oklch(0.65 0.22 25);
+  --ok: oklch(0.82 0.18 150);
+}
+
+[data-theme="cyberpunk-terminal"] {
+  color-scheme: dark;
+  --bg: oklch(0.16 0.02 240);
+  --bg-radial: oklch(0.20 0.04 160);
+  --panel: oklch(0.18 0.02 160);
+  --panel-2: oklch(0.22 0.03 160);
+  --line: oklch(0.32 0.06 155);
+  --ink: oklch(0.92 0.08 150);
+  --muted: oklch(0.65 0.07 150);
+  --accent: oklch(0.75 0.19 160);
+  --accent-soft: oklch(0.24 0.08 160);
+  --danger: oklch(0.65 0.22 25);
+  --ok: oklch(0.80 0.20 155);
+}
+
+[data-theme="clean-studio-light"] {
+  color-scheme: light;
+  --bg: oklch(0.98 0.01 240);
+  --bg-radial: oklch(0.95 0.02 240);
+  --panel: oklch(0.95 0.01 240);
+  --panel-2: oklch(0.92 0.02 240);
+  --line: oklch(0.82 0.02 240);
+  --ink: oklch(0.18 0.03 240);
+  --muted: oklch(0.45 0.04 240);
+  --accent: oklch(0.55 0.22 260);
+  --accent-soft: oklch(0.90 0.05 260);
+  --danger: oklch(0.55 0.22 25);
+  --ok: oklch(0.55 0.17 155);
 }
 
 * {
@@ -24,7 +71,7 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  background: radial-gradient(circle at 30% 10%, #10243a, var(--bg) 65%);
+  background: radial-gradient(circle at 30% 10%, var(--bg-radial, #10243a), var(--bg) 65%);
   color: var(--ink);
   display: flex;
   flex-direction: column;

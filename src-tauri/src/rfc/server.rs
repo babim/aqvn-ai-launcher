@@ -109,11 +109,31 @@ impl RateLimiter {
     }
 }
 
+/// Determines if a peer IP is a trusted local reverse proxy ([IP] or ::1).
+fn is_trusted_proxy(ip: IpAddr) -> bool {
+    ip.is_loopback()
+}
+
 /// Extracts client IP address from socket ConnectInfo or standard HTTP headers.
-fn extract_client_ip(request: &Request<Body>) -> IpAddr {
-    if let Some(ConnectInfo(addr)) = request.extensions().get::<ConnectInfo<SocketAddr>>() {
-        return addr.ip();
+///
+/// Security: X-Forwarded-For and X-Real-IP headers are ONLY parsed if the socket peer
+/// is a trusted local reverse proxy ([IP] or ::1). Direct external connections enforce
+/// rate limits strictly against the physical socket peer IP.
+pub fn extract_client_ip(request: &Request<Body>) -> IpAddr {
+    let peer_ip = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0.ip());
+
+    // If socket peer is known and NOT a trusted local reverse proxy, enforce physical peer IP.
+    if let Some(peer) = peer_ip {
+        if !is_trusted_proxy(peer) {
+            return peer;
+        }
     }
+
+    // ConnectInfo is loopback (trusted proxy) or missing (in-memory test pipeline):
+    // Parse forwarded headers if present.
     if let Some(forwarded) = request
         .headers()
         .get("x-forwarded-for")
@@ -134,7 +154,9 @@ fn extract_client_ip(request: &Request<Body>) -> IpAddr {
             return ip;
         }
     }
-    IpAddr::V4(Ipv4Addr::LOCALHOST)
+
+    // Fall back to peer IP if available, else localhost
+    peer_ip.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST))
 }
 
 /// Per-generation server state, cloned per request.

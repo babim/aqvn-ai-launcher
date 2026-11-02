@@ -7,10 +7,14 @@
 
 use aqvn_workspace_lib::config::{AppConfig, ConfigWatcher};
 use aqvn_workspace_lib::rfc::{auth, server};
+use axum::body::Body;
+use axum::extract::ConnectInfo;
+use axum::http::{header, Method, Request, StatusCode};
 use serde_json::json;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tower::ServiceExt;
 
 const TEST_PASSWORD: &str = "secret-supervisor-test";
 const WORKED_INPUT: &str = r#"{"module": "helpers.rfc_files", "function_name": "_path_exists_impl", "args": ["/a0/test.txt"], "kwargs": {}}"#;
@@ -199,4 +203,118 @@ async fn val_res_001_rfc_supervisor_default_loop_does_not_exit_on_error() {
 
     assert!(!supervisor.is_finished());
     supervisor.abort();
+}
+
+fn make_request_with_peer(
+    rfc_input: &str,
+    peer_addr: Option<SocketAddr>,
+    forwarded_for: Option<&str>,
+) -> Request<Body> {
+    let hash = auth::compute_hash(TEST_PASSWORD, rfc_input);
+    let payload = json!({
+        "rfc_input": rfc_input,
+        "hash": hash,
+    });
+    let mut builder = Request::builder()
+        .method(Method::POST)
+        .uri("/api/rfc")
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(forwarded) = forwarded_for {
+        builder = builder.header("x-forwarded-for", forwarded);
+    }
+    let mut req = builder
+        .body(Body::from(payload.to_string()))
+        .expect("request");
+    if let Some(peer) = peer_addr {
+        req.extensions_mut().insert(ConnectInfo(peer));
+    }
+    req
+}
+
+#[tokio::test]
+async fn val_res_003_rate_limiter_trusted_reverse_proxy_x_forwarded_for() {
+    let sandbox = TempSandbox::new(&[("test.txt", b"core content")]);
+    let app = server::router(server::build_state(&config_for(sandbox.path(), 0)));
+
+    // ConnectInfo is a trusted local reverse proxy ([IP])
+    let proxy_peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
+
+    // 60 requests from client A behind proxy
+    for _ in 0..60 {
+        let req = make_request_with_peer(WORKED_INPUT, Some(proxy_peer), Some("198.51.100.1"));
+        let resp = app.clone().oneshot(req).await.expect("call");
+        assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    // Client A is now throttled (61st request)
+    let req_a_throttled =
+        make_request_with_peer(WORKED_INPUT, Some(proxy_peer), Some("198.51.100.1"));
+    let resp_a = app.clone().oneshot(req_a_throttled).await.expect("call");
+    assert_eq!(resp_a.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    // Client B from same reverse proxy has distinct IP and must NOT be throttled
+    let req_b = make_request_with_peer(WORKED_INPUT, Some(proxy_peer), Some("198.51.100.2"));
+    let resp_b = app.clone().oneshot(req_b).await.expect("call");
+    assert_ne!(
+        resp_b.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "Client B behind trusted local reverse proxy should not be throttled by Client A's quota"
+    );
+}
+
+#[tokio::test]
+async fn val_res_003_rate_limiter_direct_external_connection_ignores_spoofed_x_forwarded_for() {
+    let sandbox = TempSandbox::new(&[("test.txt", b"core content")]);
+    let app = server::router(server::build_state(&config_for(sandbox.path(), 0)));
+
+    // ConnectInfo is external untrusted peer ([IP])
+    let external_peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 55)), 54321);
+
+    // Attacker sends 60 requests spoofing different X-Forwarded-For headers
+    for i in 0..60 {
+        let spoofed_ip = format!("10.0.0.{}", i + 1);
+        let req = make_request_with_peer(WORKED_INPUT, Some(external_peer), Some(&spoofed_ip));
+        let resp = app.clone().oneshot(req).await.expect("call");
+        assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    // 61st request from external peer with another spoofed header MUST be throttled
+    // because rate limiting binds strictly to the external socket peer IP!
+    let req_spoof_throttled =
+        make_request_with_peer(WORKED_INPUT, Some(external_peer), Some("10.0.0.61"));
+    let resp = app
+        .clone()
+        .oneshot(req_spoof_throttled)
+        .await
+        .expect("call");
+    assert_eq!(
+        resp.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "Direct external requests must enforce rate limit on peer socket IP, ignoring spoofed X-Forwarded-For"
+    );
+}
+
+#[tokio::test]
+async fn val_res_003_rate_limiter_ipv6_loopback_trusted_proxy() {
+    let sandbox = TempSandbox::new(&[("test.txt", b"core content")]);
+    let app = server::router(server::build_state(&config_for(sandbox.path(), 0)));
+
+    // ConnectInfo is IPv6 loopback (::1)
+    let proxy_peer_v6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 8080);
+
+    for _ in 0..60 {
+        let req = make_request_with_peer(WORKED_INPUT, Some(proxy_peer_v6), Some("198.51.100.99"));
+        let resp = app.clone().oneshot(req).await.expect("call");
+        assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    let req_throttled =
+        make_request_with_peer(WORKED_INPUT, Some(proxy_peer_v6), Some("198.51.100.99"));
+    let resp = app.clone().oneshot(req_throttled).await.expect("call");
+    assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    let req_fresh =
+        make_request_with_peer(WORKED_INPUT, Some(proxy_peer_v6), Some("198.51.100.100"));
+    let resp_fresh = app.clone().oneshot(req_fresh).await.expect("call");
+    assert_ne!(resp_fresh.status(), StatusCode::TOO_MANY_REQUESTS);
 }

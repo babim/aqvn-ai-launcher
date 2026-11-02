@@ -9,9 +9,10 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, oneshot, watch};
 
 pub const DEFAULT_SERVER_URL: &str = "https://a0.matmagoc.com";
 pub const DEFAULT_SERVER_PROFILES: &[&str] = &[DEFAULT_SERVER_URL];
@@ -555,4 +556,98 @@ pub fn load_from_file(path: &Path) -> Option<AppConfig> {
 pub fn store_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     tauri_plugin_store::resolve_store_path(app, STORE_FILENAME)
         .map_err(|e| format!("resolve store path failed: {e}"))
+}
+
+enum DebounceMsg {
+    Update(WindowState),
+    Flush(Option<oneshot::Sender<()>>),
+}
+
+/// Debounces window geometry writes to settings store by 500ms (VAL-RES-004).
+#[derive(Clone)]
+pub struct GeometryDebouncer {
+    tx: mpsc::UnboundedSender<DebounceMsg>,
+}
+
+impl GeometryDebouncer {
+    pub const DEFAULT_DELAY: Duration = Duration::from_millis(500);
+
+    pub fn new<R: Runtime>(app: AppHandle<R>) -> Self {
+        Self::new_with_delay(app, Self::DEFAULT_DELAY)
+    }
+
+    pub fn new_with_delay<R: Runtime>(app: AppHandle<R>, delay: Duration) -> Self {
+        Self::new_with_callback(delay, move |state| {
+            let _ = persist_window_geometry(&app, state);
+        })
+    }
+
+    pub fn new_with_callback<F>(delay: Duration, on_persist: F) -> Self
+    where
+        F: Fn(WindowState) + Send + 'static,
+    {
+        let (tx, mut rx) = mpsc::unbounded_channel::<DebounceMsg>();
+        tauri::async_runtime::spawn(async move {
+            let mut pending: Option<WindowState> = None;
+            let mut deadline: Option<tokio::time::Instant> = None;
+
+            loop {
+                let sleep_fut = async {
+                    match deadline {
+                        Some(d) => tokio::time::sleep_until(d).await,
+                        None => std::future::pending().await,
+                    }
+                };
+
+                tokio::select! {
+                    msg = rx.recv() => {
+                        match msg {
+                            Some(DebounceMsg::Update(state)) => {
+                                pending = Some(state);
+                                deadline = Some(tokio::time::Instant::now() + delay);
+                            }
+                            Some(DebounceMsg::Flush(ack)) => {
+                                if let Some(state) = pending.take() {
+                                    on_persist(state);
+                                }
+                                deadline = None;
+                                if let Some(ack) = ack {
+                                    let _ = ack.send(());
+                                }
+                            }
+                            None => {
+                                if let Some(state) = pending.take() {
+                                    on_persist(state);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    _ = sleep_fut, if deadline.is_some() => {
+                        deadline = None;
+                        if let Some(state) = pending.take() {
+                            on_persist(state);
+                        }
+                    }
+                }
+            }
+        });
+
+        Self { tx }
+    }
+
+    pub fn debounce(&self, state: WindowState) {
+        let _ = self.tx.send(DebounceMsg::Update(state));
+    }
+
+    pub fn flush(&self) {
+        let _ = self.tx.send(DebounceMsg::Flush(None));
+    }
+
+    pub async fn flush_wait(&self) {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        if self.tx.send(DebounceMsg::Flush(Some(ack_tx))).is_ok() {
+            let _ = ack_rx.await;
+        }
+    }
 }

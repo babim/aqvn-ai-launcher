@@ -80,15 +80,33 @@ pub fn run() {
                                 };
 
                                 if current_ws.as_ref() != Some(&new_state) {
-                                    let _ = config::persist_window_geometry(
-                                        window.app_handle(),
-                                        new_state,
-                                    );
+                                    if let Some(debouncer) =
+                                        window.app_handle().try_state::<config::GeometryDebouncer>()
+                                    {
+                                        debouncer.debounce(new_state);
+                                    } else {
+                                        let _ = config::persist_window_geometry(
+                                            window.app_handle(),
+                                            new_state,
+                                        );
+                                    }
                                 }
                             }
                         }
                     }
+                    tauri::WindowEvent::Focused(false) => {
+                        if let Some(debouncer) =
+                            window.app_handle().try_state::<config::GeometryDebouncer>()
+                        {
+                            debouncer.flush();
+                        }
+                    }
                     tauri::WindowEvent::CloseRequested { api, .. } => {
+                        if let Some(debouncer) =
+                            window.app_handle().try_state::<config::GeometryDebouncer>()
+                        {
+                            debouncer.flush();
+                        }
                         let close_to_tray = window
                             .app_handle()
                             .try_state::<config::ConfigWatcher>()
@@ -116,6 +134,8 @@ pub fn run() {
             connector::handlers::files::sync_from_app_config(&initial_config);
             let watcher = config::ConfigWatcher::new(initial_config.clone());
             app.manage(watcher.clone());
+            let debouncer = config::GeometryDebouncer::new(app.handle().clone());
+            app.manage(debouncer);
 
             // Local bridge proxy: loopback-only, kernel-chosen port. Binds before
             // the window exists so the resolved port can be injected into the

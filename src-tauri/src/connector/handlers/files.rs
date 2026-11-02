@@ -791,6 +791,54 @@ fn op_patch(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
         );
     }
 
+    let expected_sha256 = parse_expected_sha256(envelope);
+    let computed_sha256 = match compute_file_sha256(&jailed) {
+        Ok(hash) => {
+            if let Some(ref exp) = expected_sha256 {
+                let norm_exp = exp.trim().trim_start_matches("sha256:").to_lowercase();
+                let norm_comp = hash.to_lowercase();
+                if norm_exp != norm_comp {
+                    // Rollback file to original pre-patch state
+                    let _ = fs::write(&jailed, original.as_bytes());
+                    let mut err_reply = serde_json::from_str::<Value>(&make_error_reply(
+                        id,
+                        op_id,
+                        "patch",
+                        Some(raw_path),
+                        format!(
+                            "SHA-256 checksum mismatch on patched file: expected {exp}, got {hash}. File rolled back."
+                        ),
+                    ))
+                    .unwrap_or_else(|_| json!({}));
+                    err_reply["rollback"] = json!(true);
+                    err_reply["file_sha256"] = json!(hash);
+                    err_reply["expected_sha256"] = json!(exp);
+                    err_reply["data"] = json!({
+                        "error": format!("SHA-256 checksum mismatch on patched file: expected {exp}, got {hash}"),
+                        "file_sha256": hash,
+                        "expected_sha256": exp,
+                        "rollback": true
+                    });
+                    return err_reply.to_string();
+                }
+            }
+            Some(hash)
+        }
+        Err(e) => {
+            if expected_sha256.is_some() {
+                let _ = fs::write(&jailed, original.as_bytes());
+                return make_error_reply(
+                    id,
+                    op_id,
+                    "patch",
+                    Some(raw_path),
+                    format!("failed to compute SHA-256 for patched file: {e}. File rolled back."),
+                );
+            }
+            None
+        }
+    };
+
     let total_lines = count_content_lines(&updated);
     let checksum = calculate_checksum(updated.as_bytes());
 
@@ -810,13 +858,19 @@ fn op_patch(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
         "hunk_count": hunk_count,
         "replacement_count": replacement_count,
     });
+    if let Some(ref sha) = computed_sha256 {
+        res["file_sha256"] = json!(sha);
+    }
 
-    let data_payload = json!({
+    let mut data_payload = json!({
         "total_lines": total_lines,
         "checksum": checksum,
         "hunk_count": hunk_count,
         "replacement_count": replacement_count,
     });
+    if let Some(ref sha) = computed_sha256 {
+        data_payload["file_sha256"] = json!(sha);
+    }
     res["data"] = data_payload.clone();
     res["result"] = data_payload;
 

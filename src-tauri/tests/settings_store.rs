@@ -96,6 +96,7 @@ fn config_json_serde_roundtrip() {
         app_language: "en".to_string(),
         show_menu_bar: true,
         task_chime_enabled: false,
+        task_notification_enabled: false,
         task_chime_volume: 0.8,
         task_chime_tone: "bell".to_string(),
         window_state: None,

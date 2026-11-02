@@ -70,6 +70,21 @@ impl RateLimiter {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
+
+        // Periodic sweep of idle clients to prevent unbounded memory growth
+        if map.len() > 64 {
+            map.retain(|_, ts| {
+                while let Some(&front) = ts.front() {
+                    if front < cutoff {
+                        ts.pop_front();
+                    } else {
+                        break;
+                    }
+                }
+                !ts.is_empty()
+            });
+        }
+
         let timestamps = map.entry(ip).or_default();
         while let Some(&front) = timestamps.front() {
             if front < cutoff {

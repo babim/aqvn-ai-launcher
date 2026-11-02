@@ -79,8 +79,12 @@ pub fn run() {
                                     is_maximized,
                                 };
 
-                                let _ =
-                                    config::persist_window_geometry(window.app_handle(), new_state);
+                                if current_ws.as_ref() != Some(&new_state) {
+                                    let _ = config::persist_window_geometry(
+                                        window.app_handle(),
+                                        new_state,
+                                    );
+                                }
                             }
                         }
                     }

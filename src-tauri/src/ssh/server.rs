@@ -89,6 +89,18 @@ impl LockoutTracker {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
+
+        // Sweep expired lockout entries
+        if map.len() > 64 {
+            map.retain(|_, entry| {
+                if let Some(until) = entry.locked_until {
+                    now < until
+                } else {
+                    entry.consecutive_failures > 0
+                }
+            });
+        }
+
         let entry = map.entry(ip).or_insert(LockoutEntry {
             consecutive_failures: 0,
             locked_until: None,

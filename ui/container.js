@@ -75,6 +75,37 @@
   var TASK_CHIME_KEY = 'aqvn_task_chime_enabled';
   var TASK_CHIME_VOLUME_KEY = 'aqvn_task_chime_volume';
   var TASK_CHIME_TONE_KEY = 'aqvn_task_chime_tone';
+  var TASK_NOTIFICATION_KEY = 'aqvn_task_notification_enabled';
+
+  function isTaskNotificationEnabled() {
+    if (state.taskNotificationEnabled !== undefined) {
+      return Boolean(state.taskNotificationEnabled);
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        if (window.__AQVN_TASK_NOTIFICATION_ENABLED__ !== undefined) {
+          return Boolean(window.__AQVN_TASK_NOTIFICATION_ENABLED__);
+        }
+        if (window.localStorage) {
+          var val = window.localStorage.getItem(TASK_NOTIFICATION_KEY);
+          if (val !== null) {
+            return val === 'true' || val === true;
+          }
+        }
+      }
+    } catch (e) {}
+    return true;
+  }
+
+  function setTaskNotificationEnabled(enabled) {
+    state.taskNotificationEnabled = Boolean(enabled);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(TASK_NOTIFICATION_KEY, String(state.taskNotificationEnabled));
+      }
+    } catch (e) {}
+    return state.taskNotificationEnabled;
+  }
   var DEFAULT_TASK_CHIME_VOLUME = 0.5;
   var DEFAULT_TASK_CHIME_TONE = 'classic';
   var VALID_CHIME_TONES = ['classic', 'bell', 'beep', 'subtle'];
@@ -298,6 +329,7 @@
           playTaskChime();
         }
         if (
+          isTaskNotificationEnabled() &&
           typeof document !== 'undefined' &&
           (document.hidden === true || (typeof document.hasFocus === 'function' && !document.hasFocus()))
         ) {
@@ -1248,10 +1280,30 @@
       var docOrWin = typeof window !== 'undefined' ? window : root;
       if (docOrWin && typeof docOrWin.addEventListener === 'function') {
         docOrWin.addEventListener('keydown', function (e) {
-          if (e && (e.key === 'Escape' || e.key === 'Esc')) {
+          if (!e) return;
+          if (e.key === 'Escape' || e.key === 'Esc') {
             if (isDiagnosticsModalOpen()) {
               if (typeof e.preventDefault === 'function') e.preventDefault();
               closeDiagnosticsModal();
+            }
+          } else if (e.key === 'Tab') {
+            if (isDiagnosticsModalOpen() && modal) {
+              var focusables = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+              if (focusables && focusables.length > 0) {
+                var first = focusables[0];
+                var last = focusables[focusables.length - 1];
+                if (e.shiftKey) {
+                  if (document.activeElement === first || !modal.contains(document.activeElement)) {
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    last.focus();
+                  }
+                } else {
+                  if (document.activeElement === last || !modal.contains(document.activeElement)) {
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    first.focus();
+                  }
+                }
+              }
             }
           }
         });
@@ -1292,6 +1344,8 @@
     playTaskChime: playTaskChime,
     isTaskChimeEnabled: isTaskChimeEnabled,
     setTaskChimeEnabled: setTaskChimeEnabled,
+    isTaskNotificationEnabled: isTaskNotificationEnabled,
+    setTaskNotificationEnabled: setTaskNotificationEnabled,
     getTaskChimeVolume: getTaskChimeVolume,
     setTaskChimeVolume: setTaskChimeVolume,
     getTaskChimeTone: getTaskChimeTone,
@@ -1323,6 +1377,7 @@
         lastProgress: state.lastProgress,
         lastSummary: state.lastSummary,
         taskChimeEnabled: isTaskChimeEnabled(),
+        taskNotificationEnabled: isTaskNotificationEnabled(),
         taskChimeVolume: getTaskChimeVolume(),
         taskChimeTone: getTaskChimeTone(),
         connectionStatus: diagnosticsState.connectionStatus,

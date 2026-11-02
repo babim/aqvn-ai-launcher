@@ -166,6 +166,20 @@ pub fn launch_browser_with_remote_debugging(
     cmd.arg(format!("--remote-debugging-port={port}"));
     cmd.arg("--remote-allow-origins=*");
 
+    // Clean up stale temporary CDP profiles from previous sessions
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("aqvn-cdp-profile-") {
+                        let _ = std::fs::remove_dir_all(&p);
+                    }
+                }
+            }
+        }
+    }
+
     let temp_profile = std::env::temp_dir().join(format!(
         "aqvn-cdp-profile-{port}-{}-{}",
         std::process::id(),

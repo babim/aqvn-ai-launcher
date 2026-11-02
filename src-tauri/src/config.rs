@@ -169,6 +169,8 @@ pub struct AppConfig {
     pub show_menu_bar: bool,
     #[serde(default = "default_true")]
     pub task_chime_enabled: bool,
+    #[serde(default = "default_true")]
+    pub task_notification_enabled: bool,
     #[serde(default = "default_task_chime_volume")]
     pub task_chime_volume: f32,
     #[serde(default = "default_task_chime_tone")]
@@ -210,6 +212,7 @@ impl Default for AppConfig {
             app_language: DEFAULT_APP_LANGUAGE.to_string(),
             show_menu_bar: DEFAULT_SHOW_MENU_BAR,
             task_chime_enabled: DEFAULT_TASK_CHIME_ENABLED,
+            task_notification_enabled: true,
             task_chime_volume: DEFAULT_TASK_CHIME_VOLUME,
             task_chime_tone: DEFAULT_TASK_CHIME_TONE.to_string(),
             window_state: None,
@@ -380,6 +383,11 @@ impl AppConfig {
                 config.task_chime_enabled = b;
             }
         }
+        if let Some(val) = store.get("task_notification_enabled") {
+            if let Some(b) = val.as_bool() {
+                config.task_notification_enabled = b;
+            }
+        }
         if let Some(val) = store.get("task_chime_volume") {
             if let Some(f) = val.as_f64() {
                 config.task_chime_volume = f.clamp(0.0, 1.0) as f32;
@@ -449,6 +457,10 @@ impl AppConfig {
         store.set(
             "task_chime_enabled",
             serde_json::json!(self.task_chime_enabled),
+        );
+        store.set(
+            "task_notification_enabled",
+            serde_json::json!(self.task_notification_enabled),
         );
         store.set(
             "task_chime_volume",

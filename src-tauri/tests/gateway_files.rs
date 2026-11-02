@@ -1540,3 +1540,63 @@ async fn test_chunked_write_rollback_on_sha256_mismatch() {
     set_test_sandbox(None);
     let _ = std::fs::remove_dir_all(&sandbox_dir);
 }
+
+#[tokio::test]
+async fn test_op_patch_sha256_verification_and_rollback() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (sandbox_dir, sandbox) = create_temp_sandbox();
+    set_test_sandbox(Some(sandbox.clone()));
+
+    // 1. Write initial file
+    let write_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-patch-init",
+        "action": "write",
+        "path": "test_patch.txt",
+        "content": "line1\nline2\nline3\n"
+    });
+    let _ = files::handle_file_op_with_sandbox(&write_op, &sandbox).await;
+
+    // 2. Patch with invalid expected_sha256 -> must trigger rollback
+    let bad_patch_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-patch-bad",
+        "action": "patch",
+        "path": "test_patch.txt",
+        "old_text": "line2",
+        "new_text": "line2_modified",
+        "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&bad_patch_op, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).expect("parse patch reply");
+    assert_eq!(reply["success"], false);
+    assert_eq!(reply["rollback"], true);
+
+    // Verify file content was restored to original pre-patch state
+    let read_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-read-restored",
+        "action": "read",
+        "path": "test_patch.txt"
+    });
+    let read_reply_str = files::handle_file_op_with_sandbox(&read_op, &sandbox).await;
+    let read_reply: Value = serde_json::from_str(&read_reply_str).unwrap();
+    assert_eq!(read_reply["content"], "line1\nline2\nline3\n");
+
+    // 3. Patch without error -> succeeds and returns file_sha256
+    let good_patch_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-patch-good",
+        "action": "patch",
+        "path": "test_patch.txt",
+        "old_text": "line2",
+        "new_text": "line2_patched"
+    });
+    let good_reply_str = files::handle_file_op_with_sandbox(&good_patch_op, &sandbox).await;
+    let good_reply: Value = serde_json::from_str(&good_reply_str).expect("parse patch reply");
+    assert_eq!(good_reply["success"], true);
+    assert!(good_reply.get("file_sha256").is_some());
+
+    set_test_sandbox(None);
+    let _ = std::fs::remove_dir_all(&sandbox_dir);
+}

@@ -26,6 +26,7 @@
     close_to_tray: true,
     show_menu_bar: false,
     task_chime_enabled: true,
+    task_notification_enabled: true,
     task_chime_volume: 0.5,
     task_chime_tone: 'classic',
     app_language: 'vi'
@@ -41,6 +42,7 @@
   const closeToTrayInput = document.getElementById('close-to-tray');
   const showMenuBarInput = document.getElementById('show-menu-bar');
   const taskChimeEnabledInput = document.getElementById('task-chime-enabled');
+  const taskNotificationEnabledInput = document.getElementById('task-notification-enabled');
   const taskChimeVolumeInput = document.getElementById('task-chime-volume');
   const taskChimeVolumeDisplay = document.getElementById('task-chime-volume-display');
   const taskChimeToneInput = document.getElementById('task-chime-tone');
@@ -89,6 +91,8 @@
       show_menu_bar_help: 'Hiển thị thanh menu native dưới thanh tiêu đề cửa sổ (áp dụng ngay; chuột phải context menu luôn khả dụng).',
       task_chime_enabled_label: 'Âm báo hoàn thành tác vụ (Task Completion Sound)',
       task_chime_enabled_help: 'Phát âm thanh chuông báo khi trợ lý hoàn thành câu trả lời.',
+      task_notification_enabled_label: 'Thông báo màn hình (Desktop Notifications)',
+      task_notification_enabled_help: 'Hiển thị thông báo màn hình hệ thống khi hoàn thành tác vụ lúc cửa sổ ẩn hoặc không được focus.',
       task_chime_volume_label: 'Âm lượng chuông (Chime Volume)',
       task_chime_volume_help: 'Điều chỉnh âm lượng âm báo hoàn thành (0% đến 100%).',
       task_chime_tone_label: 'Giai điệu chuông (Chime Tone)',
@@ -157,6 +161,8 @@
       show_menu_bar_help: 'Display the native menu bar under the title bar (hot-reloaded immediately; right-click context menu is always available).',
       task_chime_enabled_label: 'Task Completion Sound (Play Chime)',
       task_chime_enabled_help: 'Play an audible synthesized chime when the assistant finishes responding.',
+      task_notification_enabled_label: 'Desktop Notifications',
+      task_notification_enabled_help: 'Show a system desktop notification when a task completes while the window is hidden or unfocused.',
       task_chime_volume_label: 'Chime Volume',
       task_chime_volume_help: 'Adjust volume for completion chime (0% to 100%).',
       task_chime_tone_label: 'Chime Tone',
@@ -497,6 +503,12 @@
           taskChimeEnabled !== undefined ? Boolean(taskChimeEnabled) : DEFAULTS.task_chime_enabled;
       }
 
+      const taskNotificationEnabled = await store.get('task_notification_enabled');
+      if (taskNotificationEnabledInput) {
+        taskNotificationEnabledInput.checked =
+          taskNotificationEnabled !== undefined ? Boolean(taskNotificationEnabled) : DEFAULTS.task_notification_enabled;
+      }
+
       const taskChimeVolume = await store.get('task_chime_volume');
       if (taskChimeVolumeInput) {
         const vol = taskChimeVolume !== undefined && taskChimeVolume !== null ? parseFloat(taskChimeVolume) : DEFAULTS.task_chime_volume;
@@ -638,6 +650,11 @@
         : DEFAULTS.task_chime_enabled;
       await store.set('task_chime_enabled', taskChimeEnabled);
 
+      const taskNotificationEnabled = taskNotificationEnabledInput
+        ? taskNotificationEnabledInput.checked
+        : DEFAULTS.task_notification_enabled;
+      await store.set('task_notification_enabled', taskNotificationEnabled);
+
       const taskChimeVolume = taskChimeVolumeInput
         ? Math.max(0, Math.min(1, parseFloat(taskChimeVolumeInput.value)))
         : DEFAULTS.task_chime_volume;
@@ -661,6 +678,7 @@
         localStorage.setItem('aqvn_server_profiles', JSON.stringify(serverProfiles));
         localStorage.setItem('aqvn_global_hotkey', globalHotkey || DEFAULTS.global_hotkey);
         localStorage.setItem('aqvn_task_chime_enabled', String(taskChimeEnabled));
+        localStorage.setItem('aqvn_task_notification_enabled', String(taskNotificationEnabled));
         localStorage.setItem('aqvn_task_chime_volume', String(taskChimeVolume));
         localStorage.setItem('aqvn_task_chime_tone', taskChimeTone);
         localStorage.setItem('aqvn_lang', appLanguage);
@@ -697,6 +715,7 @@
     if (closeToTrayInput) closeToTrayInput.checked = DEFAULTS.close_to_tray;
     if (showMenuBarInput) showMenuBarInput.checked = DEFAULTS.show_menu_bar;
     if (taskChimeEnabledInput) taskChimeEnabledInput.checked = DEFAULTS.task_chime_enabled;
+    if (taskNotificationEnabledInput) taskNotificationEnabledInput.checked = DEFAULTS.task_notification_enabled;
     if (taskChimeVolumeInput) {
       taskChimeVolumeInput.value = DEFAULTS.task_chime_volume;
       if (taskChimeVolumeDisplay) taskChimeVolumeDisplay.textContent = '50%';

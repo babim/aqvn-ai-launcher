@@ -506,13 +506,98 @@
   }
 
   function mergeLogs(logs) {
+    if (!Array.isArray(logs) || logs.length === 0) {
+      return;
+    }
     var before = dom.messages.childElementCount;
+
+    // Filter valid log records
+    var validLogs = [];
     for (var i = 0; i < logs.length; i += 1) {
-      var record = logs[i];
-      if (record && (record.id || record.no != null)) {
-        upsertLog(record);
+      var r = logs[i];
+      if (r && (r.id || r.no != null)) {
+        validLogs.push(r);
       }
     }
+    if (validLogs.length === 0) {
+      return;
+    }
+
+    // Sort valid logs by logNo ascending
+    validLogs.sort(function (a, b) {
+      return logNo(a) - logNo(b);
+    });
+
+    var fragment = document.createDocumentFragment ? document.createDocumentFragment() : null;
+    var fragmentCount = 0;
+
+    for (var j = 0; j < validLogs.length; j += 1) {
+      var record = validLogs[j];
+      var id = logKey(record);
+
+      if (state.logs.has(id)) {
+        // Update existing log
+        Object.assign(state.logs.get(id), record);
+        paintRow(id);
+      } else {
+        // New log record
+        state.logs.set(id, Object.assign({}, record));
+        state.order.push(id);
+        var row = createRow(id);
+        state.rows.set(id, row);
+        paintRow(id);
+
+        if (fragment) {
+          fragment.appendChild(row);
+          fragmentCount += 1;
+        } else {
+          placeRow(id);
+        }
+      }
+    }
+
+    // Keep state.order sorted by logNo
+    state.order.sort(function (a, b) {
+      var recA = state.logs.get(a);
+      var recB = state.logs.get(b);
+      return logNo(recA) - logNo(recB);
+    });
+
+    if (fragment && fragmentCount > 0) {
+      if (before === 0) {
+        // Initial load or empty messages container: single batch append
+        dom.messages.appendChild(fragment);
+      } else {
+        // Container already has rows; check if all new rows belong at the bottom
+        var lastChild = dom.messages.lastChild;
+        var lastRecord = lastChild && lastChild.dataset ? state.logs.get(lastChild.dataset.id) : null;
+        var firstNewChild = fragment.firstChild;
+        var firstNewRecord = firstNewChild && firstNewChild.dataset ? state.logs.get(firstNewChild.dataset.id) : null;
+
+        if (!lastRecord || !firstNewRecord || logNo(firstNewRecord) >= logNo(lastRecord)) {
+          // Monotonically increasing: append directly to bottom
+          dom.messages.appendChild(fragment);
+        } else {
+          // Out of order: unpack fragment and place individually via binary search / placeRow
+          while (fragment.firstChild) {
+            var node = fragment.firstChild;
+            if (fragment.removeChild) {
+              fragment.removeChild(node);
+            } else if (fragment.children) {
+              fragment.children.shift();
+            }
+            if (node.dataset && node.dataset.id) {
+              placeRow(node.dataset.id);
+            }
+          }
+        }
+      }
+    }
+
+    if (state.searchOpen) {
+      applySearchAndFilter();
+    }
+
     if (dom.messages.childElementCount !== before) {
       scrollToBottom();
     }

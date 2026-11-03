@@ -19,11 +19,36 @@ function createClassList() {
   };
 }
 
+function createDocumentFragmentMock() {
+  const children = [];
+  return {
+    nodeType: 11,
+    children,
+    get childElementCount() {
+      return children.length;
+    },
+    get firstChild() {
+      return children[0] || null;
+    },
+    get lastChild() {
+      return children[children.length - 1] || null;
+    },
+    appendChild: (child) => {
+      children.push(child);
+      return child;
+    },
+    append: (...nodes) => {
+      nodes.forEach((node) => children.push(node));
+    }
+  };
+}
+
 function createElementMock(id) {
   const listeners = {};
   const attributes = {};
   const element = {
     id,
+    nodeType: 1,
     value: '',
     textContent: '',
     innerHTML: '',
@@ -50,6 +75,15 @@ function createElementMock(id) {
       element.dispatch('click', {});
     },
     appendChild: (child) => {
+      if (child && child.nodeType === 11) {
+        while (child.children.length > 0) {
+          const c = child.children.shift();
+          element.children.push(c);
+          if (c && typeof c === 'object') c.parentNode = element;
+        }
+        element.childElementCount = element.children.length;
+        return child;
+      }
       element.children.push(child);
       element.childElementCount = element.children.length;
       if (child && typeof child === 'object') child.parentNode = element;
@@ -64,7 +98,36 @@ function createElementMock(id) {
       }
       return child;
     },
-    insertBefore: () => {},
+    insertBefore: (newNode, referenceNode) => {
+      if (newNode && newNode.nodeType !== 11) {
+        const existingIdx = element.children.indexOf(newNode);
+        if (existingIdx !== -1) {
+          element.children.splice(existingIdx, 1);
+        }
+      }
+      if (!referenceNode) {
+        return element.appendChild(newNode);
+      }
+      const idx = element.children.indexOf(referenceNode);
+      if (idx === -1) {
+        return element.appendChild(newNode);
+      }
+      if (newNode && newNode.nodeType === 11) {
+        let insertIdx = idx;
+        while (newNode.children.length > 0) {
+          const c = newNode.children.shift();
+          element.children.splice(insertIdx, 0, c);
+          if (c && typeof c === 'object') c.parentNode = element;
+          insertIdx += 1;
+        }
+        element.childElementCount = element.children.length;
+        return newNode;
+      }
+      element.children.splice(idx, 0, newNode);
+      element.childElementCount = element.children.length;
+      if (newNode && typeof newNode === 'object') newNode.parentNode = element;
+      return newNode;
+    },
     addEventListener: (type, fn) => {
       (listeners[type] = listeners[type] || []).push(fn);
     },
@@ -122,7 +185,7 @@ __harness__.exports = (function () {
     'showChat', 'cycleTheme', 'applyTheme', 'readTheme', 'THEMES',
     'openSearch', 'closeSearch', 'toggleSearch', 'setSearchCategory',
     'applySearchAndFilter', 'searchNext', 'searchPrev', 'matchesCategory',
-    'upsertLog', 'clearLogs', 'exportMarkdown', 'exportJson', 'copyTranscript',
+    'upsertLog', 'mergeLogs', 'placeRow', 'clearLogs', 'exportMarkdown', 'exportJson', 'copyTranscript',
     'openExportMenu', 'closeExportMenu', 'toggleExportMenu'
   ];
   var out = {};
@@ -182,6 +245,7 @@ __harness__.exports = (function () {
     body: bodyMock,
     getElementById: getEl,
     createElement: () => createElementMock('el'),
+    createDocumentFragment: () => createDocumentFragmentMock(),
     createTextNode: () => ({}),
     hasFocus: () => (options.hasFocus !== undefined ? options.hasFocus : true),
     addEventListener: (type, fn) => {
@@ -3573,6 +3637,101 @@ describe('VAL-EXPORT-002: Transcript clipboard copy', () => {
     assert.match(dom.copyTranscriptBtn.textContent, /Copy Transcript/i, 'Button text must reset to Copy Transcript');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* VAL-PERF-001: Log rendering batch DocumentFragment optimization    */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-PERF-001: Log rendering batch DocumentFragment optimization', () => {
+  test('VAL-PERF-001: mergeLogs appends new logs via DocumentFragment in a single DOM mutation', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, mergeLogs, state } = harness.exports;
+
+    let appendChildCalls = 0;
+    let appendedFragments = 0;
+    let appendedElements = 0;
+    const origAppendChild = dom.messages.appendChild;
+    dom.messages.appendChild = (child) => {
+      appendChildCalls += 1;
+      if (child && child.nodeType === 11) {
+        appendedFragments += 1;
+      } else {
+        appendedElements += 1;
+      }
+      return origAppendChild.call(dom.messages, child);
+    };
+
+    let insertBeforeCalls = 0;
+    const origInsertBefore = dom.messages.insertBefore;
+    dom.messages.insertBefore = (newNode, ref) => {
+      insertBeforeCalls += 1;
+      return origInsertBefore.call(dom.messages, newNode, ref);
+    };
+
+    const batch = [];
+    for (let i = 1; i <= 20; i += 1) {
+      batch.push({
+        id: `log-${i}`,
+        no: i,
+        type: i % 2 === 0 ? 'agent' : 'user',
+        content: `Message ${i}`
+      });
+    }
+
+    mergeLogs(batch);
+
+    assert.equal(dom.messages.childElementCount, 20, 'All 20 rows must be present in dom.messages');
+    assert.equal(state.order.length, 20, 'State order must track all 20 rows');
+    assert.equal(appendedFragments, 1, 'Batch mergeLogs must append via DocumentFragment');
+    assert.equal(appendChildCalls, 1, 'Batch mergeLogs must trigger single appendChild on dom.messages');
+    assert.equal(insertBeforeCalls, 0, 'Initial load append must not trigger quadratic insertBefore calls');
+  });
+
+  test('VAL-PERF-001: mergeLogs preserves ascending numerical order even if input logs are unsorted', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, mergeLogs } = harness.exports;
+
+    const unsortedBatch = [
+      { id: 'msg-30', no: 30, type: 'agent', content: 'Thirty' },
+      { id: 'msg-10', no: 10, type: 'user', content: 'Ten' },
+      { id: 'msg-20', no: 20, type: 'agent', content: 'Twenty' }
+    ];
+
+    mergeLogs(unsortedBatch);
+
+    assert.equal(dom.messages.childElementCount, 3);
+    const orderNos = dom.messages.children.map((c) => c.dataset.id);
+    assert.deepEqual(orderNos, ['msg-10', 'msg-20', 'msg-30'], 'Rows must be ordered by sequence/no ascending');
+  });
+
+  test('VAL-PERF-001: mergeLogs handles existing row updates and out-of-order incremental inserts', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, mergeLogs, state } = harness.exports;
+
+    // Initial batch
+    mergeLogs([
+      { id: 'msg-10', no: 10, type: 'user', content: 'Ten' },
+      { id: 'msg-30', no: 30, type: 'agent', content: 'Thirty' }
+    ]);
+    assert.equal(dom.messages.childElementCount, 2);
+
+    // Merge update to msg-30 and new insert msg-20 which belongs between msg-10 and msg-30
+    mergeLogs([
+      { id: 'msg-30', no: 30, type: 'agent', content: 'Thirty updated' },
+      { id: 'msg-20', no: 20, type: 'code_exe', content: 'Twenty inserted' }
+    ]);
+
+    assert.equal(dom.messages.childElementCount, 3);
+    const orderNos = dom.messages.children.map((c) => c.dataset.id);
+    assert.deepEqual(orderNos, ['msg-10', 'msg-20', 'msg-30']);
+    const rec30 = state.logs.get('msg-30');
+    assert.equal(rec30.content, 'Thirty updated');
+  });
+});
+
 
 
 

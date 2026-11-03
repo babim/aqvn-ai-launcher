@@ -202,3 +202,100 @@ async fn test_gateway_client_reconnects_with_jitter_backoff() {
     let _ = join_handle.await;
     server_handle.abort();
 }
+
+#[tokio::test]
+async fn test_telemetry_op_handling_val_tel_001() {
+    use aqvn_workspace_lib::connector::handlers::dispatch_message;
+    use aqvn_workspace_lib::connector::handlers::telemetry::{
+        collect_system_metrics, handle_telemetry_op, set_test_system_metrics,
+    };
+    use aqvn_workspace_lib::connector::protocol::{
+        ConnectorTelemetryOpResult, HostSystemMetrics, MSG_TYPE_TELEMETRY_OP,
+        MSG_TYPE_TELEMETRY_OP_RESULT,
+    };
+    use serde_json::{json, Value};
+
+    // Ensure test override is clear
+    set_test_system_metrics(None);
+
+    // 1. Live system metrics collection
+    let live_metrics = collect_system_metrics();
+    assert!(live_metrics.cpu_count > 0, "CPU count must be > 0");
+    assert!(
+        live_metrics.cpu_usage_percent >= 0.0 && live_metrics.cpu_usage_percent <= 100.0,
+        "CPU usage % must be within [0.0, 100.0]"
+    );
+    assert!(live_metrics.total_ram_mb > 0, "total RAM must be > 0");
+    assert!(live_metrics.free_ram_mb > 0, "free RAM must be > 0");
+    assert!(
+        live_metrics.available_ram_mb > 0,
+        "available RAM must be > 0"
+    );
+    assert!(!live_metrics.os.is_empty(), "OS must not be empty");
+    assert!(!live_metrics.arch.is_empty(), "Arch must not be empty");
+
+    // 2. Dispatch via dispatch_message
+    let req = json!({
+        "type": MSG_TYPE_TELEMETRY_OP,
+        "id": "tel-req-001",
+        "op_id": "tel-op-001",
+    });
+
+    let resp_str = dispatch_message(&req.to_string())
+        .await
+        .expect("dispatch_message must handle connector_telemetry_op");
+    let resp: Value = serde_json::from_str(&resp_str).expect("valid JSON response");
+
+    assert_eq!(resp["type"], MSG_TYPE_TELEMETRY_OP_RESULT);
+    assert_eq!(resp["op"], MSG_TYPE_TELEMETRY_OP_RESULT);
+    assert_eq!(resp["id"], "tel-req-001");
+    assert_eq!(resp["op_id"], "tel-op-001");
+    assert_eq!(resp["success"], true);
+    assert_eq!(resp["status"], "ok");
+
+    // Assert VAL-TEL-001 required fields
+    assert!(resp["cpu_count"].as_u64().unwrap() > 0);
+    assert!(resp["cpu_usage_percent"].as_f64().unwrap() >= 0.0);
+    assert!(resp["total_ram"].as_u64().unwrap() > 0);
+    assert!(resp["free_ram"].as_u64().unwrap() > 0);
+    assert!(resp["total_ram_mb"].as_u64().unwrap() > 0);
+    assert!(resp["free_ram_mb"].as_u64().unwrap() > 0);
+
+    // 3. Strongly typed deserialization
+    let typed: ConnectorTelemetryOpResult =
+        serde_json::from_value(resp.clone()).expect("parse ConnectorTelemetryOpResult");
+    assert_eq!(typed.id, "tel-req-001");
+    assert!(typed.success);
+    assert!(typed.cpu_count > 0);
+
+    // 4. Test mock metrics override
+    let mock_metrics = HostSystemMetrics {
+        cpu_count: 64,
+        cpu_usage_percent: 33.33,
+        total_ram_mb: 131072,
+        available_ram_mb: 65536,
+        free_ram_mb: 65536,
+        disk_free_gb: 512.5,
+        os: "aqvn-os".to_string(),
+        arch: "riscv64".to_string(),
+    };
+    set_test_system_metrics(Some(mock_metrics));
+
+    let direct_req = json!({
+        "type": MSG_TYPE_TELEMETRY_OP,
+        "id": "tel-mock-002",
+        "action": "get_metrics"
+    });
+    let mock_resp_str = handle_telemetry_op(&direct_req).await;
+    let mock_resp: Value = serde_json::from_str(&mock_resp_str).expect("valid mock JSON");
+    assert_eq!(mock_resp["cpu_count"], 64);
+    assert_eq!(mock_resp["cpu_usage_percent"], 33.33);
+    assert_eq!(mock_resp["total_ram"], 131072);
+    assert_eq!(mock_resp["free_ram"], 65536);
+    assert_eq!(mock_resp["disk_free_gb"], 512.5);
+    assert_eq!(mock_resp["os"], "aqvn-os");
+    assert_eq!(mock_resp["arch"], "riscv64");
+
+    // Clean up mock override
+    set_test_system_metrics(None);
+}

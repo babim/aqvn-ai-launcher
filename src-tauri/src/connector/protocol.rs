@@ -17,6 +17,9 @@ pub const MSG_TYPE_BROWSER_OP_RESULT: &str = "connector_browser_op_result";
 pub const MSG_TYPE_COMPUTER_USE_OP: &str = "connector_computer_use_op";
 pub const MSG_TYPE_COMPUTER_USE_OP_RESULT: &str = "connector_computer_use_op_result";
 
+pub const MSG_TYPE_TELEMETRY_OP: &str = "connector_telemetry_op";
+pub const MSG_TYPE_TELEMETRY_OP_RESULT: &str = "connector_telemetry_op_result";
+
 pub const MSG_TYPE_GATEWAY_CONTROL: &str = "connector_gateway_control";
 pub const MSG_TYPE_GATEWAY_CONTROL_RESULT: &str = "connector_gateway_control_result";
 
@@ -985,4 +988,60 @@ pub struct ConnectorRemoteTreeUpdate {
     pub total_files: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_dirs: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HostSystemMetrics {
+    pub cpu_count: usize,
+    pub cpu_usage_percent: f64,
+    pub total_ram_mb: u64,
+    pub available_ram_mb: u64,
+    pub free_ram_mb: u64,
+    pub disk_free_gb: f64,
+    pub os: String,
+    pub arch: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectorTelemetryOp {
+    #[serde(rename = "type", default)]
+    pub msg_type: Option<String>,
+    #[serde(default)]
+    pub op: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub op_id: Option<String>,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub params: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConnectorTelemetryOpResult {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub op: String,
+    pub id: String,
+    #[serde(default)]
+    pub op_id: String,
+    pub success: bool,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    pub cpu_count: usize,
+    pub cpu_usage_percent: f64,
+    pub total_ram: u64,
+    pub free_ram: u64,
+    pub total_ram_mb: u64,
+    pub free_ram_mb: u64,
+    pub available_ram_mb: u64,
+    pub disk_free_gb: f64,
+    pub os: String,
+    pub arch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<HostSystemMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }

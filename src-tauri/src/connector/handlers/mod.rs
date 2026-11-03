@@ -7,13 +7,14 @@ pub mod browser;
 pub mod computer_use;
 pub mod exec;
 pub mod files;
+pub mod telemetry;
 
 use crate::connector::client::GatewayConfig;
 use crate::connector::protocol::{
     MSG_TYPE_BROWSER_OP, MSG_TYPE_BROWSER_OP_RESULT, MSG_TYPE_COMPUTER_USE_OP,
     MSG_TYPE_COMPUTER_USE_OP_RESULT, MSG_TYPE_EXEC_OP, MSG_TYPE_EXEC_OP_RESULT, MSG_TYPE_FILE_OP,
     MSG_TYPE_FILE_OP_RESULT, MSG_TYPE_GATEWAY_CONTROL, MSG_TYPE_GATEWAY_CONTROL_RESULT,
-    MSG_TYPE_REMOTE_TREE_UPDATE,
+    MSG_TYPE_REMOTE_TREE_UPDATE, MSG_TYPE_TELEMETRY_OP,
 };
 use serde_json::Value;
 
@@ -221,6 +222,9 @@ pub async fn dispatch_message_scoped(
                 );
             }
             Some(computer_use::handle_computer_use_op(&envelope).await)
+        }
+        MSG_TYPE_TELEMETRY_OP | "telemetry_op" | "telemetry" => {
+            Some(telemetry::handle_telemetry_op(&envelope).await)
         }
         _ => None,
     }

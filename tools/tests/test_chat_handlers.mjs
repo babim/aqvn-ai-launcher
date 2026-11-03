@@ -46,9 +46,22 @@ function createElementMock(id) {
       nodes.forEach((node) => element.appendChild(node));
     },
     focus: () => {},
+    click: () => {
+      element.dispatch('click', {});
+    },
     appendChild: (child) => {
       element.children.push(child);
       element.childElementCount = element.children.length;
+      if (child && typeof child === 'object') child.parentNode = element;
+      return child;
+    },
+    removeChild: (child) => {
+      const idx = element.children.indexOf(child);
+      if (idx !== -1) {
+        element.children.splice(idx, 1);
+        element.childElementCount = element.children.length;
+        if (child && typeof child === 'object') child.parentNode = null;
+      }
       return child;
     },
     insertBefore: () => {},
@@ -109,7 +122,8 @@ __harness__.exports = (function () {
     'showChat', 'cycleTheme', 'applyTheme', 'readTheme', 'THEMES',
     'openSearch', 'closeSearch', 'toggleSearch', 'setSearchCategory',
     'applySearchAndFilter', 'searchNext', 'searchPrev', 'matchesCategory',
-    'upsertLog', 'clearLogs'
+    'upsertLog', 'clearLogs', 'exportMarkdown', 'exportJson', 'copyTranscript',
+    'openExportMenu', 'closeExportMenu', 'toggleExportMenu'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -159,12 +173,13 @@ __harness__.exports = (function () {
   };
 
   const docListeners = {};
+  const bodyMock = createElementMock('body');
   const docElement = createElementMock('html');
   const documentMock = {
     title: '',
     readyState: 'loading',
     documentElement: docElement,
-    body: { classList: createClassList(), style: {} },
+    body: bodyMock,
     getElementById: getEl,
     createElement: () => createElementMock('el'),
     createTextNode: () => ({}),
@@ -205,6 +220,8 @@ __harness__.exports = (function () {
     Intl,
     crypto,
     fetch: null,
+    Blob,
+    URL,
     Headers,
     Response,
     URLSearchParams,
@@ -214,6 +231,8 @@ __harness__.exports = (function () {
       localStorage: localStorageMock,
       setTimeout: fakeSetTimeout,
       clearTimeout: fakeClearTimeout,
+      URL,
+      Blob,
       __AQVN_PROXY__: null,
       bridge: null
     },
@@ -242,7 +261,8 @@ __harness__.exports = (function () {
     'search-toggle-btn', 'search-drawer', 'search-input', 'search-count',
     'search-prev-btn', 'search-next-btn', 'search-close-btn', 'search-filters',
     'filter-all-btn', 'filter-code-btn', 'filter-tool-btn', 'filter-thought-btn',
-    'filter-error-btn', 'messages'
+    'filter-error-btn', 'messages', 'export-toggle-btn', 'export-menu',
+    'export-md-btn', 'export-json-btn', 'copy-transcript-btn'
   ].forEach((id) => {
     dom[id] = getEl(id);
   });
@@ -266,6 +286,11 @@ __harness__.exports = (function () {
   dom.filterErrorBtn = getEl('filter-error-btn');
   dom.filterErrorBtn.dataset.category = 'error';
   dom.messages = getEl('messages');
+  dom.exportToggleBtn = getEl('export-toggle-btn');
+  dom.exportMenu = getEl('export-menu');
+  dom.exportMdBtn = getEl('export-md-btn');
+  dom.exportJsonBtn = getEl('export-json-btn');
+  dom.copyTranscriptBtn = getEl('copy-transcript-btn');
 
   return {
     exports: context.__harness__.exports,
@@ -3330,6 +3355,225 @@ describe('VAL-SEARCH-002: Search category filter pills', () => {
     assert.match(css, /mark\.search-match\.active/, 'CSS must style active search match');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* VAL-EXPORT-001: Transcript export to Markdown and JSON             */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-EXPORT-001: Transcript export to Markdown and JSON', () => {
+  test('VAL-EXPORT-001: ui/index.html exposes conversation export dropdown button and menu items', () => {
+    const html = readIndexHtml();
+
+    assert.match(html, /id="export-toggle-btn"/, 'ui/index.html must declare #export-toggle-btn');
+    assert.match(html, /id="export-menu"/, 'ui/index.html must declare #export-menu');
+    assert.match(html, /id="export-md-btn"/, 'ui/index.html must declare #export-md-btn');
+    assert.match(html, /id="export-json-btn"/, 'ui/index.html must declare #export-json-btn');
+    assert.match(html, /id="copy-transcript-btn"/, 'ui/index.html must declare #copy-transcript-btn');
+  });
+
+  test('VAL-EXPORT-001: clicking #export-toggle-btn toggles #export-menu dropdown visibility', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom } = harness.exports;
+
+    assert.equal(dom.exportMenu.hidden, true, 'Export menu starts hidden');
+
+    dom.exportToggleBtn.dispatch('click', {});
+    assert.equal(dom.exportMenu.hidden, false, 'Clicking #export-toggle-btn opens export menu');
+
+    dom.exportToggleBtn.dispatch('click', {});
+    assert.equal(dom.exportMenu.hidden, true, 'Clicking again closes export menu');
+  });
+
+  test('VAL-EXPORT-001: Export Markdown triggers .md file download with structured messages and timestamps', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, upsertLog, exportMarkdown } = harness.exports;
+
+    upsertLog({
+      id: 'm-1',
+      no: 1,
+      type: 'user',
+      content: 'Can you run the tests?',
+      timestamp: 1700000000
+    });
+    upsertLog({
+      id: 'm-2',
+      no: 2,
+      type: 'thought',
+      thought: true,
+      content: 'I need to check the test suite.',
+      timestamp: 1700000001
+    });
+    upsertLog({
+      id: 'm-3',
+      no: 3,
+      type: 'code_exe',
+      content: 'cargo test',
+      timestamp: 1700000002
+    });
+    upsertLog({
+      id: 'm-4',
+      no: 4,
+      type: 'agent',
+      content: 'All tests passed successfully.',
+      timestamp: 1700000003
+    });
+
+    let downloadTriggered = false;
+    let downloadedBlob = null;
+    let downloadedFilename = '';
+
+    const origCreateElement = harness.document.createElement;
+    harness.document.createElement = (tag) => {
+      const el = origCreateElement(tag);
+      if (tag === 'a') {
+        el.click = () => {
+          downloadTriggered = true;
+          downloadedFilename = el.download;
+        };
+      }
+      return el;
+    };
+
+    harness.context.URL.createObjectURL = (blob) => {
+      downloadedBlob = blob;
+      return 'blob:mock-export-url';
+    };
+    harness.context.URL.revokeObjectURL = () => {};
+
+    dom.exportMdBtn.dispatch('click', {});
+
+    assert.equal(downloadTriggered, true, 'Export Markdown must trigger download');
+    assert.match(downloadedFilename, /\.md$/, 'Filename must end with .md');
+    assert.ok(downloadedBlob, 'Must create a Blob for download');
+
+    const md = typeof exportMarkdown === 'function' ? exportMarkdown() : '';
+    assert.match(md, /# (Conversation|Chat) Transcript/, 'Markdown must have a title');
+    assert.match(md, /## (You|Assistant|User)/, 'Markdown must include role headings');
+    assert.match(md, /Can you run the tests\?/, 'Markdown must contain user content');
+    assert.match(md, /Thought/i, 'Markdown must include thought section');
+    assert.match(md, /cargo test/, 'Markdown must include code execution');
+    assert.match(md, /All tests passed successfully\./, 'Markdown must include agent content');
+    assert.match(md, /2023|UTC|\d{4}/, 'Markdown must include timestamps');
+  });
+
+  test('VAL-EXPORT-001: Export JSON triggers .json download of raw logs', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, upsertLog, exportJson } = harness.exports;
+
+    upsertLog({
+      id: 'm-1',
+      no: 1,
+      type: 'user',
+      content: 'Hello world',
+      timestamp: 1700000000
+    });
+    upsertLog({
+      id: 'm-2',
+      no: 2,
+      type: 'agent',
+      content: 'Hello! How can I help?',
+      timestamp: 1700000001
+    });
+
+    let downloadTriggered = false;
+    let downloadedFilename = '';
+    let downloadedBlob = null;
+
+    const origCreateElement = harness.document.createElement;
+    harness.document.createElement = (tag) => {
+      const el = origCreateElement(tag);
+      if (tag === 'a') {
+        el.click = () => {
+          downloadTriggered = true;
+          downloadedFilename = el.download;
+        };
+      }
+      return el;
+    };
+
+    harness.context.URL.createObjectURL = (blob) => {
+      downloadedBlob = blob;
+      return 'blob:mock-json-url';
+    };
+    harness.context.URL.revokeObjectURL = () => {};
+
+    dom.exportJsonBtn.dispatch('click', {});
+
+    assert.equal(downloadTriggered, true, 'Export JSON must trigger download');
+    assert.match(downloadedFilename, /\.json$/, 'Filename must end with .json');
+
+    const jsonStr = typeof exportJson === 'function' ? exportJson() : '';
+    const parsed = JSON.parse(jsonStr);
+    assert.ok(Array.isArray(parsed), 'Exported JSON must be an array of logs');
+    assert.equal(parsed.length, 2, 'Exported JSON must contain all logs');
+    assert.equal(parsed[0].id, 'm-1');
+    assert.equal(parsed[0].content, 'Hello world');
+    assert.equal(parsed[1].id, 'm-2');
+  });
+
+  test('VAL-EXPORT-001: ui/chat.css styles export dropdown and menu items', () => {
+    const css = readChatCss();
+
+    assert.match(css, /\.export-dropdown/, 'CSS must style .export-dropdown');
+    assert.match(css, /\.export-menu/, 'CSS must style .export-menu');
+    assert.match(css, /\.export-item/, 'CSS must style .export-item');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-EXPORT-002: Transcript clipboard copy                          */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-EXPORT-002: Transcript clipboard copy', () => {
+  test('VAL-EXPORT-002: Copy Transcript writes formatted transcript to navigator.clipboard and provides feedback', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, upsertLog } = harness.exports;
+
+    upsertLog({
+      id: 'm-1',
+      no: 1,
+      type: 'user',
+      content: 'What is 2+2?',
+      timestamp: 1700000000
+    });
+    upsertLog({
+      id: 'm-2',
+      no: 2,
+      type: 'agent',
+      content: '4',
+      timestamp: 1700000001
+    });
+
+    let copiedText = null;
+    harness.context.navigator = {
+      clipboard: {
+        writeText: (val) => {
+          copiedText = val;
+          return Promise.resolve();
+        }
+      }
+    };
+
+    dom.copyTranscriptBtn.dispatch('click', {});
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.ok(copiedText, 'Clipboard writeText must be called');
+    assert.match(copiedText, /What is 2\+2\?/, 'Transcript must contain user message');
+    assert.match(copiedText, /4/, 'Transcript must contain assistant message');
+    assert.match(dom.copyTranscriptBtn.textContent, /Copied!|Copied/i, 'Button text must show copied feedback');
+
+    const reset = harness.timeouts.find((t) => t.delay === 1200 || t.delay === 1500 || t.delay === 2000);
+    assert.ok(reset, 'Feedback reset timeout must be set');
+    reset.fn();
+    assert.match(dom.copyTranscriptBtn.textContent, /Copy Transcript/i, 'Button text must reset to Copy Transcript');
+  });
+});
+
 
 
 

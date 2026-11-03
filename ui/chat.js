@@ -1344,10 +1344,17 @@
       event.preventDefault();
       return true;
     }
-    if (key === 'escape' && state.searchOpen) {
-      closeSearch();
-      event.preventDefault();
-      return true;
+    if (key === 'escape') {
+      if (dom.exportMenu && !dom.exportMenu.hidden) {
+        closeExportMenu();
+        event.preventDefault();
+        return true;
+      }
+      if (state.searchOpen) {
+        closeSearch();
+        event.preventDefault();
+        return true;
+      }
     }
     if (!event.altKey || event.ctrlKey || event.metaKey) {
       return false;
@@ -1643,6 +1650,163 @@
     applySearchAndFilter();
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Conversation Export & Transcript Copy                              */
+  /* ------------------------------------------------------------------ */
+
+  function formatTimestamp(ts) {
+    if (!ts) return '';
+    try {
+      var d = new Date(ts > 1e11 ? ts : ts * 1000);
+      return d.toISOString().replace('T', ' ').replace(/\..+/, ' UTC');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function getSortedLogEntries() {
+    var entries = [];
+    state.logs.forEach(function (rec) {
+      entries.push(rec);
+    });
+    entries.sort(function (a, b) {
+      return logNo(a) - logNo(b);
+    });
+    return entries;
+  }
+
+  function exportMarkdown() {
+    var entries = getSortedLogEntries();
+    var lines = [];
+    lines.push('# Conversation Transcript');
+    lines.push('');
+    lines.push('*Exported: ' + formatTimestamp(Date.now() / 1000) + '*');
+    lines.push('');
+
+    for (var i = 0; i < entries.length; i += 1) {
+      var rec = entries[i];
+      var type = rec.type || 'info';
+      var roleName = TYPE_LABELS[type] || type;
+      if (type === 'user') roleName = 'You';
+      else if (type === 'agent' || type === 'response') roleName = 'Assistant';
+      else if (type === 'code_exe') roleName = 'Code Execution';
+      else if (type === 'tool') roleName = 'Tool Operation';
+      else if (rec.thought === true || type === 'thought' || type === 'thinking' || type === 'reasoning') roleName = 'Thought';
+
+      var ts = formatTimestamp(rec.timestamp);
+      var header = '## ' + roleName + (ts ? ' (' + ts + ')' : '');
+      lines.push(header);
+      lines.push('');
+
+      var content = rec.content || '';
+      if (type === 'code_exe') {
+        lines.push('```bash');
+        lines.push(content);
+        lines.push('```');
+      } else if (rec.thought === true || type === 'thought' || type === 'thinking' || type === 'reasoning') {
+        lines.push('> ' + content.replace(/\n/g, '\n> '));
+      } else {
+        lines.push(content);
+      }
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
+  function exportJson() {
+    var entries = getSortedLogEntries();
+    return JSON.stringify(entries, null, 2);
+  }
+
+  function copyTranscript() {
+    var entries = getSortedLogEntries();
+    var lines = [];
+    for (var i = 0; i < entries.length; i += 1) {
+      var rec = entries[i];
+      var type = rec.type || 'info';
+      var roleName = TYPE_LABELS[type] || type;
+      if (type === 'user') roleName = 'You';
+      else if (type === 'agent' || type === 'response') roleName = 'Assistant';
+      else if (type === 'code_exe') roleName = 'Code Execution';
+      else if (type === 'tool') roleName = 'Tool Operation';
+      else if (rec.thought === true || type === 'thought' || type === 'thinking' || type === 'reasoning') roleName = 'Thought';
+
+      var ts = formatTimestamp(rec.timestamp);
+      lines.push('[' + roleName + (ts ? ' - ' + ts : '') + ']');
+      lines.push(rec.content || '');
+      lines.push('');
+    }
+
+    var transcriptText = lines.join('\n').trim();
+    var clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : null;
+    if (!clipboard || typeof clipboard.writeText !== 'function') {
+      return;
+    }
+
+    Promise.resolve(clipboard.writeText(transcriptText))
+      .then(function () {
+        if (dom.copyTranscriptBtn) {
+          var origText = dom.copyTranscriptBtn.textContent;
+          dom.copyTranscriptBtn.textContent = 'Copied!';
+          window.setTimeout(function () {
+            dom.copyTranscriptBtn.textContent = origText || 'Copy Transcript';
+          }, 1500);
+        }
+      })
+      .catch(function () {});
+  }
+
+  function triggerDownload(content, filename, mimeType) {
+    var blob = new Blob([content], { type: mimeType });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    if (document.body && typeof document.body.appendChild === 'function') {
+      document.body.appendChild(a);
+    }
+    if (typeof a.click === 'function') {
+      a.click();
+    }
+    if (document.body && typeof document.body.removeChild === 'function') {
+      try {
+        document.body.removeChild(a);
+      } catch (e) {}
+    }
+    window.setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 1000);
+  }
+
+  function openExportMenu() {
+    if (dom.exportMenu) {
+      dom.exportMenu.hidden = false;
+      dom.exportMenu.removeAttribute('hidden');
+    }
+    if (dom.exportToggleBtn) {
+      dom.exportToggleBtn.setAttribute('aria-expanded', 'true');
+    }
+  }
+
+  function closeExportMenu() {
+    if (dom.exportMenu) {
+      dom.exportMenu.hidden = true;
+      dom.exportMenu.setAttribute('hidden', '');
+    }
+    if (dom.exportToggleBtn) {
+      dom.exportToggleBtn.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  function toggleExportMenu() {
+    if (dom.exportMenu && !dom.exportMenu.hidden) {
+      closeExportMenu();
+    } else {
+      openExportMenu();
+    }
+  }
+
   function renderSidebarServers() {
     if (!dom.sidebarServerSelect) {
       return;
@@ -1685,6 +1849,15 @@
     dom.filterToolBtn = byId('filter-tool-btn');
     dom.filterThoughtBtn = byId('filter-thought-btn');
     dom.filterErrorBtn = byId('filter-error-btn');
+    dom.exportToggleBtn = byId('export-toggle-btn');
+    dom.exportMenu = byId('export-menu');
+    dom.exportMdBtn = byId('export-md-btn');
+    dom.exportJsonBtn = byId('export-json-btn');
+    dom.copyTranscriptBtn = byId('copy-transcript-btn');
+
+    if (dom.exportMenu) {
+      dom.exportMenu.hidden = true;
+    }
 
     if (dom.searchDrawer) {
       dom.searchDrawer.hidden = true;
@@ -1715,6 +1888,33 @@
     if (dom.themeToggleBtn) {
       dom.themeToggleBtn.addEventListener('click', function () {
         cycleTheme();
+      });
+    }
+    if (dom.exportToggleBtn) {
+      dom.exportToggleBtn.addEventListener('click', function (e) {
+        if (typeof e.stopPropagation === 'function') e.stopPropagation();
+        toggleExportMenu();
+      });
+    }
+    if (dom.exportMdBtn) {
+      dom.exportMdBtn.addEventListener('click', function () {
+        closeExportMenu();
+        var md = exportMarkdown();
+        var filename = 'transcript-' + (state.context || 'conversation') + '-' + Date.now() + '.md';
+        triggerDownload(md, filename, 'text/markdown');
+      });
+    }
+    if (dom.exportJsonBtn) {
+      dom.exportJsonBtn.addEventListener('click', function () {
+        closeExportMenu();
+        var json = exportJson();
+        var filename = 'transcript-' + (state.context || 'conversation') + '-' + Date.now() + '.json';
+        triggerDownload(json, filename, 'application/json');
+      });
+    }
+    if (dom.copyTranscriptBtn) {
+      dom.copyTranscriptBtn.addEventListener('click', function () {
+        copyTranscript();
       });
     }
     if (dom.searchToggleBtn) {
@@ -1799,6 +1999,23 @@
         hardRefresh();
       });
     }
+
+    document.addEventListener('click', function (e) {
+      if (dom.exportMenu && !dom.exportMenu.hidden) {
+        var inExport = false;
+        var node = e.target;
+        while (node) {
+          if (node === dom.exportMenu || node === dom.exportToggleBtn) {
+            inExport = true;
+            break;
+          }
+          node = node.parentNode;
+        }
+        if (!inExport) {
+          closeExportMenu();
+        }
+      }
+    });
 
     applyZoom(readZoom());
     document.addEventListener('keydown', handleShortcut);
@@ -2077,6 +2294,11 @@
     dom.filterToolBtn = byId('filter-tool-btn');
     dom.filterThoughtBtn = byId('filter-thought-btn');
     dom.filterErrorBtn = byId('filter-error-btn');
+    dom.exportToggleBtn = byId('export-toggle-btn');
+    dom.exportMenu = byId('export-menu');
+    dom.exportMdBtn = byId('export-md-btn');
+    dom.exportJsonBtn = byId('export-json-btn');
+    dom.copyTranscriptBtn = byId('copy-transcript-btn');
 
     if (dom.messages) {
       dom.messages.addEventListener('click', onMessagesClick);

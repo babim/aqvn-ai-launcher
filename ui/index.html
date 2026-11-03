@@ -245,6 +245,22 @@
                 aria-label="Search conversation"
                 aria-expanded="false"
               >&#128269;</button>
+              <div class="export-dropdown">
+                <button
+                  id="export-toggle-btn"
+                  type="button"
+                  class="icon-btn export-toggle-btn"
+                  title="Export conversation"
+                  aria-label="Export conversation"
+                  aria-haspopup="true"
+                  aria-expanded="false"
+                >&#8942;</button>
+                <div id="export-menu" class="export-menu" role="menu" hidden>
+                  <button id="export-md-btn" type="button" class="export-item" role="menuitem">Export Markdown (.md)</button>
+                  <button id="export-json-btn" type="button" class="export-item" role="menuitem">Export JSON (.json)</button>
+                  <button id="copy-transcript-btn" type="button" class="export-item" role="menuitem">Copy Transcript</button>
+                </div>
+              </div>
               <button id="stop-btn" type="button" disabled>Stop</button>
             </div>
           </div>

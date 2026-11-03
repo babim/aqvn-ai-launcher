@@ -9,7 +9,7 @@
 #                  Xvfb / D-Bus / tray / notification hosts.
 set -euo pipefail
 
-RIG=/home/babim/Desktop/dev/dev.aqvn/ai-launcher/tools/tray_rig.sh
+RIG="$(dirname "${BASH_SOURCE[0]}")/../tray_rig.sh"
 RIG_DIR="${AQVN_TEST_RIG_DIR:-/tmp/aqvn-rig-restart-test}"
 DISPLAY_NUM="${AQVN_TEST_RIG_DISPLAY:-:99}"
 
@@ -63,12 +63,12 @@ pid_after="$(cat "$RIG_DIR/pids/app.pid")"
 kill -0 "$pid_after" 2>/dev/null || fail "VAL-CROSS-003 relaunched app not alive"
 
 for _ in $(seq 1 40); do
-  if DISPLAY="$DISPLAY_NUM" xdotool search --onlyvisible --name 'AQVN AI Workspace' >/dev/null 2>&1; then
+  if DISPLAY="$DISPLAY_NUM" xdotool search --onlyvisible --name 'AQVN.*Workspace' >/dev/null 2>&1; then
     break
   fi
   sleep 0.5
 done
-DISPLAY="$DISPLAY_NUM" xdotool search --onlyvisible --name 'AQVN AI Workspace' >/dev/null 2>&1 ||
+DISPLAY="$DISPLAY_NUM" xdotool search --onlyvisible --name 'AQVN.*Workspace' >/dev/null 2>&1 ||
   fail "VAL-CROSS-003 window did not come back after restart"
 
 if ss -tln | grep -qE ':(55080|55022)\b'; then

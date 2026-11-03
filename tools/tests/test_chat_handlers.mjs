@@ -4640,6 +4640,86 @@ describe('VAL-DEBT-003: Binary file upload safe transfer', () => {
   });
 });
 
+describe('VAL-DEBT-004: Tooling and CI hygiene', () => {
+  test('VAL-DEBT-004: tools/tests/tray_rig_restart_test.sh uses relative RIG path without hardcoded /home/babim', () => {
+    const shPath = new URL('tray_rig_restart_test.sh', import.meta.url);
+    const sh = fs.readFileSync(shPath, 'utf8');
+
+    assert.doesNotMatch(
+      sh,
+      /\/home\/babim/,
+      'tray_rig_restart_test.sh must not contain hardcoded user path /home/babim'
+    );
+    assert.doesNotMatch(
+      sh,
+      /\/home\/[a-zA-Z0-9_-]+/,
+      'tray_rig_restart_test.sh must not contain hardcoded /home/<user> paths'
+    );
+    assert.match(
+      sh,
+      /RIG=(?:(?:\$\{[^}]*:-)?["']?\$\(dirname ["']?\$\{?BASH_SOURCE\[0\]\}?["']?\)\/\.\.\/tray_rig\.sh["']?|\.\.\/tray_rig\.sh)/,
+      'tray_rig_restart_test.sh must use relative RIG path to tray_rig.sh'
+    );
+  });
+
+  test('VAL-DEBT-004: tray_rig.sh and restart test search for window with regex matching AQVN.*Workspace', () => {
+    const testShPath = new URL('tray_rig_restart_test.sh', import.meta.url);
+    const testSh = fs.readFileSync(testShPath, 'utf8');
+    const rigShPath = new URL('../tray_rig.sh', import.meta.url);
+    const rigSh = fs.readFileSync(rigShPath, 'utf8');
+
+    assert.match(
+      testSh,
+      /xdotool\s+search\s+--onlyvisible\s+--name\s+['"]AQVN\.\*Workspace['"]/,
+      'tray_rig_restart_test.sh must search for window matching AQVN.*Workspace regex'
+    );
+    assert.doesNotMatch(
+      testSh,
+      /xdotool\s+search\s+--onlyvisible\s+--name\s+['"]AQVN AI Workspace['"]/,
+      'tray_rig_restart_test.sh must not use static AQVN AI Workspace string'
+    );
+
+    assert.match(
+      rigSh,
+      /xdotool\s+search\s+--onlyvisible\s+--name\s+['"]AQVN\.\*Workspace['"]/,
+      'tray_rig.sh must search for window matching AQVN.*Workspace regex'
+    );
+    assert.doesNotMatch(
+      rigSh,
+      /xdotool\s+search\s+--onlyvisible\s+--name\s+['"]AQVN AI Workspace['"]/,
+      'tray_rig.sh must not use static AQVN AI Workspace string'
+    );
+  });
+
+  test('VAL-DEBT-004: tools/benchmark.sh sets MAX_BINARY_BYTES to 10485760 (10MB)', () => {
+    const benchPath = new URL('../benchmark.sh', import.meta.url);
+    const bench = fs.readFileSync(benchPath, 'utf8');
+
+    assert.match(
+      bench,
+      /MAX_BINARY_BYTES=10485760/,
+      'benchmark.sh must set MAX_BINARY_BYTES to 10485760'
+    );
+    assert.doesNotMatch(
+      bench,
+      /MAX_BINARY_BYTES=8388608/,
+      'benchmark.sh must not retain legacy 8MB threshold'
+    );
+  });
+
+  test('VAL-DEBT-004: .github/workflows/ci.yml runs tests, clippy, and fmt on master push and PRs', () => {
+    const ciPath = new URL('../../.github/workflows/ci.yml', import.meta.url);
+    assert.ok(fs.existsSync(ciPath), '.github/workflows/ci.yml must exist');
+
+    const ciYaml = fs.readFileSync(ciPath, 'utf8');
+    assert.match(ciYaml, /push:\s*\n\s+branches:\s*\n\s+-\s+master|push:\s*\n\s+branches:\s*\[.*master.*\]/, 'CI must trigger on master push');
+    assert.match(ciYaml, /pull_request/, 'CI must trigger on pull requests');
+    assert.match(ciYaml, /cargo\s+test/, 'CI must run cargo test');
+    assert.match(ciYaml, /cargo\s+clippy/, 'CI must run cargo clippy');
+    assert.match(ciYaml, /cargo\s+fmt/, 'CI must run cargo fmt');
+  });
+});
+
 
 
 

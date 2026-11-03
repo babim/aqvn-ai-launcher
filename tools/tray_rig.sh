@@ -190,7 +190,7 @@ window_state() {
   # The tray icon is a small 24x24 window owned by the app too, so match the
   # synced document title instead of the process class.
   local id
-  id="$(xdotool search --onlyvisible --name 'AQVN AI Workspace' 2>/dev/null | sed -n '1p' || true)"
+  id="$(xdotool search --onlyvisible --name 'AQVN.*Workspace' 2>/dev/null | sed -n '1p' || true)"
   if [ -n "$id" ]; then
     echo "window visible (id $id)"
   else

@@ -2,7 +2,7 @@
 # tools/benchmark.sh
 #
 # Measures all five performance gates on the Linux release binary under Xvfb:
-#   (1) Binary size:              < 8,388,608 bytes (8 MB)
+#   (1) Binary size:              < 10,485,760 bytes (10 MB)
 #   (2) Main process PrivDirty:   < 40,960 KB (40 MB), Private_Dirty from smaps_rollup (ruling R14)
 #   (3) Total family PrivDirty:   < 204,800 KB (200 MB), sum of app + WebKit child processes (ruling R14)
 #   (4) FCP:                      < 100 ms after window shown (JS Performance API / first layout fallback)
@@ -17,7 +17,7 @@ BINARY="$REPO_ROOT/src-tauri/target/release/aqvn-workspace"
 FCP_LOG="/tmp/aqvn-benchmark-fcp.json"
 
 # Gate thresholds
-MAX_BINARY_BYTES=8388608
+MAX_BINARY_BYTES=10485760
 MAX_MAIN_DIRTY_KB=40960
 MAX_TOTAL_DIRTY_KB=204800
 MAX_FCP_MS=100.0
@@ -261,7 +261,7 @@ fi
 echo "---------------------------------------------------------------------------------"
 printf "%-26s | %-24s | %-14s | %s\n" "Gate" "Measured" "Threshold" "Result"
 echo "---------------------------------------------------------------------------------"
-printf "%-26s | %-24s | %-14s | %s\n" "1. Binary Size" "$BINARY_BYTES B ($BINARY_MB MB)" "< 8,388,608 B" "[$GATE1_STATUS]"
+printf "%-26s | %-24s | %-14s | %s\n" "1. Binary Size" "$BINARY_BYTES B ($BINARY_MB MB)" "< 10,485,760 B" "[$GATE1_STATUS]"
 printf "%-26s | %-24s | %-14s | %s\n" "2. Main Private_Dirty" "$MAIN_DIRTY_KB KB ($MAIN_DIRTY_MB MB)" "< 40,960 KB" "[$GATE2_STATUS]"
 printf "%-26s | %-24s | %-14s | %s\n" "3. Total Family PrivDirty" "$TOTAL_DIRTY_KB KB ($TOTAL_DIRTY_MB MB)" "< 204,800 KB" "[$GATE3_STATUS]"
 printf "%-26s | %-24s | %-14s | %s\n" "4. FCP (${FCP_METHOD})" "${FCP_MS} ms" "< 100.0 ms" "[$GATE4_STATUS]"

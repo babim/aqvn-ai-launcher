@@ -203,14 +203,16 @@ pub fn run() {
             let store_file = config::store_path(&poll_handle).ok();
             tauri::async_runtime::spawn(async move {
                 let mut last = poll_initial;
-                #[cfg(not(target_os = "android"))]
-                let mut last_gateway_connected = app::tray::is_gateway_connected();
+                let mut last_mtime = store_file
+                    .as_deref()
+                    .and_then(|p| std::fs::metadata(p).ok())
+                    .and_then(|m| m.modified().ok());
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    let next = store_file
-                        .as_deref()
-                        .and_then(config::load_from_file)
-                        .or_else(|| config::AppConfig::load_from_store(&poll_handle).ok());
+                    let next = match store_file.as_deref() {
+                        Some(p) => config::load_from_file_if_modified(p, &mut last_mtime),
+                        None => config::AppConfig::load_from_store(&poll_handle).ok(),
+                    };
                     let Some(next) = next else { continue };
                     #[cfg(not(target_os = "android"))]
                     let server_url_changed = next.server_url != last.server_url;
@@ -239,29 +241,22 @@ pub fn run() {
                                 let _ = main_win.eval("window.location.reload();");
                             }
                         }
+                        #[cfg(not(target_os = "android"))]
+                        if server_url_changed || server_profiles_changed {
+                            let _ = app::tray::update_tray_status(
+                                &poll_handle,
+                                &next.server_url,
+                                app::tray::is_gateway_connected(),
+                            );
+                        }
+                        #[cfg(not(target_os = "android"))]
+                        if workspace_path_changed {
+                            app::tray::set_workspace_path(&next.workspace_path);
+                        }
                         last = next.clone();
                         #[cfg(not(target_os = "android"))]
                         connector::handlers::files::sync_from_app_config(&last);
                         poll_watcher.update(next);
-                    }
-
-                    #[cfg(not(target_os = "android"))]
-                    {
-                        let current_gw = app::tray::is_gateway_connected();
-                        if server_url_changed
-                            || server_profiles_changed
-                            || current_gw != last_gateway_connected
-                        {
-                            last_gateway_connected = current_gw;
-                            let _ = app::tray::update_tray_status(
-                                &poll_handle,
-                                &last.server_url,
-                                current_gw,
-                            );
-                        }
-                        if workspace_path_changed {
-                            app::tray::set_workspace_path(&last.workspace_path);
-                        }
                     }
                 }
             });

@@ -280,3 +280,75 @@ fn load_from_file_applies_partial_settings() {
 
     let _ = std::fs::remove_file(path5);
 }
+
+#[test]
+fn test_settings_store_poll_uses_mtime_check_and_skips_unchanged() {
+    // VAL-DEBT-001: Settings store poll loop checks mtime and skips file reading/JSON deserialization when unchanged.
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "aqvn-settings-mtime-{}-{unique}.json",
+        std::process::id()
+    ));
+
+    std::fs::write(&path, r#"{"server_url": "https://mtime1.example"}"#)
+        .expect("write settings fixture");
+
+    let mut last_mtime = None;
+
+    // First call: mtime was None, so it should read the file and update last_mtime
+    let loaded1 = aqvn_workspace_lib::config::load_from_file_if_modified(&path, &mut last_mtime);
+    assert!(loaded1.is_some(), "first load must succeed");
+    assert_eq!(loaded1.unwrap().server_url, "https://mtime1.example");
+    assert!(
+        last_mtime.is_some(),
+        "last_mtime must be populated after load"
+    );
+
+    // Second call immediately without modifying the file: mtime matches, so it must return None
+    let loaded2 = aqvn_workspace_lib::config::load_from_file_if_modified(&path, &mut last_mtime);
+    assert!(
+        loaded2.is_none(),
+        "second load must return None because mtime is unchanged (skipping file I/O & deserialization)"
+    );
+
+    // Sleep briefly to ensure filesystem timestamp difference on all filesystems
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Update file with new settings
+    std::fs::write(&path, r#"{"server_url": "https://mtime2.example"}"#)
+        .expect("update settings fixture");
+
+    // Third call: mtime has changed, so it should read the file and update last_mtime
+    let loaded3 = aqvn_workspace_lib::config::load_from_file_if_modified(&path, &mut last_mtime);
+    assert!(
+        loaded3.is_some(),
+        "third load must succeed after file update"
+    );
+    assert_eq!(loaded3.unwrap().server_url, "https://mtime2.example");
+
+    // Clean up
+    let _ = std::fs::remove_file(&path);
+
+    // After file is deleted: metadata fails, returns None
+    let loaded4 = aqvn_workspace_lib::config::load_from_file_if_modified(&path, &mut last_mtime);
+    assert!(
+        loaded4.is_none(),
+        "load from non-existent file must return None"
+    );
+
+    // Also verify static invariants in src-tauri/src/lib.rs:
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).expect("read src/lib.rs");
+
+    assert!(
+        lib_rs.contains("load_from_file_if_modified"),
+        "src-tauri/src/lib.rs polling loop must use load_from_file_if_modified"
+    );
+    assert!(
+        !lib_rs.contains("last_gateway_connected"),
+        "src-tauri/src/lib.rs polling loop must remove redundant last_gateway_connected polling"
+    );
+}

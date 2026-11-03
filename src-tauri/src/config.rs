@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -550,6 +550,27 @@ pub fn load_from_file(path: &Path) -> Option<AppConfig> {
     let text = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     serde_json::from_value(value).ok()
+}
+
+/// Loads configuration from file only if file modification timestamp (mtime) has changed.
+///
+/// Skips file reading and JSON deserialization when `last_mtime` matches the file's current mtime.
+/// On successful parse, updates `*last_mtime` to the file's mtime and returns `Some(AppConfig)`.
+pub fn load_from_file_if_modified(
+    path: &Path,
+    last_mtime: &mut Option<SystemTime>,
+) -> Option<AppConfig> {
+    let mtime = std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())?;
+    if let Some(prev) = *last_mtime {
+        if prev == mtime {
+            return None;
+        }
+    }
+    let config = load_from_file(path)?;
+    *last_mtime = Some(mtime);
+    Some(config)
 }
 
 /// Resolves the store file path using tauri-plugin-store.

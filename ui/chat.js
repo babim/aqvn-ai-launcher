@@ -2099,20 +2099,134 @@
     });
   }
 
+  var BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|ico|tiff?|avif|heic|heif|pdf|zip|tar|gz|tgz|bz2|xz|7z|rar|wasm|bin|exe|dll|dylib|so|mp3|mp4|wav|ogg|flac|aac|m4a|mov|avi|mkv|webm|iso|dmg|apk|jar|class|woff2?|ttf|otf|eot|doc|docx|xls|xlsx|ppt|pptx)$/i;
+  var BINARY_MIME_RE = /^(image\/(?!svg\+xml)|audio\/|video\/|font\/|application\/(pdf|zip|x-zip-compressed|gzip|octet-stream|x-tar|x-7z-compressed|x-rar-compressed|wasm|vnd\.))/i;
+  var TEXT_EXT_RE = /\.(txt|md|markdown|json|js|mjs|cjs|ts|tsx|jsx|html?|css|scss|sass|less|xml|svg|yaml|yml|toml|ini|cfg|conf|sh|bash|zsh|bat|cmd|ps1|rs|py|rb|php|java|c|cpp|h|hpp|cs|go|sql|env|log|csv|tsv|properties)$/i;
+  var TEXT_MIME_RE = /^(text\/|application\/(json|javascript|x-javascript|typescript|xml|x-yaml|yaml|toml|sql|csv|x-sh|xhtml\+xml|graphql|ld\+json))/i;
+  var B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+  function isBinaryFile(file) {
+    if (!file) return false;
+    var name = typeof file === 'string' ? file : (file.name || '');
+    var type = (file && typeof file.type === 'string') ? file.type.toLowerCase() : '';
+
+    if (type && BINARY_MIME_RE.test(type)) return true;
+    if (type && TEXT_MIME_RE.test(type)) return false;
+    if (name && BINARY_EXT_RE.test(name)) return true;
+    if (name && TEXT_EXT_RE.test(name)) return false;
+
+    if (file && typeof file.isBinary === 'boolean') return file.isBinary;
+    return false;
+  }
+
+  function bytesToBase64(bytes) {
+    if (!bytes || !bytes.length) return '';
+    var btoaFn = (typeof btoa === 'function' ? btoa : (typeof window !== 'undefined' && typeof window.btoa === 'function' ? window.btoa : null));
+    if (btoaFn) {
+      try {
+        var bin = '';
+        var chunkSize = 8192;
+        for (var i = 0; i < bytes.length; i += chunkSize) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
+        }
+        return btoaFn(bin);
+      } catch (_) {}
+    }
+    var res = '';
+    var len = bytes.length;
+    var idx = 0;
+    while (idx < len) {
+      var b0 = bytes[idx++];
+      var b1 = idx < len ? bytes[idx++] : NaN;
+      var b2 = idx < len ? bytes[idx++] : NaN;
+      res += B64_CHARS.charAt(b0 >> 2);
+      res += B64_CHARS.charAt(((b0 & 3) << 4) | (isNaN(b1) ? 0 : (b1 >> 4)));
+      res += isNaN(b1) ? '=' : B64_CHARS.charAt(((b1 & 15) << 2) | (isNaN(b2) ? 0 : (b2 >> 6)));
+      res += isNaN(b2) ? '=' : B64_CHARS.charAt(b2 & 63);
+    }
+    return res;
+  }
+
   async function uploadSingleFile(file) {
     if (!file) return;
-    var name = file.name;
+    var name = file.name || 'file';
+    var isBinary = isBinaryFile(file);
     var content = '';
+    var encoding = 'utf-8';
+
     try {
-      if (typeof file.text === 'function') {
-        content = await file.text();
-      } else if (typeof FileReader !== 'undefined') {
-        content = await new Promise(function (resolve, reject) {
-          var reader = new FileReader();
-          reader.onload = function () { resolve(reader.result); };
-          reader.onerror = reject;
-          reader.readAsText(file);
-        });
+      if (!isBinary && typeof file.arrayBuffer === 'function' && !TEXT_EXT_RE.test(name) && !(file.type && TEXT_MIME_RE.test(file.type))) {
+        var peekBuf = await file.arrayBuffer();
+        var peekBytes = new Uint8Array(peekBuf);
+        var checkLen = Math.min(peekBytes.length, 8192);
+        for (var k = 0; k < checkLen; k += 1) {
+          if (peekBytes[k] === 0) {
+            isBinary = true;
+            break;
+          }
+        }
+        if (isBinary) {
+          content = bytesToBase64(peekBytes);
+        }
+      }
+
+      if (isBinary) {
+        encoding = 'base64';
+        if (!content) {
+          if (typeof file.arrayBuffer === 'function') {
+            var buf = await file.arrayBuffer();
+            content = bytesToBase64(new Uint8Array(buf));
+          } else if (typeof FileReader !== 'undefined') {
+            content = await new Promise(function (resolve, reject) {
+              var reader = new FileReader();
+              reader.onload = function () {
+                var res = reader.result;
+                if (typeof res === 'string') {
+                  var commaIdx = res.indexOf(',');
+                  resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+                } else if (res instanceof ArrayBuffer) {
+                  resolve(bytesToBase64(new Uint8Array(res)));
+                } else {
+                  resolve('');
+                }
+              };
+              reader.onerror = reject;
+              if (typeof reader.readAsDataURL === 'function') {
+                reader.readAsDataURL(file);
+              } else if (typeof reader.readAsArrayBuffer === 'function') {
+                reader.readAsArrayBuffer(file);
+              } else {
+                reader.readAsText(file);
+              }
+            });
+          } else if (typeof file.text === 'function') {
+            var str = await file.text();
+            var rawBytes = [];
+            for (var j = 0; j < str.length; j += 1) {
+              rawBytes.push(str.charCodeAt(j) & 0xff);
+            }
+            content = bytesToBase64(new Uint8Array(rawBytes));
+          }
+        }
+      } else {
+        encoding = 'utf-8';
+        if (typeof file.text === 'function') {
+          content = await file.text();
+        } else if (typeof FileReader !== 'undefined') {
+          content = await new Promise(function (resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function () { resolve(reader.result); };
+            reader.onerror = reject;
+            reader.readAsText(file);
+          });
+        } else if (typeof file.arrayBuffer === 'function') {
+          var textBuf = await file.arrayBuffer();
+          if (typeof TextDecoder !== 'undefined') {
+            content = new TextDecoder().decode(textBuf);
+          } else {
+            content = '';
+          }
+        }
       }
     } catch (e) {
       content = '';
@@ -2122,7 +2236,8 @@
       path: name,
       name: name,
       content: content,
-      size: file.size
+      encoding: encoding,
+      size: file.size != null ? file.size : (isBinary ? Math.round(content.length * 3 / 4) : content.length)
     });
   }
 

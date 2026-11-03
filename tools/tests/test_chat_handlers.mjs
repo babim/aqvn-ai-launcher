@@ -187,7 +187,7 @@ __harness__.exports = (function () {
     'applySearchAndFilter', 'searchNext', 'searchPrev', 'matchesCategory',
     'upsertLog', 'mergeLogs', 'placeRow', 'clearLogs', 'exportMarkdown', 'exportJson', 'copyTranscript',
     'openExportMenu', 'closeExportMenu', 'toggleExportMenu',
-    'switchSidebarTab', 'loadWorkspaceFiles', 'renderWorkspaceFiles', 'uploadWorkspaceFiles', 'formatFileSize', 'formatFileTimestamp',
+    'switchSidebarTab', 'loadWorkspaceFiles', 'renderWorkspaceFiles', 'uploadWorkspaceFiles', 'uploadSingleFile', 'isBinaryFile', 'formatFileSize', 'formatFileTimestamp',
     'toggleTerminal', 'setTerminalCollapsed', 'appendTerminalOutput', 'clearTerminalOutput', 'sendTerminalCommand'
   ];
   var out = {};
@@ -299,6 +299,10 @@ __harness__.exports = (function () {
     crypto,
     fetch: null,
     Blob,
+    btoa: typeof btoa !== 'undefined' ? btoa : undefined,
+    atob: typeof atob !== 'undefined' ? atob : undefined,
+    TextDecoder: typeof TextDecoder !== 'undefined' ? TextDecoder : undefined,
+    TextEncoder: typeof TextEncoder !== 'undefined' ? TextEncoder : undefined,
     URL,
     Headers,
     Response,
@@ -311,6 +315,10 @@ __harness__.exports = (function () {
       clearTimeout: fakeClearTimeout,
       URL,
       Blob,
+      btoa: typeof btoa !== 'undefined' ? btoa : undefined,
+      atob: typeof atob !== 'undefined' ? atob : undefined,
+      TextDecoder: typeof TextDecoder !== 'undefined' ? TextDecoder : undefined,
+      TextEncoder: typeof TextEncoder !== 'undefined' ? TextEncoder : undefined,
       __AQVN_PROXY__: null,
       bridge: null
     },
@@ -4419,6 +4427,219 @@ describe('VAL-FIX-UI-001: Chat socket auth callback retry and error handling', (
     assert.deepEqual(Array.from(authData.handlers), ['ws_webui']);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* VAL-DEBT-003: Binary file upload safe transfer                     */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-DEBT-003: Binary file upload safe transfer', () => {
+  test('VAL-DEBT-003: isBinaryFile accurately detects binary file types and extensions vs text files', () => {
+    const harness = createHarness();
+    const { isBinaryFile } = harness.exports;
+
+    assert.equal(typeof isBinaryFile, 'function', 'isBinaryFile must be exported');
+
+    // Binary file extensions
+    assert.equal(isBinaryFile({ name: 'image.png' }), true, 'PNG should be binary');
+    assert.equal(isBinaryFile({ name: 'photo.jpg' }), true, 'JPG should be binary');
+    assert.equal(isBinaryFile({ name: 'photo.jpeg' }), true, 'JPEG should be binary');
+    assert.equal(isBinaryFile({ name: 'archive.zip' }), true, 'ZIP should be binary');
+    assert.equal(isBinaryFile({ name: 'archive.tar.gz' }), true, 'TAR.GZ should be binary');
+    assert.equal(isBinaryFile({ name: 'manual.pdf' }), true, 'PDF should be binary');
+    assert.equal(isBinaryFile({ name: 'program.exe' }), true, 'EXE should be binary');
+    assert.equal(isBinaryFile({ name: 'raw.bin' }), true, 'BIN should be binary');
+    assert.equal(isBinaryFile({ name: 'module.wasm' }), true, 'WASM should be binary');
+    assert.equal(isBinaryFile({ name: 'track.mp3' }), true, 'MP3 should be binary');
+
+    // Binary MIME types
+    assert.equal(isBinaryFile({ name: 'unknown', type: 'image/png' }), true, 'image/png MIME should be binary');
+    assert.equal(isBinaryFile({ name: 'unknown', type: 'application/pdf' }), true, 'application/pdf MIME should be binary');
+    assert.equal(isBinaryFile({ name: 'unknown', type: 'application/zip' }), true, 'application/zip MIME should be binary');
+    assert.equal(isBinaryFile({ name: 'unknown', type: 'application/octet-stream' }), true, 'application/octet-stream MIME should be binary');
+
+    // Text file extensions
+    assert.equal(isBinaryFile({ name: 'notes.txt' }), false, 'TXT should be text');
+    assert.equal(isBinaryFile({ name: 'readme.md' }), false, 'MD should be text');
+    assert.equal(isBinaryFile({ name: 'data.json' }), false, 'JSON should be text');
+    assert.equal(isBinaryFile({ name: 'script.js' }), false, 'JS should be text');
+    assert.equal(isBinaryFile({ name: 'index.html' }), false, 'HTML should be text');
+    assert.equal(isBinaryFile({ name: 'style.css' }), false, 'CSS should be text');
+    assert.equal(isBinaryFile({ name: 'main.rs' }), false, 'RS should be text');
+    assert.equal(isBinaryFile({ name: 'graphic.svg' }), false, 'SVG should be text');
+    assert.equal(isBinaryFile({ name: 'config.yaml' }), false, 'YAML should be text');
+
+    // Text MIME types
+    assert.equal(isBinaryFile({ name: 'unknown', type: 'text/plain' }), false, 'text/plain MIME should be text');
+    assert.equal(isBinaryFile({ name: 'unknown', type: 'application/json' }), false, 'application/json MIME should be text');
+    assert.equal(isBinaryFile({ name: 'unknown', type: 'text/html' }), false, 'text/html MIME should be text');
+    assert.equal(isBinaryFile({ name: 'unknown', type: 'image/svg+xml' }), false, 'image/svg+xml MIME should be text');
+  });
+
+  test('VAL-DEBT-003: uploadSingleFile transfers binary files safely via base64 encoding without UTF-8 corruption', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { uploadSingleFile } = harness.exports;
+
+    assert.equal(typeof uploadSingleFile, 'function', 'uploadSingleFile must be exported');
+
+    let uploadedPayload = null;
+    harness.context.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ ok: true, token: 'fake-csrf' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_write')) {
+        uploadedPayload = JSON.parse(opts.body);
+        return new Response(JSON.stringify({ ok: true, success: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    // Construct arbitrary binary bytes with non-UTF8 and null bytes: 0x89 PNG header, 0xFF, 0x00, 0xFE
+    const binaryBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe, 0x00]);
+    const expectedBase64 = Buffer.from(binaryBytes).toString('base64');
+
+    const fakeBinaryFile = {
+      name: 'screenshot.png',
+      size: binaryBytes.length,
+      type: 'image/png',
+      arrayBuffer: async () => binaryBytes.buffer
+    };
+
+    await uploadSingleFile(fakeBinaryFile);
+
+    assert.ok(uploadedPayload, 'files_write API must be called');
+    assert.equal(uploadedPayload.name, 'screenshot.png');
+    assert.equal(uploadedPayload.path, 'screenshot.png');
+    assert.equal(uploadedPayload.encoding, 'base64', 'Binary file upload must specify base64 encoding');
+    assert.equal(uploadedPayload.content, expectedBase64, 'Binary content must match base64 encoded bytes');
+    assert.equal(uploadedPayload.size, binaryBytes.length);
+  });
+
+  test('VAL-DEBT-003: uploadSingleFile continues to upload text files as plaintext', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { uploadSingleFile } = harness.exports;
+
+    let uploadedPayload = null;
+    harness.context.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ ok: true, token: 'fake-csrf' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_write')) {
+        uploadedPayload = JSON.parse(opts.body);
+        return new Response(JSON.stringify({ ok: true, success: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    const textContent = '# Project Plan\n\n- Step 1: Tests\n- Step 2: Implementation\n\nUnicode: 🚀 Tiếng Việt';
+    const fakeTextFile = {
+      name: 'plan.md',
+      size: Buffer.byteLength(textContent, 'utf8'),
+      type: 'text/markdown',
+      text: async () => textContent
+    };
+
+    await uploadSingleFile(fakeTextFile);
+
+    assert.ok(uploadedPayload, 'files_write API must be called');
+    assert.equal(uploadedPayload.name, 'plan.md');
+    assert.equal(uploadedPayload.path, 'plan.md');
+    assert.equal(uploadedPayload.content, textContent, 'Text file must transfer exact plaintext');
+    assert.ok(
+      uploadedPayload.encoding === 'utf-8' || uploadedPayload.encoding === undefined,
+      'Text file should have utf-8 or default encoding'
+    );
+  });
+
+  test('VAL-DEBT-003: Workspace drag-and-drop handles mixed binary and text files', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, uploadWorkspaceFiles } = harness.exports;
+
+    const uploadedOps = [];
+    harness.context.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ ok: true, token: 'fake-csrf' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_write')) {
+        uploadedOps.push(JSON.parse(opts.body));
+        return new Response(JSON.stringify({ ok: true, success: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_list') || u.includes('/api/workspace_files')) {
+        return new Response(JSON.stringify({ ok: true, entries: [], count: 0 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    const zipBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]);
+    const zipBase64 = Buffer.from(zipBytes).toString('base64');
+    const fakeZip = {
+      name: 'archive.zip',
+      size: zipBytes.length,
+      type: 'application/zip',
+      arrayBuffer: async () => zipBytes.buffer
+    };
+
+    const fakeJson = {
+      name: 'config.json',
+      size: 20,
+      type: 'application/json',
+      text: async () => '{"debug": true}'
+    };
+
+    dom.workspaceUploadDropzone.dispatch('drop', {
+      preventDefault: () => {},
+      dataTransfer: {
+        files: [fakeZip, fakeJson]
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(uploadedOps.length, 2, 'Should upload both files');
+    assert.equal(uploadedOps[0].name, 'archive.zip');
+    assert.equal(uploadedOps[0].encoding, 'base64');
+    assert.equal(uploadedOps[0].content, zipBase64);
+
+    assert.equal(uploadedOps[1].name, 'config.json');
+    assert.equal(uploadedOps[1].content, '{"debug": true}');
+  });
+});
+
 
 
 

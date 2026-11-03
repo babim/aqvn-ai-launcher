@@ -405,16 +405,16 @@ impl Upstream {
     }
 
     /// Current CSRF token and runtime id (bootstrapping on first use).
-    pub async fn csrf(&self) -> Result<(String, String), String> {
+    /// Returns Ok(Some((runtime_id, token))) if bootstrapped,
+    /// or Ok(None) if upstream redirected (session/login required).
+    pub async fn csrf(&self) -> Result<Option<(String, String)>, String> {
         let mut jar = self.jar.lock().await;
         if jar.is_bootstrapped() {
             let runtime_id = jar.runtime_id().unwrap_or_default().to_string();
             let token = jar.csrf_token().unwrap_or_default().to_string();
-            return Ok((runtime_id, token));
+            return Ok(Some((runtime_id, token)));
         }
-        self.bootstrap_locked(&mut jar, true)
-            .await?
-            .ok_or_else(|| "CSRF bootstrap did not return a token".to_string())
+        self.bootstrap_locked(&mut jar, true).await
     }
 
     /// Bootstraps CSRF unless the jar already holds a token for the runtime.
@@ -460,10 +460,10 @@ impl Upstream {
             .await
             .map_err(|err| format!("CSRF bootstrap response unreadable: {err}"))?;
         if !status.is_success() {
-            if !required
-                && (status.is_redirection()
-                    || status == axum::http::StatusCode::UNAUTHORIZED
-                    || status == axum::http::StatusCode::FORBIDDEN)
+            if status.is_redirection()
+                || (!required
+                    && (status == axum::http::StatusCode::UNAUTHORIZED
+                        || status == axum::http::StatusCode::FORBIDDEN))
             {
                 if !names.is_empty() {
                     self.persist_jar(jar);

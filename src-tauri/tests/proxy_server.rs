@@ -36,6 +36,7 @@ struct Stub {
     rotated: AtomicBool,
     flaky: AtomicBool,
     always_403: AtomicBool,
+    csrf_redirect_302: AtomicBool,
     port: AtomicU16,
     last_csrf_header: Mutex<Option<String>>,
     last_cookie: Mutex<Option<String>>,
@@ -122,6 +123,13 @@ async fn start_proxy(target: &str) -> Running {
 
 async fn stub_csrf(State(stub): State<Arc<Stub>>) -> Response {
     stub.csrf_calls.fetch_add(1, Ordering::SeqCst);
+    if stub.csrf_redirect_302.load(Ordering::SeqCst) {
+        return (
+            StatusCode::FOUND,
+            [(header::LOCATION, "/login".to_string())],
+        )
+            .into_response();
+    }
     let (runtime_id, token) = stub.credentials().await;
     (
         [(
@@ -438,6 +446,101 @@ async fn proxy_csrf_endpoint_returns_the_socket_auth_token() {
     assert_eq!(body["ok"], true);
     assert_eq!(body["runtime_id"], "abcd1234");
     assert_eq!(body["token"], "token-1");
+}
+
+#[tokio::test]
+async fn test_proxy_routes_api_csrf_token_directly_with_single_fetch_and_cache() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    let start = std::time::Instant::now();
+    let response = client()
+        .get(format!("{}/api/csrf_token", proxy.base))
+        .send()
+        .await
+        .expect("api csrf request");
+    let elapsed = start.elapsed();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "bootstrap request must complete under 500ms, took {:?}",
+        elapsed
+    );
+
+    let body: Value = response.json().await.expect("json body");
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["token"], "token-1");
+    assert_eq!(body["runtime_id"], "abcd1234");
+
+    // Single fetch upstream, not double-fetch
+    assert_eq!(
+        stub.csrf_calls.load(Ordering::SeqCst),
+        1,
+        "first call should execute exactly one bootstrap request (no double-fetch)"
+    );
+
+    // Second call should return cached token from jar without calling upstream
+    let response2 = client()
+        .get(format!("{}/api/csrf_token", proxy.base))
+        .send()
+        .await
+        .expect("second api csrf request");
+    assert_eq!(response2.status(), StatusCode::OK);
+    let body2: Value = response2.json().await.expect("json body 2");
+    assert_eq!(body2["ok"], true);
+    assert_eq!(body2["token"], "token-1");
+
+    assert_eq!(
+        stub.csrf_calls.load(Ordering::SeqCst),
+        1,
+        "second call must return cached token without upstream fetch"
+    );
+}
+
+#[tokio::test]
+async fn test_proxy_csrf_handles_302_redirect_without_502_error() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+
+    // Simulate upstream session redirect (302) on /api/csrf_token
+    stub.csrf_redirect_302.store(true, Ordering::SeqCst);
+
+    let no_redirect_client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("client");
+
+    let response = no_redirect_client
+        .get(format!("{}/api/csrf_token", proxy.base))
+        .send()
+        .await
+        .expect("csrf request");
+
+    // Must NOT return 502 Bad Gateway
+    assert_ne!(
+        response.status(),
+        StatusCode::BAD_GATEWAY,
+        "Session redirect (302) must not return 502 Bad Gateway"
+    );
+
+    // Returns login-required payload or redirect (302/FOUND / SEE_OTHER)
+    if response.status().is_redirection() {
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or_default();
+        assert!(
+            location.contains("/login"),
+            "Redirect must point to login, got: {location}"
+        );
+    } else {
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value = response.json().await.expect("json body");
+        assert_eq!(body["ok"], false);
+        assert_eq!(body["login_required"], true);
+    }
 }
 
 // -------------------------------------- 403 refresh+retry (VAL-PROXY-007)

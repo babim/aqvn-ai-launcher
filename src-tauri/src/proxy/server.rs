@@ -329,6 +329,7 @@ pub fn router(state: ProxyState) -> Router {
     Router::new()
         .route("/health", any(handle_health))
         .route("/proxy/csrf", any(handle_proxy_csrf))
+        .route("/api/csrf_token", any(handle_proxy_csrf))
         .route("/proxy/clear_disk_cache", any(handle_clear_disk_cache))
         .route("/proxy/cache/clear", any(handle_clear_disk_cache))
         .route("/benchmark/fcp", any(handle_benchmark_fcp))
@@ -402,15 +403,43 @@ async fn handle_benchmark_fcp(
 /// it against the session cookie the proxy holds. The token must therefore be
 /// readable by page JS (it is not a cookie and never leaves the proxy⇄page
 /// boundary).
-async fn handle_proxy_csrf(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+async fn handle_proxy_csrf(
+    State(state): State<ProxyState>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
     let origin = request_origin(&headers);
     if let Some(response) = reject_bad_origin(origin.as_deref()) {
         return with_cors(response, origin.as_deref());
     }
+    if method == Method::OPTIONS {
+        return with_cors(StatusCode::NO_CONTENT.into_response(), origin.as_deref());
+    }
     let upstream = state.upstream().await;
     let response = match upstream.csrf().await {
-        Ok((runtime_id, token)) => {
+        Ok(Some((runtime_id, token))) => {
             Json(json!({ "ok": true, "runtime_id": runtime_id, "token": token })).into_response()
+        }
+        Ok(None) => {
+            let accepts_html = headers
+                .get(header::ACCEPT)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|a| a.contains("text/html") && !a.contains("application/json"));
+            if accepts_html {
+                (
+                    StatusCode::FOUND,
+                    [(header::LOCATION, HeaderValue::from_static("/login"))],
+                )
+                    .into_response()
+            } else {
+                Json(json!({
+                    "ok": false,
+                    "login_required": true,
+                    "error": "login_required",
+                    "redirect": "/login"
+                }))
+                .into_response()
+            }
         }
         Err(err) => text_response(StatusCode::BAD_GATEWAY, err),
     };

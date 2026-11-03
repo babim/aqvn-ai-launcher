@@ -37,9 +37,13 @@ struct Stub {
     flaky: AtomicBool,
     always_403: AtomicBool,
     csrf_redirect_302: AtomicBool,
+    ws_reject_status: AtomicU16,
+    ws_flaky_status: AtomicU16,
+    ws_delay_ms: std::sync::atomic::AtomicU64,
     port: AtomicU16,
     last_csrf_header: Mutex<Option<String>>,
     last_cookie: Mutex<Option<String>>,
+    last_ws_cookie: Mutex<Option<String>>,
     login_bodies: Mutex<Vec<String>>,
     last_raw_uri: Mutex<Option<String>>,
     last_raw_origin: Mutex<Option<String>>,
@@ -307,6 +311,26 @@ async fn stub_socket(
     State(stub): State<Arc<Stub>>,
     headers: HeaderMap,
 ) -> Response {
+    let delay = stub.ws_delay_ms.load(Ordering::SeqCst);
+    if delay > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+    }
+
+    let flaky_status = stub.ws_flaky_status.swap(0, Ordering::SeqCst);
+    if flaky_status > 0 {
+        return StatusCode::from_u16(flaky_status)
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+            .into_response();
+    }
+
+    let reject_status = stub.ws_reject_status.load(Ordering::SeqCst);
+    if reject_status > 0 {
+        return StatusCode::from_u16(reject_status)
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+            .into_response();
+    }
+
+    *stub.last_ws_cookie.lock().await = header_string(&headers, "cookie");
     let expected = format!("http://127.0.0.1:{}", stub.port.load(Ordering::SeqCst));
     let origin = header_string(&headers, "origin");
     if origin.as_deref() != Some(expected.as_str()) {
@@ -2116,4 +2140,111 @@ async fn test_proxy_clear_disk_cache_endpoint() {
     let body: Value = resp.json().await.expect("json body");
     assert_eq!(body["ok"], true);
     assert_eq!(body["cleared"], true);
+}
+
+// --------------------------------- WebSocket handshake timeout & Close 1011 (VAL-FIX-WS-001)
+
+#[tokio::test]
+async fn test_upstream_ws_failure_sends_close_frame_1011() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+    login(&proxy.base).await;
+
+    // Upstream websocket returns HTTP 500 error
+    stub.ws_reject_status.store(500, Ordering::SeqCst);
+
+    let request = websocket_request(&proxy.base);
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("proxy handshake connects");
+    assert_eq!(response.status().as_u16(), 101);
+
+    // Proxy must send WebSocket Close frame with code 1011
+    let msg = socket
+        .next()
+        .await
+        .expect("message expected")
+        .expect("valid message");
+    match msg {
+        tokio_tungstenite::tungstenite::Message::Close(Some(frame)) => {
+            assert_eq!(frame.code, 1011.into(), "must send close code 1011");
+        }
+        other => panic!("expected Close frame with code 1011, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_upstream_ws_timeout_sends_close_frame_1011() {
+    let (stub, stub_guard) = start_stub().await;
+    let proxy = start_proxy(&stub_guard.base).await;
+    login(&proxy.base).await;
+
+    // Set handshake timeout override to 100ms
+    std::env::set_var("AQVN_WS_HANDSHAKE_TIMEOUT_MS", "100");
+    // Delay upstream websocket response by 300ms (> 100ms)
+    stub.ws_delay_ms.store(300, Ordering::SeqCst);
+
+    let request = websocket_request(&proxy.base);
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("proxy handshake connects");
+    assert_eq!(response.status().as_u16(), 101);
+
+    let msg = socket
+        .next()
+        .await
+        .expect("message expected")
+        .expect("valid message");
+    std::env::remove_var("AQVN_WS_HANDSHAKE_TIMEOUT_MS");
+
+    match msg {
+        tokio_tungstenite::tungstenite::Message::Close(Some(frame)) => {
+            assert_eq!(
+                frame.code,
+                1011.into(),
+                "must send close code 1011 on timeout"
+            );
+        }
+        other => panic!("expected Close frame with code 1011, got: {:?}", other),
+    }
+}
+
+// --------------------------------- WebSocket re-bootstrap on 400/401/403/302 (VAL-FIX-WS-002)
+
+#[tokio::test]
+async fn test_websocket_rebootstraps_on_http_rejections() {
+    for code in [400, 401, 403, 302] {
+        let (stub, stub_guard) = start_stub().await;
+        let proxy = start_proxy(&stub_guard.base).await;
+        login(&proxy.base).await;
+
+        let csrf_before = stub.csrf_calls.load(Ordering::SeqCst);
+
+        // First attempt rejects with `code`, subsequent attempt succeeds
+        stub.ws_flaky_status.store(code, Ordering::SeqCst);
+
+        let request = websocket_request(&proxy.base);
+        let (mut socket, response) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("handshake after retry");
+        assert_eq!(response.status().as_u16(), 101);
+
+        socket
+            .send(tokio_tungstenite::tungstenite::Message::Text("2".into()))
+            .await
+            .expect("send frame");
+        let echoed = socket.next().await.expect("echo frame").expect("echo ok");
+        assert!(matches!(
+            echoed,
+            tokio_tungstenite::tungstenite::Message::Text(_)
+        ));
+
+        // Should have re-bootstrapped CSRF exactly once
+        assert_eq!(
+            stub.csrf_calls.load(Ordering::SeqCst),
+            csrf_before + 1,
+            "must re-bootstrap CSRF token once on HTTP {code}"
+        );
+        socket.close(None).await.expect("close");
+    }
 }

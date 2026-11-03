@@ -17,6 +17,16 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CSRF_PATH: &str = "/api/csrf_token";
 const LOGIN_PATH: &str = "/login";
 
+pub const WS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(8);
+
+pub fn ws_handshake_timeout() -> Duration {
+    std::env::var("AQVN_WS_HANDSHAKE_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(WS_HANDSHAKE_TIMEOUT)
+}
+
 pub const MAX_UPSTREAM_ATTEMPTS: usize = 3;
 pub const INITIAL_BACKOFF_MS: u64 = 100;
 
@@ -617,18 +627,19 @@ impl Upstream {
 
     /// Opens the second leg of the WebSocket proxy.
     ///
-    /// A 403 handshake (stale CSRF after a server restart) refreshes the token
-    /// once and retries, mirroring the HTTP path.
+    /// Re-bootstraps CSRF and retries once on HTTP 400, 401, 403, or 302.
     pub async fn connect_ws(&self, path_and_query: &str) -> Result<WsStream, String> {
         self.ensure_bootstrapped().await?;
         match self.ws_try(path_and_query).await {
             Ok(stream) => Ok(stream),
-            Err(WsConnectError::Http(403)) => {
+            Err(WsConnectError::Http(status)) if matches!(status, 400 | 401 | 403 | 302) => {
                 println!(
-                    "Bridge proxy: upstream websocket rejected (403), refreshing CSRF token once"
+                    "Bridge proxy: upstream websocket rejected ({status}), invalidating jar and re-bootstrapping CSRF token once"
                 );
                 {
                     let mut jar = self.jar.lock().await;
+                    jar.invalidate();
+                    self.persist_jar(&jar);
                     self.bootstrap_locked(&mut jar, true).await?;
                 }
                 self.ws_try(path_and_query)
@@ -676,12 +687,17 @@ impl Upstream {
             }
         }
 
-        match tokio_tungstenite::connect_async(request).await {
-            Ok((stream, _response)) => Ok(stream),
-            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+        let handshake = tokio_tungstenite::connect_async(request);
+        match tokio::time::timeout(ws_handshake_timeout(), handshake).await {
+            Ok(Ok((stream, _response))) => Ok(stream),
+            Ok(Err(tokio_tungstenite::tungstenite::Error::Http(response))) => {
                 Err(WsConnectError::Http(response.status().as_u16()))
             }
-            Err(err) => Err(WsConnectError::Other(err.to_string())),
+            Ok(Err(err)) => Err(WsConnectError::Other(err.to_string())),
+            Err(_) => Err(WsConnectError::Other(format!(
+                "upstream websocket handshake timed out after {:?}",
+                ws_handshake_timeout()
+            ))),
         }
     }
 

@@ -92,6 +92,12 @@ pub async fn bridge_with_watchdog(
         Ok(stream) => stream,
         Err(err) => {
             eprintln!("Bridge proxy: {err}");
+            let close_frame = ClientCloseFrame {
+                code: 1011,
+                reason: err.into(),
+            };
+            let mut socket = socket;
+            let _ = socket.send(ClientMessage::Close(Some(close_frame))).await;
             return;
         }
     };

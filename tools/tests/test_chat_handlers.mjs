@@ -186,7 +186,8 @@ __harness__.exports = (function () {
     'openSearch', 'closeSearch', 'toggleSearch', 'setSearchCategory',
     'applySearchAndFilter', 'searchNext', 'searchPrev', 'matchesCategory',
     'upsertLog', 'mergeLogs', 'placeRow', 'clearLogs', 'exportMarkdown', 'exportJson', 'copyTranscript',
-    'openExportMenu', 'closeExportMenu', 'toggleExportMenu'
+    'openExportMenu', 'closeExportMenu', 'toggleExportMenu',
+    'switchSidebarTab', 'loadWorkspaceFiles', 'renderWorkspaceFiles', 'uploadWorkspaceFiles', 'formatFileSize', 'formatFileTimestamp'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -326,10 +327,23 @@ __harness__.exports = (function () {
     'search-prev-btn', 'search-next-btn', 'search-close-btn', 'search-filters',
     'filter-all-btn', 'filter-code-btn', 'filter-tool-btn', 'filter-thought-btn',
     'filter-error-btn', 'messages', 'export-toggle-btn', 'export-menu',
-    'export-md-btn', 'export-json-btn', 'copy-transcript-btn'
+    'export-md-btn', 'export-json-btn', 'copy-transcript-btn',
+    'tab-sessions-btn', 'tab-workspace-btn', 'sessions-view', 'workspace-view',
+    'workspace-file-list', 'workspace-upload-dropzone', 'workspace-refresh-btn'
   ].forEach((id) => {
     dom[id] = getEl(id);
   });
+  dom.tabSessionsBtn = getEl('tab-sessions-btn');
+  dom.tabSessionsBtn.classList.add('active');
+  dom.tabWorkspaceBtn = getEl('tab-workspace-btn');
+  dom.sessionsView = getEl('sessions-view');
+  dom.sessionsView.hidden = false;
+  dom.workspaceView = getEl('workspace-view');
+  dom.workspaceView.hidden = true;
+  dom.workspaceFileList = getEl('workspace-file-list');
+  dom.workspaceUploadDropzone = getEl('workspace-upload-dropzone');
+  dom.workspaceRefreshBtn = getEl('workspace-refresh-btn');
+  dom.composer = getEl('composer');
   dom.themeToggleBtn = getEl('theme-toggle-btn');
   dom.searchToggleBtn = getEl('search-toggle-btn');
   dom.searchDrawer = getEl('search-drawer');
@@ -3729,6 +3743,202 @@ describe('VAL-PERF-001: Log rendering batch DocumentFragment optimization', () =
     assert.deepEqual(orderNos, ['msg-10', 'msg-20', 'msg-30']);
     const rec30 = state.logs.get('msg-30');
     assert.equal(rec30.content, 'Thirty updated');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-WORK-001 & VAL-WORK-002: Workspace file browser & file upload  */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-WORK-001: Workspace file browser drawer rendering', () => {
+  test('VAL-WORK-001: ui/index.html defines sidebar tabs and workspace drawer view', () => {
+    const html = readIndexHtml();
+
+    assert.match(html, /id="tab-sessions-btn"/, 'index.html must have #tab-sessions-btn');
+    assert.match(html, /id="tab-workspace-btn"/, 'index.html must have #tab-workspace-btn');
+    assert.match(html, /id="sessions-view"/, 'index.html must have #sessions-view');
+    assert.match(html, /id="workspace-view"/, 'index.html must have #workspace-view');
+    assert.match(html, /id="workspace-file-list"/, 'index.html must have #workspace-file-list');
+    assert.match(html, /id="workspace-upload-dropzone"/, 'index.html must have #workspace-upload-dropzone');
+  });
+
+  test('VAL-WORK-001: sidebar tab switching toggles between sessions and workspace file views', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, switchSidebarTab } = harness.exports;
+
+    assert.equal(dom.sessionsView.hidden, false, 'sessions-view starts visible');
+    assert.equal(dom.workspaceView.hidden, true, 'workspace-view starts hidden');
+    assert.ok(dom.tabSessionsBtn.classList.contains('active'), 'sessions tab active initially');
+
+    dom.tabWorkspaceBtn.dispatch('click', {});
+    assert.equal(dom.sessionsView.hidden, true, 'sessions-view hidden on workspace tab switch');
+    assert.equal(dom.workspaceView.hidden, false, 'workspace-view visible on workspace tab switch');
+    assert.ok(dom.tabWorkspaceBtn.classList.contains('active'), 'workspace tab active');
+    assert.equal(state.sidebarTab, 'workspace');
+
+    dom.tabSessionsBtn.dispatch('click', {});
+    assert.equal(dom.sessionsView.hidden, false);
+    assert.equal(dom.workspaceView.hidden, true);
+    assert.equal(state.sidebarTab, 'sessions');
+  });
+
+  test('VAL-WORK-001: Workspace drawer displays the contents of the configured workspace directory with file sizes and modified timestamps', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, renderWorkspaceFiles, loadWorkspaceFiles } = harness.exports;
+
+    const mockFiles = [
+      {
+        name: 'report.txt',
+        path: 'report.txt',
+        is_file: true,
+        is_dir: false,
+        size: 1048576, // 1 MB
+        modified: 1700000000
+      },
+      {
+        name: 'assets',
+        path: 'assets',
+        is_file: false,
+        is_dir: true,
+        size: 4096,
+        modified: 1700003600
+      }
+    ];
+
+    harness.context.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ ok: true, token: 'fake-csrf' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_list') || u.includes('/api/workspace_files')) {
+        return new Response(JSON.stringify({ ok: true, entries: mockFiles, count: 2 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    await loadWorkspaceFiles();
+
+    assert.equal(state.workspaceFiles.length, 2, 'state.workspaceFiles should store fetched files');
+    assert.equal(dom.workspaceFileList.children.length, 2, 'File list DOM must contain 2 file entries');
+
+    const fileItem = dom.workspaceFileList.children[0];
+    assert.match(fileItem.innerHTML, /report\.txt/, 'File entry must show file name');
+    assert.match(fileItem.innerHTML, /1\.0 MB|1 MB|1024 KB|1048576/, 'File entry must display formatted file size');
+    assert.match(fileItem.innerHTML, /2023|UTC|\d{4}/, 'File entry must display modified timestamp');
+
+    const dirItem = dom.workspaceFileList.children[1];
+    assert.match(dirItem.innerHTML, /assets/, 'Directory entry must show directory name');
+  });
+});
+
+describe('VAL-WORK-002: Workspace drag-and-drop file upload', () => {
+  test('VAL-WORK-002: Drag and drop files into chat composer or workspace drawer uploads into workspace directory', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, uploadWorkspaceFiles } = harness.exports;
+
+    const uploadedOps = [];
+    harness.context.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ ok: true, token: 'fake-csrf' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_write') || u.includes('/api/upload_file') || u.includes('/api/write_file')) {
+        uploadedOps.push(JSON.parse(opts.body));
+        return new Response(JSON.stringify({ ok: true, success: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, entries: [], count: 0 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    // Test dropping onto workspace dropzone
+    const fakeFile1 = {
+      name: 'notes.md',
+      size: 120,
+      type: 'text/markdown',
+      text: async () => '# Meeting notes'
+    };
+
+    let dropPrevented = false;
+    dom.workspaceUploadDropzone.dispatch('drop', {
+      preventDefault: () => {
+        dropPrevented = true;
+      },
+      dataTransfer: {
+        files: [fakeFile1]
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(dropPrevented, true, 'drop event preventDefault must be called');
+    assert.equal(uploadedOps.length, 1, 'Should call upload API for dropped file');
+    assert.equal(uploadedOps[0].name || uploadedOps[0].path, 'notes.md', 'Uploaded file must match file name');
+
+    // Test dropping onto composer
+    const fakeFile2 = {
+      name: 'data.json',
+      size: 45,
+      type: 'application/json',
+      text: async () => '{"key":"value"}'
+    };
+
+    dom.composer.dispatch('drop', {
+      preventDefault: () => {},
+      dataTransfer: {
+        files: [fakeFile2]
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.equal(uploadedOps.length, 2, 'Should call upload API for composer dropped file');
+    assert.equal(uploadedOps[1].name || uploadedOps[1].path, 'data.json');
+  });
+
+  test('VAL-WORK-002: Dragover adds dragover/active class and dragleave removes it', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom } = harness.exports;
+
+    let prevented = false;
+    dom.workspaceUploadDropzone.dispatch('dragover', {
+      preventDefault: () => {
+        prevented = true;
+      }
+    });
+    assert.equal(prevented, true, 'dragover preventDefault must be called');
+    assert.ok(
+      dom.workspaceUploadDropzone.classList.contains('dragover') ||
+      dom.workspaceUploadDropzone.classList.contains('active'),
+      'Dropzone must have dragover class on dragover'
+    );
+
+    dom.workspaceUploadDropzone.dispatch('dragleave', {});
+    assert.equal(
+      dom.workspaceUploadDropzone.classList.contains('dragover'),
+      false,
+      'Dropzone removes dragover class on dragleave'
+    );
   });
 });
 

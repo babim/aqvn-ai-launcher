@@ -68,7 +68,9 @@
     searchQuery: '',
     searchCategory: 'all',
     searchActiveIndex: 0,
-    searchMatchesCount: 0
+    searchMatchesCount: 0,
+    sidebarTab: 'sessions',
+    workspaceFiles: []
   };
 
   function byId(id) {
@@ -1892,6 +1894,220 @@
     }
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Workspace File Browser & Drag-and-Drop Uploader                     */
+  /* ------------------------------------------------------------------ */
+
+  function formatFileSize(bytes) {
+    if (bytes == null || isNaN(bytes)) return '0 B';
+    var num = Number(bytes);
+    if (num < 1024) return num + ' B';
+    if (num < 1024 * 1024) return (num / 1024).toFixed(1) + ' KB';
+    if (num < 1024 * 1024 * 1024) return (num / (1024 * 1024)).toFixed(1) + ' MB';
+    return (num / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+  }
+
+  function formatFileTimestamp(ts) {
+    if (!ts) return '';
+    try {
+      var d = new Date(ts > 1e11 ? ts : ts * 1000);
+      return d.toISOString().replace('T', ' ').replace(/\..+/, ' UTC');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function switchSidebarTab(tabName) {
+    state.sidebarTab = tabName;
+    if (dom.tabSessionsBtn && dom.tabWorkspaceBtn) {
+      if (tabName === 'workspace') {
+        dom.tabSessionsBtn.classList.remove('active');
+        dom.tabSessionsBtn.setAttribute('aria-selected', 'false');
+        dom.tabWorkspaceBtn.classList.add('active');
+        dom.tabWorkspaceBtn.setAttribute('aria-selected', 'true');
+        if (dom.sessionsView) {
+          dom.sessionsView.hidden = true;
+          dom.sessionsView.setAttribute('hidden', '');
+        }
+        if (dom.workspaceView) {
+          dom.workspaceView.hidden = false;
+          dom.workspaceView.removeAttribute('hidden');
+        }
+        loadWorkspaceFiles();
+      } else {
+        dom.tabWorkspaceBtn.classList.remove('active');
+        dom.tabWorkspaceBtn.setAttribute('aria-selected', 'false');
+        dom.tabSessionsBtn.classList.add('active');
+        dom.tabSessionsBtn.setAttribute('aria-selected', 'true');
+        if (dom.workspaceView) {
+          dom.workspaceView.hidden = true;
+          dom.workspaceView.setAttribute('hidden', '');
+        }
+        if (dom.sessionsView) {
+          dom.sessionsView.hidden = false;
+          dom.sessionsView.removeAttribute('hidden');
+        }
+      }
+    }
+  }
+
+  async function loadWorkspaceFiles() {
+    try {
+      var res = await apiCall('files_list', { path: '' });
+      var entries = (res && (res.entries || (res.data && res.data.entries))) || [];
+      state.workspaceFiles = entries;
+      renderWorkspaceFiles();
+    } catch (err) {
+      // If remote fails or offline, attempt to render empty/current
+      renderWorkspaceFiles();
+    }
+  }
+
+  function renderWorkspaceFiles() {
+    if (!dom.workspaceFileList) return;
+    dom.workspaceFileList.innerHTML = '';
+    if (!state.workspaceFiles || state.workspaceFiles.length === 0) {
+      var emptyEl = document.createElement('div');
+      emptyEl.className = 'workspace-empty-msg';
+      emptyEl.textContent = 'No files found in workspace';
+      dom.workspaceFileList.appendChild(emptyEl);
+      return;
+    }
+
+    state.workspaceFiles.forEach(function (file) {
+      var item = document.createElement('div');
+      item.className = 'workspace-file-item ' + (file.is_dir ? 'is-dir' : 'is-file');
+      item.dataset.path = file.path || file.name;
+
+      var icon = file.is_dir ? '&#128193;' : '&#128196;';
+      var parts = [];
+      if (!file.is_dir && file.size != null) {
+        parts.push(formatFileSize(file.size));
+      }
+      if (file.modified) {
+        parts.push(formatFileTimestamp(file.modified));
+      }
+
+      item.innerHTML =
+        '<span class="file-icon">' + icon + '</span>' +
+        '<div class="file-info">' +
+          '<div class="file-name">' + escapeHtml(file.name || file.path) + '</div>' +
+          '<div class="file-meta">' + escapeHtml(parts.join(' • ')) + '</div>' +
+        '</div>';
+      dom.workspaceFileList.appendChild(item);
+    });
+  }
+
+  async function uploadSingleFile(file) {
+    if (!file) return;
+    var name = file.name;
+    var content = '';
+    try {
+      if (typeof file.text === 'function') {
+        content = await file.text();
+      } else if (typeof FileReader !== 'undefined') {
+        content = await new Promise(function (resolve, reject) {
+          var reader = new FileReader();
+          reader.onload = function () { resolve(reader.result); };
+          reader.onerror = reject;
+          reader.readAsText(file);
+        });
+      }
+    } catch (e) {
+      content = '';
+    }
+
+    await apiCall('files_write', {
+      path: name,
+      name: name,
+      content: content,
+      size: file.size
+    });
+  }
+
+  async function uploadWorkspaceFiles(files) {
+    if (!files || !files.length) return;
+    var list = Array.from(files);
+    for (var i = 0; i < list.length; i += 1) {
+      try {
+        await uploadSingleFile(list[i]);
+      } catch (err) {
+        showChatError('File upload failed: ' + (err.message || String(err)));
+      }
+    }
+    await loadWorkspaceFiles();
+  }
+
+  function setupDragAndDropUploader() {
+    function handleDrop(e, target) {
+      if (e && typeof e.preventDefault === 'function') {
+        e.preventDefault();
+      }
+      if (target) {
+        target.classList.remove('dragover');
+        target.classList.remove('active');
+      }
+      var dt = e.dataTransfer;
+      if (dt && dt.files && dt.files.length > 0) {
+        uploadWorkspaceFiles(dt.files);
+      }
+    }
+
+    function handleDragOver(e, target) {
+      if (e && typeof e.preventDefault === 'function') {
+        e.preventDefault();
+      }
+      if (target) {
+        target.classList.add('dragover');
+        target.classList.add('active');
+      }
+    }
+
+    function handleDragLeave(e, target) {
+      if (target) {
+        target.classList.remove('dragover');
+        target.classList.remove('active');
+      }
+    }
+
+    if (dom.workspaceUploadDropzone) {
+      dom.workspaceUploadDropzone.addEventListener('dragover', function (e) {
+        handleDragOver(e, dom.workspaceUploadDropzone);
+      });
+      dom.workspaceUploadDropzone.addEventListener('dragleave', function (e) {
+        handleDragLeave(e, dom.workspaceUploadDropzone);
+      });
+      dom.workspaceUploadDropzone.addEventListener('drop', function (e) {
+        handleDrop(e, dom.workspaceUploadDropzone);
+      });
+      dom.workspaceUploadDropzone.addEventListener('click', function () {
+        if (dom.workspaceFileInput) {
+          dom.workspaceFileInput.click();
+        }
+      });
+    }
+
+    if (dom.workspaceFileInput) {
+      dom.workspaceFileInput.addEventListener('change', function () {
+        if (dom.workspaceFileInput.files && dom.workspaceFileInput.files.length > 0) {
+          uploadWorkspaceFiles(dom.workspaceFileInput.files);
+        }
+      });
+    }
+
+    if (dom.composer) {
+      dom.composer.addEventListener('dragover', function (e) {
+        handleDragOver(e, dom.composer);
+      });
+      dom.composer.addEventListener('dragleave', function (e) {
+        handleDragLeave(e, dom.composer);
+      });
+      dom.composer.addEventListener('drop', function (e) {
+        handleDrop(e, dom.composer);
+      });
+    }
+  }
+
   function renderSidebarServers() {
     if (!dom.sidebarServerSelect) {
       return;
@@ -1939,6 +2155,14 @@
     dom.exportMdBtn = byId('export-md-btn');
     dom.exportJsonBtn = byId('export-json-btn');
     dom.copyTranscriptBtn = byId('copy-transcript-btn');
+    dom.tabSessionsBtn = byId('tab-sessions-btn');
+    dom.tabWorkspaceBtn = byId('tab-workspace-btn');
+    dom.sessionsView = byId('sessions-view');
+    dom.workspaceView = byId('workspace-view');
+    dom.workspaceFileList = byId('workspace-file-list');
+    dom.workspaceUploadDropzone = byId('workspace-upload-dropzone');
+    dom.workspaceFileInput = byId('workspace-file-input');
+    dom.workspaceRefreshBtn = byId('workspace-refresh-btn');
 
     if (dom.exportMenu) {
       dom.exportMenu.hidden = true;
@@ -1947,6 +2171,30 @@
     if (dom.searchDrawer) {
       dom.searchDrawer.hidden = true;
     }
+
+    if (dom.sessionsView) {
+      dom.sessionsView.hidden = false;
+    }
+    if (dom.workspaceView) {
+      dom.workspaceView.hidden = true;
+    }
+
+    if (dom.tabSessionsBtn) {
+      dom.tabSessionsBtn.addEventListener('click', function () {
+        switchSidebarTab('sessions');
+      });
+    }
+    if (dom.tabWorkspaceBtn) {
+      dom.tabWorkspaceBtn.addEventListener('click', function () {
+        switchSidebarTab('workspace');
+      });
+    }
+    if (dom.workspaceRefreshBtn) {
+      dom.workspaceRefreshBtn.addEventListener('click', function () {
+        loadWorkspaceFiles();
+      });
+    }
+    setupDragAndDropUploader();
 
     state.sidebarWidth = SIDEBAR_DEFAULT;
     state.canvasWidth = CANVAS_DEFAULT;

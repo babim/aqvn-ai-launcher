@@ -210,15 +210,55 @@
 
       <section id="chat-view" class="chat-shell" aria-label="Conversation" hidden>
         <aside id="sidebar" class="sidebar" aria-label="Sessions and server">
-          <div class="sidebar-head">
-            <span class="sidebar-title">Sessions</span>
-            <button id="new-chat-btn" type="button" class="sidebar-btn">New chat</button>
+          <div class="sidebar-tabs" role="tablist" aria-label="Sidebar navigation">
+            <button
+              id="tab-sessions-btn"
+              type="button"
+              class="sidebar-tab-btn active"
+              role="tab"
+              aria-selected="true"
+              aria-controls="sessions-view"
+            >Sessions</button>
+            <button
+              id="tab-workspace-btn"
+              type="button"
+              class="sidebar-tab-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="workspace-view"
+            >Workspace</button>
           </div>
-          <div class="sidebar-server">
-            <label for="sidebar-server-select">Server</label>
-            <select id="sidebar-server-select" aria-label="Server Switcher"></select>
+
+          <div id="sessions-view" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="tab-sessions-btn">
+            <div class="sidebar-head">
+              <span class="sidebar-title">Sessions</span>
+              <button id="new-chat-btn" type="button" class="sidebar-btn">New chat</button>
+            </div>
+            <div class="sidebar-server">
+              <label for="sidebar-server-select">Server</label>
+              <select id="sidebar-server-select" aria-label="Server Switcher"></select>
+            </div>
+            <nav id="contexts" class="contexts" aria-label="Conversations"></nav>
           </div>
-          <nav id="contexts" class="contexts" aria-label="Conversations"></nav>
+
+          <div id="workspace-view" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="tab-workspace-btn" hidden>
+            <div class="sidebar-head">
+              <span class="sidebar-title">Workspace</span>
+              <button id="workspace-refresh-btn" type="button" class="sidebar-btn" title="Refresh files">&#8635;</button>
+            </div>
+            <div
+              id="workspace-upload-dropzone"
+              class="workspace-dropzone"
+              tabindex="0"
+              role="region"
+              aria-label="Drag and drop files to upload"
+            >
+              <span class="dropzone-icon">&#128193;</span>
+              <span class="dropzone-text">Drop files here or click to upload</span>
+              <input id="workspace-file-input" type="file" multiple hidden />
+            </div>
+            <div id="workspace-file-list" class="workspace-file-list" role="list" aria-label="Workspace files"></div>
+          </div>
         </aside>
 
         <div

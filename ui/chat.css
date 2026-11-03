@@ -170,6 +170,87 @@ body {
   border-color: rgba(255, 255, 255, 0.1);
 }
 
+/* ------------------------------------------------------------------ */
+/* Topbar Telemetry Status Widget & Indicator Pill                    */
+/* ------------------------------------------------------------------ */
+
+.status-container {
+  display: inline-flex;
+  align-items: center;
+}
+
+.telemetry-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  padding: 3px 12px;
+  font-size: 0.76rem;
+  font-family: inherit;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.telemetry-status-pill:hover {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--ink);
+}
+
+.telemetry-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.telemetry-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.telemetry-value {
+  color: var(--ink);
+  font-weight: 500;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.telemetry-divider {
+  color: rgba(255, 255, 255, 0.15);
+  user-select: none;
+}
+
+.telemetry-agent-state {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.telemetry-agent-state[data-state="idle"] {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+.telemetry-agent-state[data-state="thinking"] {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+}
+
+.telemetry-agent-state[data-state="executing"] {
+  background: rgba(34, 197, 94, 0.2);
+  color: var(--ok);
+}
+
 .diagnostics-modal {
   position: fixed;
   inset: 0;

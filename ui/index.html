@@ -114,6 +114,31 @@
         data-state="connected"
         title="Connection Diagnostics"
       >&#128994; Connected</button>
+      <div id="status-container" class="status-container">
+        <button
+          id="telemetry-status-pill"
+          class="telemetry-status-pill"
+          type="button"
+          role="status"
+          aria-live="polite"
+          title="Host Telemetry & Resource Usage (Click for Diagnostics)"
+        >
+          <span id="telemetry-cpu" class="telemetry-indicator" title="CPU Usage">
+            <span class="telemetry-label">CPU</span>
+            <span id="telemetry-cpu-val" class="telemetry-value">--%</span>
+          </span>
+          <span class="telemetry-divider">|</span>
+          <span id="telemetry-ram" class="telemetry-indicator" title="Memory RSS / Used">
+            <span class="telemetry-label">RAM</span>
+            <span id="telemetry-ram-val" class="telemetry-value">-- MB</span>
+          </span>
+          <span class="telemetry-divider">|</span>
+          <span id="telemetry-latency" class="telemetry-indicator" title="Ping Latency">
+            <span id="telemetry-latency-val" class="telemetry-value">-- ms</span>
+          </span>
+          <span id="telemetry-agent-state" class="telemetry-agent-state" data-state="idle">Idle</span>
+        </button>
+      </div>
       <div class="topbar-actions">
         <button
           id="toggle-sidebar-btn"
@@ -435,6 +460,18 @@
             <span id="diagnostics-active-profile" class="diagnostic-value" data-metric="active-profile">https://a0.matmagoc.com</span>
             <span id="diagnostics-server-profile" class="diagnostic-value" data-metric="server-profile" style="display:none;" aria-hidden="true">https://a0.matmagoc.com</span>
             <span id="diag-active-profile" style="display:none;" aria-hidden="true">https://a0.matmagoc.com</span>
+          </div>
+          <div class="diagnostic-row">
+            <span class="diagnostic-label">CPU Usage</span>
+            <span id="diagnostics-cpu" class="diagnostic-value" data-metric="cpu">--%</span>
+          </div>
+          <div class="diagnostic-row">
+            <span class="diagnostic-label">RAM (RSS / Used)</span>
+            <span id="diagnostics-ram" class="diagnostic-value" data-metric="ram">-- MB</span>
+          </div>
+          <div class="diagnostic-row">
+            <span class="diagnostic-label">Agent State</span>
+            <span id="diagnostics-agent-state" class="diagnostic-value" data-metric="agent-state">Idle</span>
           </div>
         </div>
         <div class="diagnostics-footer">

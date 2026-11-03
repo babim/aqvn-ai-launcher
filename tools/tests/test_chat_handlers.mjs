@@ -4092,6 +4092,196 @@ describe('VAL-TERM-001: Interactive PTY terminal drawer streaming', () => {
   });
 });
 
+/* ------------------------------------------------------------------ */
+/* VAL-STATUS-001: Topbar telemetry widget and latency indicator      */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-STATUS-001: Topbar telemetry widget and latency indicator', () => {
+  test('VAL-STATUS-001: ui/index.html exposes topbar status container and telemetry pill with RAM/CPU indicators', () => {
+    const html = readIndexHtml();
+
+    assert.match(
+      html,
+      /id="status-container"|class="[^"]*status-container[^"]*"/,
+      'ui/index.html must expose topbar status container element'
+    );
+    assert.match(
+      html,
+      /id="telemetry-status-pill"|id="telemetry-pill"/,
+      'ui/index.html must expose #telemetry-status-pill or #telemetry-pill'
+    );
+    assert.match(
+      html,
+      /id="telemetry-cpu"/,
+      'ui/index.html must expose CPU indicator element'
+    );
+    assert.match(
+      html,
+      /id="telemetry-ram"/,
+      'ui/index.html must expose RAM indicator element'
+    );
+    assert.match(
+      html,
+      /id="telemetry-latency"/,
+      'ui/index.html must expose latency indicator element'
+    );
+    assert.match(
+      html,
+      /id="telemetry-agent-state"|id="telemetry-state"/,
+      'ui/index.html must expose agent state indicator element'
+    );
+    assert.match(
+      html,
+      /id="diagnostics-cpu"/,
+      'ui/index.html diagnostics modal must expose CPU metric row'
+    );
+    assert.match(
+      html,
+      /id="diagnostics-ram"/,
+      'ui/index.html diagnostics modal must expose RAM metric row'
+    );
+  });
+
+  test('VAL-STATUS-001: ui/container.js renders compact telemetry pill with live RAM/CPU, ping latency, and agent state', () => {
+    const harness = createContainerHarness();
+    const { bridge, elements, document, createElement } = harness;
+
+    const statusContainer = createElement('status-container');
+    const pill = createElement('telemetry-status-pill');
+    const cpuEl = createElement('telemetry-cpu');
+    const cpuValEl = createElement('telemetry-cpu-val');
+    const ramEl = createElement('telemetry-ram');
+    const ramValEl = createElement('telemetry-ram-val');
+    const latencyEl = createElement('telemetry-latency');
+    const latencyValEl = createElement('telemetry-latency-val');
+    const stateEl = createElement('telemetry-agent-state');
+
+    elements['status-container'] = statusContainer;
+    elements['telemetry-status-pill'] = pill;
+    elements['telemetry-cpu'] = cpuEl;
+    elements['telemetry-cpu-val'] = cpuValEl;
+    elements['telemetry-ram'] = ramEl;
+    elements['telemetry-ram-val'] = ramValEl;
+    elements['telemetry-latency'] = latencyEl;
+    elements['telemetry-latency-val'] = latencyValEl;
+    elements['telemetry-agent-state'] = stateEl;
+
+    bridge.installDiagnostics(document);
+
+    assert.equal(typeof bridge.getTelemetryMetrics, 'function', 'bridge.getTelemetryMetrics must be function');
+    assert.equal(typeof bridge.updateTelemetry, 'function', 'bridge.updateTelemetry must be function');
+
+    // Update telemetry metrics with RAM, CPU, latency
+    bridge.updateTelemetry({
+      cpu: 24,
+      ram: 512,
+      latency: 16
+    });
+
+    const metrics = bridge.getTelemetryMetrics();
+    assert.equal(metrics.cpu, '24%', 'CPU metric must format to 24%');
+    assert.equal(metrics.ram, '512 MB', 'RAM metric must format to 512 MB');
+    assert.equal(metrics.latency, '16 ms', 'Latency metric must format to 16 ms');
+    assert.equal(metrics.agentState, 'Idle', 'Initial agent state must be Idle');
+
+    assert.equal(cpuValEl.textContent, '24%');
+    assert.equal(ramValEl.textContent, '512 MB');
+    assert.equal(latencyValEl.textContent, '16 ms');
+    assert.equal(stateEl.textContent, 'Idle');
+
+    // State changes: busy thinking
+    bridge.setTaskState(true, 'Thinking about next steps');
+    assert.equal(bridge.getTelemetryMetrics().agentState, 'Thinking', 'Agent state must be Thinking when summary mentions think');
+    assert.equal(stateEl.textContent, 'Thinking');
+
+    // State changes: busy executing
+    bridge.setTaskState(true, 'Executing shell command');
+    assert.equal(bridge.getTelemetryMetrics().agentState, 'Executing', 'Agent state must be Executing when active');
+    assert.equal(stateEl.textContent, 'Executing');
+
+    // State changes: idle
+    bridge.setTaskState(false);
+    assert.equal(bridge.getTelemetryMetrics().agentState, 'Idle', 'Agent state must return to Idle when task completes');
+    assert.equal(stateEl.textContent, 'Idle');
+  });
+
+  test('VAL-STATUS-001: clicking telemetry status pill opens diagnostics details modal', () => {
+    const harness = createContainerHarness();
+    const { bridge, elements, document, createElement } = harness;
+
+    const pill = createElement('telemetry-status-pill');
+    const modal = createElement('diagnostics-modal');
+    modal.hidden = true;
+    const cpuEl = createElement('diagnostics-cpu');
+    const ramEl = createElement('diagnostics-ram');
+    const agentStateEl = createElement('diagnostics-agent-state');
+
+    elements['telemetry-status-pill'] = pill;
+    elements['diagnostics-modal'] = modal;
+    elements['diagnostics-cpu'] = cpuEl;
+    elements['diagnostics-ram'] = ramEl;
+    elements['diagnostics-agent-state'] = agentStateEl;
+
+    bridge.installDiagnostics(document);
+
+    bridge.updateTelemetry({
+      cpu: 35,
+      ram: 1024,
+      latency: 22
+    });
+
+    assert.equal(bridge.isDiagnosticsModalOpen(), false, 'modal should initially be closed');
+
+    // Clicking telemetry pill opens modal
+    pill.dispatch('click', { preventDefault: () => {} });
+
+    assert.equal(bridge.isDiagnosticsModalOpen(), true, 'modal must be open after pill click');
+    assert.equal(modal.hidden, false, 'modal.hidden must be false');
+    assert.equal(cpuEl.textContent, '35%');
+    assert.equal(ramEl.textContent, '1024 MB');
+  });
+
+  test('VAL-STATUS-001: WebSocket telemetry op result updates host RAM, CPU, and ping latency', () => {
+    const harness = createContainerHarness();
+    const { bridge, elements, document, createElement } = harness;
+
+    const cpuValEl = createElement('telemetry-cpu-val');
+    const ramValEl = createElement('telemetry-ram-val');
+    elements['telemetry-cpu-val'] = cpuValEl;
+    elements['telemetry-ram-val'] = ramValEl;
+
+    bridge.installDiagnostics(document);
+
+    // Simulate incoming connector_telemetry_op_result packet over WebSocket
+    const packet = '42["connector_telemetry_op_result", {' +
+      '"type": "connector_telemetry_op_result",' +
+      '"op": "connector_telemetry_op",' +
+      '"id": "tel-123",' +
+      '"cpu_count": 8,' +
+      '"cpu_usage_percent": 42.8,' +
+      '"total_ram_mb": 16384,' +
+      '"available_ram_mb": 12288' +
+    '}]';
+
+    bridge.handleWebSocketMessage(packet);
+
+    const metrics = bridge.getTelemetryMetrics();
+    assert.equal(metrics.cpu, '43%', 'CPU percentage rounded from 42.8% to 43%');
+    assert.equal(metrics.ram, '4096 MB', 'RAM used is total (16384) - available (12288) = 4096 MB');
+    assert.equal(cpuValEl.textContent, '43%');
+    assert.equal(ramValEl.textContent, '4096 MB');
+  });
+
+  test('VAL-STATUS-001: ui/chat.css styles topbar telemetry pill, state badges, and indicators', () => {
+    const css = readChatCss();
+
+    assert.match(css, /\.status-container/, 'CSS must style .status-container');
+    assert.match(css, /\.telemetry-status-pill|\.telemetry-pill/, 'CSS must style .telemetry-status-pill');
+    assert.match(css, /\.telemetry-agent-state/, 'CSS must style .telemetry-agent-state');
+  });
+});
+
+
 
 
 

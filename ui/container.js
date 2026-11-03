@@ -322,6 +322,10 @@
       state.lastSummary = String(summary);
     }
 
+    if (typeof updateTelemetryDom === 'function') {
+      updateTelemetryDom();
+    }
+
     if (state.busy !== wasBusy) {
       updateTrayBusy(state.busy);
       if (wasBusy && !state.busy) {
@@ -353,6 +357,14 @@
             setTaskState(payload.active === true, payload.progress);
             return;
           }
+          if (
+            evt === 'connector_telemetry_op_result' ||
+            evt === 'telemetry_op_result' ||
+            evt === 'host_telemetry'
+          ) {
+            updateTelemetry(payload);
+            return;
+          }
           if (evt === 'state_push' && payload) {
             var snapshot = (payload.data && payload.data.snapshot) || payload.snapshot;
             if (snapshot) {
@@ -370,6 +382,14 @@
     try {
       var json = JSON.parse(data);
       if (json && typeof json === 'object') {
+        if (
+          json.type === 'connector_telemetry_op_result' ||
+          json.op === 'connector_telemetry_op' ||
+          json.type === 'telemetry_op_result'
+        ) {
+          updateTelemetry(json);
+          return;
+        }
         if (typeof json.log_progress_active === 'boolean') {
           setTaskState(json.log_progress_active, json.log_progress);
           return;
@@ -1004,8 +1024,92 @@
     connectionStatus: 'connected',
     latencyMs: null,
     proxyPort: null,
-    activeProfile: null
+    activeProfile: null,
+    cpuPercent: null,
+    ramMb: null
   };
+
+  function computeAgentState() {
+    if (!state.busy) return 'Idle';
+    var text = String(state.lastProgress || state.lastSummary || '').toLowerCase();
+    if (text.includes('think') || text.includes('reason') || text.includes('plan')) {
+      return 'Thinking';
+    }
+    return 'Executing';
+  }
+
+  function resolveTelemetryMetrics() {
+    var diag = resolveDiagnosticsMetrics();
+    var cpuStr = '--%';
+    if (diagnosticsState.cpuPercent !== null && diagnosticsState.cpuPercent !== undefined) {
+      var numCpu = Math.round(Number(diagnosticsState.cpuPercent));
+      if (!isNaN(numCpu)) {
+        cpuStr = numCpu + '%';
+      }
+    }
+    var ramStr = '-- MB';
+    if (diagnosticsState.ramMb !== null && diagnosticsState.ramMb !== undefined) {
+      var numRam = Math.round(Number(diagnosticsState.ramMb));
+      if (!isNaN(numRam)) {
+        ramStr = numRam + ' MB';
+      }
+    }
+    var agentState = computeAgentState();
+    return {
+      cpu: cpuStr,
+      ram: ramStr,
+      latency: diag.latency,
+      agentState: agentState,
+      status: diag.status
+    };
+  }
+
+  function updateTelemetryDom() {
+    if (typeof document === 'undefined') return;
+    var metrics = resolveTelemetryMetrics();
+
+    var cpuValEl = document.getElementById && document.getElementById('telemetry-cpu-val');
+    if (cpuValEl) cpuValEl.textContent = metrics.cpu;
+    var ramValEl = document.getElementById && document.getElementById('telemetry-ram-val');
+    if (ramValEl) ramValEl.textContent = metrics.ram;
+    var latencyValEl = document.getElementById && document.getElementById('telemetry-latency-val');
+    if (latencyValEl) latencyValEl.textContent = metrics.latency;
+    var stateEl = (document.getElementById && document.getElementById('telemetry-agent-state')) ||
+                  (document.getElementById && document.getElementById('telemetry-state'));
+    if (stateEl) {
+      stateEl.textContent = metrics.agentState;
+      if (stateEl.dataset) stateEl.dataset.state = metrics.agentState.toLowerCase();
+    }
+
+    var diagCpuEl = document.getElementById && document.getElementById('diagnostics-cpu');
+    if (diagCpuEl) diagCpuEl.textContent = metrics.cpu;
+    var diagRamEl = document.getElementById && document.getElementById('diagnostics-ram');
+    if (diagRamEl) diagRamEl.textContent = metrics.ram;
+    var diagStateEl = document.getElementById && document.getElementById('diagnostics-agent-state');
+    if (diagStateEl) diagStateEl.textContent = metrics.agentState;
+  }
+
+  function updateTelemetry(metrics) {
+    if (metrics && typeof metrics === 'object') {
+      if (metrics.cpu !== undefined) diagnosticsState.cpuPercent = metrics.cpu;
+      if (metrics.cpu_usage_percent !== undefined) diagnosticsState.cpuPercent = metrics.cpu_usage_percent;
+      if (metrics.ram !== undefined) diagnosticsState.ramMb = metrics.ram;
+      if (metrics.ram_mb !== undefined) diagnosticsState.ramMb = metrics.ram_mb;
+      if (metrics.total_ram_mb !== undefined) {
+        var total = Number(metrics.total_ram_mb);
+        var avail = Number(metrics.available_ram_mb != null ? metrics.available_ram_mb : metrics.free_ram_mb);
+        if (!isNaN(total) && !isNaN(avail) && total >= avail) {
+          diagnosticsState.ramMb = total - avail;
+        } else if (!isNaN(total)) {
+          diagnosticsState.ramMb = total;
+        }
+      }
+      if (metrics.latency !== undefined) diagnosticsState.latencyMs = metrics.latency;
+    }
+    updateTelemetryDom();
+    updateDiagnosticsModalDom();
+    return resolveTelemetryMetrics();
+  }
 
   var CONNECTION_STATUS_MAP = {
     connected: { label: 'Connected', icon: '\u{1F7E2}' },
@@ -1257,6 +1361,17 @@
         if (pill.style) pill.style.cursor = 'pointer';
       }
 
+      var telemetryPill = root.getElementById
+        ? (root.getElementById('telemetry-status-pill') || root.getElementById('telemetry-pill'))
+        : null;
+      if (telemetryPill && typeof telemetryPill.addEventListener === 'function') {
+        telemetryPill.addEventListener('click', function (e) {
+          if (e && typeof e.preventDefault === 'function') e.preventDefault();
+          openDiagnosticsModal();
+        });
+        if (telemetryPill.style) telemetryPill.style.cursor = 'pointer';
+      }
+
       var closeBtn = root.getElementById ? root.getElementById('close-diagnostics-btn') : null;
       if (closeBtn && typeof closeBtn.addEventListener === 'function') {
         closeBtn.addEventListener('click', function (e) {
@@ -1367,6 +1482,8 @@
     measureLatency: measureLatency,
     getConnectionMetrics: resolveDiagnosticsMetrics,
     getDiagnosticsMetrics: resolveDiagnosticsMetrics,
+    getTelemetryMetrics: resolveTelemetryMetrics,
+    updateTelemetry: updateTelemetry,
     updateDiagnostics: function (metrics) {
       if (metrics) {
         if (metrics.status) setConnectionStatus(metrics.status);
@@ -1389,7 +1506,8 @@
         taskChimeTone: getTaskChimeTone(),
         connectionStatus: diagnosticsState.connectionStatus,
         diagnosticsModalOpen: isDiagnosticsModalOpen(),
-        connectionMetrics: resolveDiagnosticsMetrics()
+        connectionMetrics: resolveDiagnosticsMetrics(),
+        telemetryMetrics: resolveTelemetryMetrics()
       };
     }
   };

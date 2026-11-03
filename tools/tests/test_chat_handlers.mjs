@@ -217,7 +217,19 @@ __harness__.exports = (function () {
   const timeouts = [];
   const fakeSetTimeout = (fn, delay) => {
     const id = timeouts.length + 1;
-    timeouts.push({ id, fn, delay });
+    const item = { id, fn, delay };
+    timeouts.push(item);
+    if (typeof delay === 'number' && delay > 0 && delay <= 250) {
+      setTimeout(() => {
+        const idx = timeouts.indexOf(item);
+        if (idx !== -1) {
+          timeouts.splice(idx, 1);
+          try {
+            fn();
+          } catch (_) {}
+        }
+      }, Math.min(delay, 5));
+    }
     return id;
   };
   const fakeClearTimeout = (id) => {
@@ -4280,6 +4292,134 @@ describe('VAL-STATUS-001: Topbar telemetry widget and latency indicator', () => 
     assert.match(css, /\.telemetry-agent-state/, 'CSS must style .telemetry-agent-state');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* VAL-FIX-UI-001: Chat socket auth callback retry and error handling */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-FIX-UI-001: Chat socket auth callback retry and error handling', () => {
+  test('VAL-FIX-UI-001: refreshCsrf retries with small backoff on transient failure and succeeds', async () => {
+    const harness = createHarness();
+    const { refreshCsrf, state } = harness.exports;
+    state.base = 'http://localhost:3000';
+
+    let calls = 0;
+    harness.context.fetch = async () => {
+      calls++;
+      if (calls === 1) {
+        return { status: 502, ok: false };
+      }
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({ ok: true, token: 'csrf-retry-success' })
+      };
+    };
+
+    const token = await refreshCsrf();
+    assert.equal(token, 'csrf-retry-success', 'must return token after transient retry');
+    assert.equal(calls, 2, 'must have retried once after 502');
+  });
+
+  test('VAL-FIX-UI-001: refreshCsrf retries with backoff and fails after max attempts on persistent error', async () => {
+    const harness = createHarness();
+    const { refreshCsrf, state } = harness.exports;
+    state.base = 'http://localhost:3000';
+
+    let calls = 0;
+    harness.context.fetch = async () => {
+      calls++;
+      return { status: 502, ok: false };
+    };
+
+    await assert.rejects(
+      async () => {
+        await refreshCsrf();
+      },
+      /CSRF bootstrap failed/i
+    );
+    assert.equal(calls, 3, 'must attempt 3 times (1 initial + 2 retries) before failing');
+  });
+
+  test('VAL-FIX-UI-001: refreshCsrf does not retry on 401/403 auth errors', async () => {
+    const harness = createHarness();
+    const { refreshCsrf, state } = harness.exports;
+    state.base = 'http://localhost:3000';
+
+    let calls = 0;
+    harness.context.fetch = async () => {
+      calls++;
+      return { status: 401, ok: false };
+    };
+
+    await assert.rejects(
+      async () => {
+        await refreshCsrf();
+      },
+      /CSRF bootstrap failed \(HTTP 401\)/i
+    );
+    assert.equal(calls, 1, 'must fail immediately without retrying on 401');
+  });
+
+  test('VAL-FIX-UI-001: connectSocket auth callback passes error object instead of empty packet on persistent CSRF failure', async () => {
+    const harness = createHarness();
+    const { connectSocket, state } = harness.exports;
+    state.base = 'http://localhost:3000';
+    state.everConnected = true;
+    state.expired = false;
+
+    let calls = 0;
+    harness.context.fetch = async () => {
+      calls++;
+      return { status: 502, ok: false };
+    };
+
+    connectSocket();
+    const authFn = harness.mockIo.authOpts.auth;
+    assert.ok(typeof authFn === 'function');
+
+    const authData = await new Promise((resolve) => {
+      authFn((data) => {
+        resolve(data);
+      });
+    });
+
+    assert.equal(calls, 3, 'must retry 3 times before calling auth callback with error');
+    assert.notDeepEqual(authData, {}, 'auth callback must not receive empty object');
+    assert.ok(
+      authData instanceof Error || (authData && typeof authData.message === 'string'),
+      'auth callback must receive an error object'
+    );
+    assert.match(authData.message, /CSRF bootstrap failed/i);
+  });
+
+  test('VAL-FIX-UI-001: connectSocket auth callback passes csrf_token and handlers on success', async () => {
+    const harness = createHarness();
+    const { connectSocket, state } = harness.exports;
+    state.base = 'http://localhost:3000';
+    state.everConnected = true;
+
+    harness.context.fetch = async () => ({
+      status: 200,
+      ok: true,
+      json: async () => ({ ok: true, token: 'valid-handshake-token' })
+    });
+
+    connectSocket();
+    const authFn = harness.mockIo.authOpts.auth;
+    assert.ok(typeof authFn === 'function');
+
+    const authData = await new Promise((resolve) => {
+      authFn((data) => {
+        resolve(data);
+      });
+    });
+
+    assert.equal(authData.csrf_token, 'valid-handshake-token');
+    assert.deepEqual(Array.from(authData.handlers), ['ws_webui']);
+  });
+});
+
 
 
 

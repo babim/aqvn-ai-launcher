@@ -348,20 +348,50 @@
     return type.indexOf('text/html') !== -1;
   }
 
-  async function refreshCsrf() {
-    var response = await fetch(state.base + '/proxy/csrf', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store'
-    });
-    if (!response.ok) {
-      throw new Error('CSRF bootstrap failed (HTTP ' + response.status + ')');
+  async function refreshCsrf(retries, delayMs) {
+    var maxAttempts = typeof retries === 'number' ? retries + 1 : 3;
+    var backoff = typeof delayMs === 'number' ? delayMs : 50;
+    var lastError;
+
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        var response = await fetch(state.base + '/proxy/csrf', {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store'
+        });
+        if (!response.ok) {
+          throw new Error('CSRF bootstrap failed (HTTP ' + response.status + ')');
+        }
+        var data = await response.json();
+        if (!data || !data.token) {
+          var errDetail = data && (data.error || data.message);
+          throw new Error(
+            'CSRF bootstrap returned no token' +
+              (errDetail ? ' (' + errDetail + ')' : '')
+          );
+        }
+        state.csrf = String(data.token);
+        return state.csrf;
+      } catch (err) {
+        lastError = err;
+        var msg = (err && err.message) || String(err || '');
+        var isAuth = /unauthor|forbidden|401|403|invalid session|login_required/i.test(msg);
+        if (isAuth || attempt >= maxAttempts) {
+          break;
+        }
+        await new Promise(function (resolve) {
+          var waitMs = Math.round(backoff * Math.pow(1.5, attempt - 1));
+          if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+            window.setTimeout(resolve, waitMs);
+          } else if (typeof setTimeout === 'function') {
+            setTimeout(resolve, waitMs);
+          } else {
+            resolve();
+          }
+        });
+      }
     }
-    var data = await response.json();
-    if (!data || !data.token) {
-      throw new Error('CSRF bootstrap returned no token');
-    }
-    state.csrf = String(data.token);
-    return state.csrf;
+    throw lastError;
   }
 
   async function apiCall(name, body, retried) {
@@ -956,13 +986,17 @@
           })
           .catch(function (err) {
             var msg = (err && err.message) || String(err || '');
-            var isAuth = /unauthor|forbidden|401|403|invalid session/i.test(msg);
+            var isAuth = /unauthor|forbidden|401|403|invalid session|login_required/i.test(msg);
             if (state.everConnected && isAuth) {
               sessionExpired();
             } else {
               showChatError(msg);
             }
-            callback({});
+            var errorObj = err instanceof Error ? err : new Error(msg);
+            if (!errorObj.error) {
+              errorObj.error = msg;
+            }
+            callback(errorObj);
           });
       }
     });

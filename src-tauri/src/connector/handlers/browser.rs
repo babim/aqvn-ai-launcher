@@ -7,7 +7,9 @@ use crate::connector::protocol::{
     attach_id_and_op_id, extract_id_and_op_id, MSG_TYPE_BROWSER_OP_RESULT,
 };
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use std::time::Duration;
 
@@ -16,6 +18,120 @@ pub const DEFAULT_CDP_URL: &str = "http://127.0.0.1:9222";
 
 static CUSTOM_CDP_ENDPOINT: RwLock<Option<String>> = RwLock::new(None);
 static TEST_BROWSER_BINARY: RwLock<Option<PathBuf>> = RwLock::new(None);
+static ACTIVE_PROFILES: RwLock<Option<HashMap<u32, PathBuf>>> = RwLock::new(None);
+static ATEXIT_REGISTERED: AtomicBool = AtomicBool::new(false);
+
+fn with_active_profiles_mut<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut HashMap<u32, PathBuf>) -> R,
+{
+    let mut lock = ACTIVE_PROFILES.write().unwrap_or_else(|e| e.into_inner());
+    let map = lock.get_or_insert_with(HashMap::new);
+    f(map)
+}
+
+fn with_active_profiles<F, R>(f: F) -> R
+where
+    F: FnOnce(&HashMap<u32, PathBuf>) -> R,
+{
+    let lock = ACTIVE_PROFILES.read().unwrap_or_else(|e| e.into_inner());
+    match lock.as_ref() {
+        Some(map) => f(map),
+        None => {
+            let empty = HashMap::new();
+            f(&empty)
+        }
+    }
+}
+
+/// Returns the list of currently tracked active CDP profile directory paths.
+pub fn active_profile_dirs() -> Vec<PathBuf> {
+    with_active_profiles(|map| map.values().cloned().collect())
+}
+
+/// Returns the number of currently tracked active CDP profiles.
+pub fn active_profile_count() -> usize {
+    with_active_profiles(|map| map.len())
+}
+
+/// Registers an active profile directory associated with a spawned browser child process PID.
+pub fn register_active_profile(pid: u32, profile_dir: PathBuf) {
+    register_exit_cleanup_handler();
+    with_active_profiles_mut(|map| {
+        map.insert(pid, profile_dir);
+    });
+}
+
+/// Unregisters an active profile directory for a terminated child process.
+pub fn unregister_active_profile(pid: u32) -> Option<PathBuf> {
+    with_active_profiles_mut(|map| map.remove(&pid))
+}
+
+/// Safely removes a profile directory with retries for transient file locks.
+pub fn cleanup_profile_dir(path: &Path) -> bool {
+    if !path.exists() {
+        return true;
+    }
+    for attempt in 0..10 {
+        if std::fs::remove_dir_all(path).is_ok() {
+            return true;
+        }
+        if !path.exists() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50 * (attempt + 1)));
+    }
+    !path.exists()
+}
+
+/// Sweeps /tmp for abandoned `aqvn-cdp-profile-` directories, preserving any currently active profiles.
+pub fn sweep_stale_cdp_profiles() {
+    let active_set: std::collections::HashSet<PathBuf> =
+        with_active_profiles(|map| map.values().cloned().collect());
+
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() && !active_set.contains(&p) {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("aqvn-cdp-profile-") {
+                        let _ = cleanup_profile_dir(&p);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Cleans up all tracked active CDP profiles and terminates their browser processes if still alive.
+pub fn cleanup_all_temp_profiles() {
+    let items: Vec<(u32, PathBuf)> = with_active_profiles_mut(|map| map.drain().collect());
+
+    for (pid, dir) in items {
+        #[cfg(unix)]
+        {
+            unsafe {
+                let _ = libc::kill(pid as libc::pid_t, libc::SIGTERM);
+            }
+        }
+        cleanup_profile_dir(&dir);
+    }
+
+    sweep_stale_cdp_profiles();
+}
+
+extern "C" fn atexit_cleanup() {
+    cleanup_all_temp_profiles();
+}
+
+/// Registers the process exit cleanup handler to ensure temporary profiles are removed when app exits.
+pub fn register_exit_cleanup_handler() {
+    if !ATEXIT_REGISTERED.swap(true, Ordering::SeqCst) {
+        unsafe {
+            libc::atexit(atexit_cleanup);
+        }
+    }
+}
 
 /// Overrides the active CDP endpoint for testing.
 pub fn set_test_cdp_endpoint(endpoint: Option<String>) {
@@ -167,18 +283,7 @@ pub fn launch_browser_with_remote_debugging(
     cmd.arg("--remote-allow-origins=*");
 
     // Clean up stale temporary CDP profiles from previous sessions
-    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("aqvn-cdp-profile-") {
-                        let _ = std::fs::remove_dir_all(&p);
-                    }
-                }
-            }
-        }
-    }
+    sweep_stale_cdp_profiles();
 
     let temp_profile = std::env::temp_dir().join(format!(
         "aqvn-cdp-profile-{port}-{}-{}",
@@ -201,11 +306,29 @@ pub fn launch_browser_with_remote_debugging(
         cmd.arg("about:blank");
     }
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("failed to spawn browser {}: {e}", executable_path.display()))?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&temp_profile);
+            return Err(format!(
+                "failed to spawn browser {}: {e}",
+                executable_path.display()
+            ));
+        }
+    };
 
     let pid = child.id();
+    register_active_profile(pid, temp_profile.clone());
+
+    let profile_to_clean = temp_profile.clone();
+    let _ = std::thread::Builder::new()
+        .name(format!("aqvn-cdp-cleaner-{pid}"))
+        .spawn(move || {
+            let _ = child.wait();
+            unregister_active_profile(pid);
+            cleanup_profile_dir(&profile_to_clean);
+        });
+
     Ok(json!({
         "launched": true,
         "port": port,

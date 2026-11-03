@@ -402,3 +402,104 @@ async fn test_process_op_handling_val_proc_001() {
     assert_eq!(err_resp["action"], "kill");
     assert_eq!(err_resp["killed"], false);
 }
+
+#[tokio::test]
+async fn test_temporary_cdp_profile_cleanup_val_debt_002() {
+    use aqvn_workspace_lib::connector::handlers::browser::{
+        active_profile_dirs, cleanup_all_temp_profiles, launch_browser_with_remote_debugging,
+        set_test_browser_binary, sweep_stale_cdp_profiles,
+    };
+    use std::path::PathBuf;
+
+    // 1. Create a mock browser script that sleeps briefly then exits
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp_dir = std::env::temp_dir();
+    let bin_path = temp_dir.join(format!("mock-cdp-cleanup-test-{unique}.sh"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script = "#!/bin/sh\nsleep 0.2\nexit 0\n";
+        std::fs::write(&bin_path, script).expect("write mock browser script");
+        let mut perms = std::fs::metadata(&bin_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&bin_path, perms).expect("set executable perms");
+    }
+
+    #[cfg(not(unix))]
+    {
+        let script = "@echo off\ntimeout /t 1 /nobreak >nul\nexit 0\n";
+        std::fs::write(&bin_path, script).expect("write mock browser script");
+    }
+
+    set_test_browser_binary(Some(bin_path.clone()));
+
+    // 2. Launch browser with remote debugging
+    let res = launch_browser_with_remote_debugging(9444, None, None, None)
+        .expect("launch mock browser with remote debugging");
+
+    let profile_dir_str = res["profile_dir"]
+        .as_str()
+        .expect("profile_dir in launch result");
+    let profile_path = PathBuf::from(profile_dir_str);
+
+    // Profile directory must exist upon launch
+    assert!(
+        profile_path.exists(),
+        "profile dir {:?} must exist after launch",
+        profile_path
+    );
+
+    // Active profiles must track this directory
+    let active = active_profile_dirs();
+    assert!(
+        active.iter().any(|p| p == &profile_path),
+        "active profiles must track {:?}",
+        profile_path
+    );
+
+    // 3. Wait for child process to terminate (script sleeps for 0.2s)
+    // The background watcher thread should reap the child and remove the profile directory.
+    let start = std::time::Instant::now();
+    let mut cleaned_up = false;
+    while start.elapsed() < Duration::from_secs(4) {
+        if !profile_path.exists() {
+            cleaned_up = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    assert!(
+        cleaned_up,
+        "temporary CDP profile {:?} must be removed upon child process termination",
+        profile_path
+    );
+
+    // Active tracking should also have unregistered the profile
+    let active_after = active_profile_dirs();
+    assert!(
+        !active_after.iter().any(|p| p == &profile_path),
+        "active profiles must no longer track {:?}",
+        profile_path
+    );
+
+    // 4. Test sweep_stale_cdp_profiles / cleanup_all_temp_profiles removes abandoned directories
+    let abandoned_dir = temp_dir.join(format!("aqvn-cdp-profile-stale-{unique}"));
+    std::fs::create_dir_all(&abandoned_dir).expect("create abandoned test profile");
+    assert!(abandoned_dir.exists());
+
+    sweep_stale_cdp_profiles();
+    assert!(
+        !abandoned_dir.exists(),
+        "abandoned aqvn-cdp-profile directories in temp dir must be swept"
+    );
+
+    // Clean up
+    let _ = std::fs::remove_file(bin_path);
+    set_test_browser_binary(None);
+    cleanup_all_temp_profiles();
+}

@@ -237,7 +237,39 @@
               <span id="chat-server-url" class="chat-server-badge">https://a0.matmagoc.com</span>
             </div>
             <div class="actions">
+              <button
+                id="search-toggle-btn"
+                type="button"
+                class="icon-btn search-toggle-btn"
+                title="Search conversation (Ctrl+F)"
+                aria-label="Search conversation"
+                aria-expanded="false"
+              >&#128269;</button>
               <button id="stop-btn" type="button" disabled>Stop</button>
+            </div>
+          </div>
+          <div id="search-drawer" class="search-drawer" hidden>
+            <div class="search-bar">
+              <span class="search-icon" aria-hidden="true">&#128269;</span>
+              <input
+                id="search-input"
+                type="search"
+                class="search-input"
+                placeholder="Find in conversation... (Enter/Shift+Enter to navigate)"
+                aria-label="Search conversation"
+                spellcheck="false"
+              />
+              <span id="search-count" class="search-count" aria-live="polite">0 of 0</span>
+              <button id="search-prev-btn" type="button" class="search-nav-btn" title="Previous match (Shift+Enter)" aria-label="Previous match">&uarr;</button>
+              <button id="search-next-btn" type="button" class="search-nav-btn" title="Next match (Enter)" aria-label="Next match">&darr;</button>
+              <button id="search-close-btn" type="button" class="search-close-btn" title="Close search (Esc)" aria-label="Close search">&times;</button>
+            </div>
+            <div id="search-filters" class="search-filters" role="group" aria-label="Filter messages by category">
+              <button id="filter-all-btn" type="button" class="filter-pill active" data-category="all">All</button>
+              <button id="filter-code-btn" type="button" class="filter-pill" data-category="code_exe">Code Execution</button>
+              <button id="filter-tool-btn" type="button" class="filter-pill" data-category="tool">Tool Ops</button>
+              <button id="filter-thought-btn" type="button" class="filter-pill" data-category="thought">Thoughts</button>
+              <button id="filter-error-btn" type="button" class="filter-pill" data-category="error">Errors</button>
             </div>
           </div>
           <div id="messages" class="messages" role="log" aria-live="polite"></div>

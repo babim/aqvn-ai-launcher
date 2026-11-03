@@ -106,7 +106,10 @@ __harness__.exports = (function () {
     'setConnection', 'sendMessage', 'queueOutbox', 'readOutbox',
     'flushOutbox', 'applyZoom', 'readZoom', 'clampZoom', 'hardRefresh',
     'reloadCanvas', 'writeOutbox', 'OUTBOX_MAX_ENTRIES', 'OUTBOX_MAX_BYTES',
-    'showChat', 'cycleTheme', 'applyTheme', 'readTheme', 'THEMES'
+    'showChat', 'cycleTheme', 'applyTheme', 'readTheme', 'THEMES',
+    'openSearch', 'closeSearch', 'toggleSearch', 'setSearchCategory',
+    'applySearchAndFilter', 'searchNext', 'searchPrev', 'matchesCategory',
+    'upsertLog', 'clearLogs'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -235,11 +238,34 @@ __harness__.exports = (function () {
   const dom = context.__harness__.exports.dom;
   [
     'connection', 'chatError', 'sessionNotice', 'loginView', 'chatView',
-    'password', 'username', 'input', 'status', 'stop', 'theme-toggle-btn'
+    'password', 'username', 'input', 'status', 'stop', 'theme-toggle-btn',
+    'search-toggle-btn', 'search-drawer', 'search-input', 'search-count',
+    'search-prev-btn', 'search-next-btn', 'search-close-btn', 'search-filters',
+    'filter-all-btn', 'filter-code-btn', 'filter-tool-btn', 'filter-thought-btn',
+    'filter-error-btn', 'messages'
   ].forEach((id) => {
     dom[id] = getEl(id);
   });
   dom.themeToggleBtn = getEl('theme-toggle-btn');
+  dom.searchToggleBtn = getEl('search-toggle-btn');
+  dom.searchDrawer = getEl('search-drawer');
+  dom.searchInput = getEl('search-input');
+  dom.searchCount = getEl('search-count');
+  dom.searchPrevBtn = getEl('search-prev-btn');
+  dom.searchNextBtn = getEl('search-next-btn');
+  dom.searchCloseBtn = getEl('search-close-btn');
+  dom.searchFilters = getEl('search-filters');
+  dom.filterAllBtn = getEl('filter-all-btn');
+  dom.filterAllBtn.dataset.category = 'all';
+  dom.filterCodeBtn = getEl('filter-code-btn');
+  dom.filterCodeBtn.dataset.category = 'code_exe';
+  dom.filterToolBtn = getEl('filter-tool-btn');
+  dom.filterToolBtn.dataset.category = 'tool';
+  dom.filterThoughtBtn = getEl('filter-thought-btn');
+  dom.filterThoughtBtn.dataset.category = 'thought';
+  dom.filterErrorBtn = getEl('filter-error-btn');
+  dom.filterErrorBtn.dataset.category = 'error';
+  dom.messages = getEl('messages');
 
   return {
     exports: context.__harness__.exports,
@@ -3063,6 +3089,248 @@ describe('VAL-THEME-001 & VAL-THEME-002: 4-Theme engine and persistence', () => 
     assert.match(headSettings, /aqvn_theme.*data-theme/s, 'settings.html head must apply theme synchronously');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* VAL-SEARCH-001: In-chat search drawer toggle and navigation        */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-SEARCH-001: In-chat search drawer toggle and navigation', () => {
+  test('VAL-SEARCH-001: ui/index.html exposes search toggle button, drawer, input, count, and nav buttons', () => {
+    const html = readIndexHtml();
+
+    assert.match(html, /id="search-toggle-btn"/, 'ui/index.html must declare #search-toggle-btn');
+    assert.match(html, /id="search-drawer"/, 'ui/index.html must declare #search-drawer');
+    assert.match(html, /id="search-input"/, 'ui/index.html must declare #search-input');
+    assert.match(html, /id="search-count"/, 'ui/index.html must declare #search-count');
+    assert.match(html, /id="search-prev-btn"/, 'ui/index.html must declare #search-prev-btn');
+    assert.match(html, /id="search-next-btn"/, 'ui/index.html must declare #search-next-btn');
+    assert.match(html, /id="search-close-btn"/, 'ui/index.html must declare #search-close-btn');
+  });
+
+  test('VAL-SEARCH-001: Ctrl+F and search toggle button open #search-drawer and focus input', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state } = harness.exports;
+
+    assert.ok(dom.searchDrawer, 'dom.searchDrawer must exist');
+    assert.equal(dom.searchDrawer.hidden, true, 'search drawer starts hidden');
+
+    // Ctrl+F opens search drawer
+    let prevented = false;
+    harness.document.fire('keydown', {
+      ctrlKey: true,
+      key: 'f',
+      preventDefault: () => {
+        prevented = true;
+      }
+    });
+
+    assert.equal(prevented, true, 'Ctrl+F must call preventDefault()');
+    assert.equal(dom.searchDrawer.hidden, false, 'Ctrl+F must open #search-drawer');
+    assert.equal(state.searchOpen, true, 'state.searchOpen must be true');
+
+    // Escape closes search drawer
+    harness.document.fire('keydown', {
+      key: 'Escape',
+      preventDefault: () => {}
+    });
+    assert.equal(dom.searchDrawer.hidden, true, 'Escape must close #search-drawer');
+    assert.equal(state.searchOpen, false, 'state.searchOpen must be false');
+
+    // Clicking search toggle button toggles drawer
+    dom.searchToggleBtn.dispatch('click', {});
+    assert.equal(dom.searchDrawer.hidden, false, 'Clicking #search-toggle-btn must open drawer');
+    assert.equal(state.searchOpen, true);
+
+    // Clicking close button closes drawer
+    dom.searchCloseBtn.dispatch('click', {});
+    assert.equal(dom.searchDrawer.hidden, true, 'Clicking #search-close-btn must close drawer');
+    assert.equal(state.searchOpen, false);
+  });
+
+  test('VAL-SEARCH-001: Typing highlights matching text across messages and shows match count', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, upsertLog } = harness.exports;
+
+    // Seed conversation messages
+    upsertLog({ id: 'msg-1', type: 'user', content: 'Need to run cargo test suite' });
+    upsertLog({ id: 'msg-2', type: 'code_exe', content: 'cargo test --manifest-path src-tauri/Cargo.toml' });
+    upsertLog({ id: 'msg-3', type: 'agent', content: 'All tests finished cleanly' });
+
+    // Open search drawer
+    dom.searchToggleBtn.dispatch('click', {});
+
+    // Type "test"
+    dom.searchInput.value = 'test';
+    dom.searchInput.dispatch('input', {});
+
+    // Match count: "test" appears in msg-1 (1), msg-2 (1), msg-3 (1) -> 3 matches
+    assert.equal(state.searchMatchesCount, 3, 'Must detect 3 matches across messages');
+    assert.match(dom.searchCount.textContent, /1 of 3|1 \/ 3/, 'Search count badge must show 1 of 3');
+
+    const row1 = state.rows.get('msg-1');
+    const row2 = state.rows.get('msg-2');
+    const row3 = state.rows.get('msg-3');
+
+    assert.match(
+      row1.lastChild.innerHTML,
+      /<mark class="search-match active">test<\/mark>/,
+      'Active match must have active class'
+    );
+    assert.match(
+      row2.lastChild.innerHTML,
+      /<mark class="search-match">test<\/mark>/,
+      'Subsequent matches must have search-match class'
+    );
+    assert.match(
+      row3.lastChild.innerHTML,
+      /<mark class="search-match">test<\/mark>/,
+      'Subsequent matches must have search-match class'
+    );
+  });
+
+  test('VAL-SEARCH-001: Enter and Shift+Enter in search input navigate through matches', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, upsertLog } = harness.exports;
+
+    upsertLog({ id: 'm-1', type: 'user', content: 'alpha keyword first' });
+    upsertLog({ id: 'm-2', type: 'code_exe', content: 'alpha keyword second' });
+    upsertLog({ id: 'm-3', type: 'agent', content: 'alpha keyword third' });
+
+    dom.searchToggleBtn.dispatch('click', {});
+    dom.searchInput.value = 'keyword';
+    dom.searchInput.dispatch('input', {});
+
+    assert.equal(state.searchMatchesCount, 3);
+    assert.match(dom.searchCount.textContent, /1 of 3|1 \/ 3/);
+
+    // Enter -> advances to match 2
+    dom.searchInput.dispatch('keydown', { key: 'Enter', shiftKey: false, preventDefault: () => {} });
+    assert.match(dom.searchCount.textContent, /2 of 3|2 \/ 3/, 'Enter must advance to match 2');
+    assert.match(
+      state.rows.get('m-2').lastChild.innerHTML,
+      /<mark class="search-match active">keyword<\/mark>/,
+      'Match 2 must now be active'
+    );
+
+    // Enter -> advances to match 3
+    dom.searchInput.dispatch('keydown', { key: 'Enter', shiftKey: false, preventDefault: () => {} });
+    assert.match(dom.searchCount.textContent, /3 of 3|3 \/ 3/, 'Enter must advance to match 3');
+    assert.match(
+      state.rows.get('m-3').lastChild.innerHTML,
+      /<mark class="search-match active">keyword<\/mark>/,
+      'Match 3 must now be active'
+    );
+
+    // Enter -> wraps around to match 1
+    dom.searchInput.dispatch('keydown', { key: 'Enter', shiftKey: false, preventDefault: () => {} });
+    assert.match(dom.searchCount.textContent, /1 of 3|1 \/ 3/, 'Enter must wrap to match 1');
+    assert.match(
+      state.rows.get('m-1').lastChild.innerHTML,
+      /<mark class="search-match active">keyword<\/mark>/,
+      'Match 1 must now be active again'
+    );
+
+    // Shift+Enter -> wraps backward to match 3
+    dom.searchInput.dispatch('keydown', { key: 'Enter', shiftKey: true, preventDefault: () => {} });
+    assert.match(dom.searchCount.textContent, /3 of 3|3 \/ 3/, 'Shift+Enter must navigate backward to match 3');
+    assert.match(
+      state.rows.get('m-3').lastChild.innerHTML,
+      /<mark class="search-match active">keyword<\/mark>/,
+      'Match 3 must be active on reverse navigation'
+    );
+
+    // Nav buttons #search-prev-btn and #search-next-btn
+    dom.searchPrevBtn.dispatch('click', {});
+    assert.match(dom.searchCount.textContent, /2 of 3|2 \/ 3/, 'searchPrevBtn must move to match 2');
+
+    dom.searchNextBtn.dispatch('click', {});
+    assert.match(dom.searchCount.textContent, /3 of 3|3 \/ 3/, 'searchNextBtn must move to match 3');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-SEARCH-002: Search category filter pills                       */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-SEARCH-002: Search category filter pills', () => {
+  test('VAL-SEARCH-002: ui/index.html exposes category filter pills', () => {
+    const html = readIndexHtml();
+
+    assert.match(html, /class="[^"]*filter-pill[^"]*"[^>]*data-category="all"/, 'index.html must have All filter pill');
+    assert.match(html, /class="[^"]*filter-pill[^"]*"[^>]*data-category="code_exe"/, 'index.html must have Code Execution filter pill');
+    assert.match(html, /class="[^"]*filter-pill[^"]*"[^>]*data-category="tool"/, 'index.html must have Tool Ops filter pill');
+    assert.match(html, /class="[^"]*filter-pill[^"]*"[^>]*data-category="thought"/, 'index.html must have Thoughts filter pill');
+    assert.match(html, /class="[^"]*filter-pill[^"]*"[^>]*data-category="error"/, 'index.html must have Errors filter pill');
+  });
+
+  test('VAL-SEARCH-002: Clicking category filter pills filters visible rows by message type', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, upsertLog } = harness.exports;
+
+    upsertLog({ id: 'm-user', type: 'user', content: 'execute bash' });
+    upsertLog({ id: 'm-code', type: 'code_exe', content: 'cargo build' });
+    upsertLog({ id: 'm-tool', type: 'tool', content: 'read file.txt' });
+    upsertLog({ id: 'm-thought', type: 'thought', thought: true, content: 'evaluating approach' });
+    upsertLog({ id: 'm-error', type: 'error', content: 'command timed out' });
+
+    // Open search drawer
+    dom.searchToggleBtn.dispatch('click', {});
+
+    // Filter by Code Execution
+    dom.filterCodeBtn.dispatch('click', {});
+    assert.equal(state.rows.get('m-code').hidden, false, 'm-code must be visible');
+    assert.equal(state.rows.get('m-user').hidden, true, 'm-user must be hidden');
+    assert.equal(state.rows.get('m-tool').hidden, true, 'm-tool must be hidden');
+    assert.equal(state.rows.get('m-thought').hidden, true, 'm-thought must be hidden');
+    assert.equal(state.rows.get('m-error').hidden, true, 'm-error must be hidden');
+    assert.ok(dom.filterCodeBtn.classList.contains('active'), 'Code pill must have active class');
+
+    // Filter by Tool Ops
+    dom.filterToolBtn.dispatch('click', {});
+    assert.equal(state.rows.get('m-tool').hidden, false, 'm-tool must be visible');
+    assert.equal(state.rows.get('m-code').hidden, true, 'm-code must be hidden');
+    assert.equal(state.rows.get('m-user').hidden, true, 'm-user must be hidden');
+    assert.equal(state.rows.get('m-thought').hidden, true, 'm-thought must be hidden');
+    assert.equal(state.rows.get('m-error').hidden, true, 'm-error must be hidden');
+
+    // Filter by Thoughts
+    dom.filterThoughtBtn.dispatch('click', {});
+    assert.equal(state.rows.get('m-thought').hidden, false, 'm-thought must be visible');
+    assert.equal(state.rows.get('m-tool').hidden, true, 'm-tool must be hidden');
+    assert.equal(state.rows.get('m-code').hidden, true, 'm-code must be hidden');
+
+    // Filter by Errors
+    dom.filterErrorBtn.dispatch('click', {});
+    assert.equal(state.rows.get('m-error').hidden, false, 'm-error must be visible');
+    assert.equal(state.rows.get('m-thought').hidden, true, 'm-thought must be hidden');
+    assert.equal(state.rows.get('m-tool').hidden, true, 'm-tool must be hidden');
+
+    // Filter by All
+    dom.filterAllBtn.dispatch('click', {});
+    assert.equal(state.rows.get('m-user').hidden, false, 'm-user must be visible under All');
+    assert.equal(state.rows.get('m-code').hidden, false, 'm-code must be visible under All');
+    assert.equal(state.rows.get('m-tool').hidden, false, 'm-tool must be visible under All');
+    assert.equal(state.rows.get('m-thought').hidden, false, 'm-thought must be visible under All');
+    assert.equal(state.rows.get('m-error').hidden, false, 'm-error must be visible under All');
+  });
+
+  test('VAL-SEARCH-002: ui/chat.css styles search drawer, search matches, and active filter pills', () => {
+    const css = readChatCss();
+
+    assert.match(css, /\.search-drawer/, 'CSS must style .search-drawer');
+    assert.match(css, /\.search-bar/, 'CSS must style .search-bar');
+    assert.match(css, /\.search-input/, 'CSS must style .search-input');
+    assert.match(css, /\.filter-pill/, 'CSS must style .filter-pill');
+    assert.match(css, /\.filter-pill\.active/, 'CSS must style active filter-pill');
+    assert.match(css, /mark\.search-match/, 'CSS must style search match highlights');
+    assert.match(css, /mark\.search-match\.active/, 'CSS must style active search match');
+  });
+});
+
 
 
 

@@ -63,7 +63,12 @@
     seq: 0,
     sidebarCollapsed: false,
     canvasCollapsed: false,
-    focusMode: false
+    focusMode: false,
+    searchOpen: false,
+    searchQuery: '',
+    searchCategory: 'all',
+    searchActiveIndex: 0,
+    searchMatchesCount: 0
   };
 
   function byId(id) {
@@ -483,6 +488,9 @@
       /* Cumulative snapshots replace fields; content is never appended. */
       Object.assign(state.logs.get(id), record);
       paintRow(id);
+      if (state.searchOpen) {
+        applySearchAndFilter();
+      }
       return id;
     }
     state.logs.set(id, Object.assign({}, record));
@@ -491,6 +499,9 @@
     state.rows.set(id, row);
     paintRow(id);
     placeRow(id);
+    if (state.searchOpen) {
+      applySearchAndFilter();
+    }
     return id;
   }
 
@@ -1316,6 +1327,11 @@
       return true;
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      if (key === 'f') {
+        openSearch();
+        event.preventDefault();
+        return true;
+      }
       if (key === '=' || key === '+') {
         zoomIn();
       } else if (key === '-' || key === '_') {
@@ -1325,6 +1341,11 @@
       } else {
         return false;
       }
+      event.preventDefault();
+      return true;
+    }
+    if (key === 'escape' && state.searchOpen) {
+      closeSearch();
       event.preventDefault();
       return true;
     }
@@ -1386,6 +1407,242 @@
     return applyTheme(next);
   }
 
+  /* ------------------------------------------------------------------ */
+  /* In-chat search & filter bar                                        */
+  /* ------------------------------------------------------------------ */
+
+  function matchesCategory(record, category) {
+    if (!category || category === 'all') return true;
+    if (!record) return false;
+    var type = String(record.type || '').toLowerCase();
+    if (category === 'code_exe') {
+      return type === 'code_exe' || type === 'code';
+    }
+    if (category === 'tool') {
+      return type === 'tool';
+    }
+    if (category === 'thought') {
+      return record.thought === true || type === 'thought' || type === 'thinking' || type === 'reasoning';
+    }
+    if (category === 'error') {
+      return type === 'error' || record.failed === true;
+    }
+    return true;
+  }
+
+  function openSearch() {
+    state.searchOpen = true;
+    if (dom.searchDrawer) {
+      dom.searchDrawer.hidden = false;
+      dom.searchDrawer.removeAttribute('hidden');
+    }
+    if (dom.searchToggleBtn) {
+      dom.searchToggleBtn.setAttribute('aria-expanded', 'true');
+    }
+    if (dom.searchInput && typeof dom.searchInput.focus === 'function') {
+      dom.searchInput.focus();
+      if (typeof dom.searchInput.select === 'function') {
+        dom.searchInput.select();
+      }
+    }
+    applySearchAndFilter();
+  }
+
+  function closeSearch() {
+    state.searchOpen = false;
+    if (dom.searchDrawer) {
+      dom.searchDrawer.hidden = true;
+      dom.searchDrawer.setAttribute('hidden', '');
+    }
+    if (dom.searchToggleBtn) {
+      dom.searchToggleBtn.setAttribute('aria-expanded', 'false');
+    }
+    state.searchQuery = '';
+    state.searchCategory = 'all';
+    state.searchActiveIndex = 0;
+    state.searchMatchesCount = 0;
+    if (dom.searchInput) {
+      dom.searchInput.value = '';
+    }
+    if (dom.searchFilters) {
+      var pills = [
+        dom.filterAllBtn,
+        dom.filterCodeBtn,
+        dom.filterToolBtn,
+        dom.filterThoughtBtn,
+        dom.filterErrorBtn
+      ];
+      for (var i = 0; i < pills.length; i += 1) {
+        var pill = pills[i];
+        if (!pill) continue;
+        var pillCat = (pill.dataset && pill.dataset.category) || (typeof pill.getAttribute === 'function' ? pill.getAttribute('data-category') : null);
+        pill.classList.toggle('active', pillCat === 'all');
+      }
+    }
+    // Restore all message visibility and clear highlights
+    state.rows.forEach(function (row, id) {
+      row.hidden = false;
+      row.removeAttribute('hidden');
+      paintRow(id);
+    });
+    if (dom.searchCount) {
+      dom.searchCount.textContent = '0 of 0';
+    }
+  }
+
+  function toggleSearch() {
+    if (state.searchOpen) {
+      closeSearch();
+    } else {
+      openSearch();
+    }
+  }
+
+  function setSearchCategory(category) {
+    state.searchCategory = category || 'all';
+    if (dom.searchFilters) {
+      var pills = [
+        dom.filterAllBtn,
+        dom.filterCodeBtn,
+        dom.filterToolBtn,
+        dom.filterThoughtBtn,
+        dom.filterErrorBtn
+      ];
+      for (var i = 0; i < pills.length; i += 1) {
+        var pill = pills[i];
+        if (!pill) continue;
+        var pillCat = (pill.dataset && pill.dataset.category) || (typeof pill.getAttribute === 'function' ? pill.getAttribute('data-category') : null);
+        pill.classList.toggle('active', pillCat === state.searchCategory);
+      }
+    }
+    state.searchActiveIndex = 0;
+    applySearchAndFilter();
+  }
+
+  function highlightMatchesInHtml(html, query, activeMatchIndex) {
+    if (!query) return { html: html, count: 0 };
+    var escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var re = new RegExp('(' + escapedQuery + ')', 'gi');
+    var matchCount = 0;
+    var parts = html.split(/(<[^>]+>)/g);
+    for (var i = 0; i < parts.length; i += 1) {
+      if (parts[i].charAt(0) !== '<') {
+        parts[i] = parts[i].replace(re, function (matched) {
+          matchCount += 1;
+          var isActive = matchCount === activeMatchIndex;
+          return '<mark class="search-match' + (isActive ? ' active' : '') + '">' + escapeHtml(matched) + '</mark>';
+        });
+      }
+    }
+    return { html: parts.join(''), count: matchCount };
+  }
+
+  function applySearchAndFilter() {
+    var query = (state.searchQuery || '').trim();
+    var category = state.searchCategory || 'all';
+    var totalMatches = 0;
+    var matchTargets = [];
+
+    // First count total matches across visible rows matching category
+    state.order.forEach(function (id) {
+      var record = state.logs.get(id);
+      var row = state.rows.get(id);
+      if (!record || !row) return;
+
+      var visible = matchesCategory(record, category);
+      if (!visible) {
+        row.hidden = true;
+        row.setAttribute('hidden', '');
+        return;
+      }
+      row.hidden = false;
+      row.removeAttribute('hidden');
+
+      if (query) {
+        var text = (record.content || '') + ' ' + (record.heading || '');
+        var lowerText = text.toLowerCase();
+        var lowerQuery = query.toLowerCase();
+        var pos = 0;
+        while ((pos = lowerText.indexOf(lowerQuery, pos)) !== -1) {
+          totalMatches += 1;
+          matchTargets.push({ logId: id, matchNum: totalMatches });
+          pos += lowerQuery.length;
+        }
+      }
+    });
+
+    state.searchMatchesCount = totalMatches;
+    if (totalMatches === 0) {
+      state.searchActiveIndex = 0;
+      if (dom.searchCount) {
+        dom.searchCount.textContent = query ? '0 of 0' : '0 of 0';
+      }
+    } else {
+      if (state.searchActiveIndex <= 0 || state.searchActiveIndex > totalMatches) {
+        state.searchActiveIndex = 1;
+      }
+      if (dom.searchCount) {
+        dom.searchCount.textContent = state.searchActiveIndex + ' of ' + totalMatches;
+      }
+    }
+
+    // Repaint visible rows with highlights
+    var currentMatchCounter = 0;
+    state.order.forEach(function (id) {
+      var record = state.logs.get(id);
+      var row = state.rows.get(id);
+      if (!record || !row) return;
+      if (row.hidden) return;
+
+      // Base render
+      paintRow(id);
+
+      if (query && totalMatches > 0) {
+        var bodyNode = row.lastChild;
+        if (bodyNode) {
+          var originalHtml = bodyNode.innerHTML;
+          var escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          var re = new RegExp('(' + escapedQuery + ')', 'gi');
+          var parts = originalHtml.split(/(<[^>]+>)/g);
+          for (var i = 0; i < parts.length; i += 1) {
+            if (parts[i].charAt(0) !== '<') {
+              parts[i] = parts[i].replace(re, function (matched) {
+                currentMatchCounter += 1;
+                var isActive = currentMatchCounter === state.searchActiveIndex;
+                return '<mark class="search-match' + (isActive ? ' active' : '') + '">' + matched + '</mark>';
+              });
+            }
+          }
+          bodyNode.innerHTML = parts.join('');
+        }
+      }
+    });
+
+    // Scroll active match row into view
+    if (state.searchActiveIndex > 0 && matchTargets[state.searchActiveIndex - 1]) {
+      var activeLogId = matchTargets[state.searchActiveIndex - 1].logId;
+      var activeRow = state.rows.get(activeLogId);
+      if (activeRow && typeof activeRow.scrollIntoView === 'function') {
+        activeRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+  }
+
+  function searchNext() {
+    if (state.searchMatchesCount <= 0) return;
+    state.searchActiveIndex = (state.searchActiveIndex % state.searchMatchesCount) + 1;
+    applySearchAndFilter();
+  }
+
+  function searchPrev() {
+    if (state.searchMatchesCount <= 0) return;
+    state.searchActiveIndex = state.searchActiveIndex - 1;
+    if (state.searchActiveIndex <= 0) {
+      state.searchActiveIndex = state.searchMatchesCount;
+    }
+    applySearchAndFilter();
+  }
+
   function renderSidebarServers() {
     if (!dom.sidebarServerSelect) {
       return;
@@ -1415,6 +1672,23 @@
     dom.sidebarServerSelect = byId('sidebar-server-select');
     dom.hardRefreshBtn = byId('hard-refresh-btn');
     dom.themeToggleBtn = byId('theme-toggle-btn');
+    dom.searchToggleBtn = byId('search-toggle-btn');
+    dom.searchDrawer = byId('search-drawer');
+    dom.searchInput = byId('search-input');
+    dom.searchCount = byId('search-count');
+    dom.searchPrevBtn = byId('search-prev-btn');
+    dom.searchNextBtn = byId('search-next-btn');
+    dom.searchCloseBtn = byId('search-close-btn');
+    dom.searchFilters = byId('search-filters');
+    dom.filterAllBtn = byId('filter-all-btn');
+    dom.filterCodeBtn = byId('filter-code-btn');
+    dom.filterToolBtn = byId('filter-tool-btn');
+    dom.filterThoughtBtn = byId('filter-thought-btn');
+    dom.filterErrorBtn = byId('filter-error-btn');
+
+    if (dom.searchDrawer) {
+      dom.searchDrawer.hidden = true;
+    }
 
     state.sidebarWidth = SIDEBAR_DEFAULT;
     state.canvasWidth = CANVAS_DEFAULT;
@@ -1441,6 +1715,71 @@
     if (dom.themeToggleBtn) {
       dom.themeToggleBtn.addEventListener('click', function () {
         cycleTheme();
+      });
+    }
+    if (dom.searchToggleBtn) {
+      dom.searchToggleBtn.addEventListener('click', function () {
+        toggleSearch();
+      });
+    }
+    if (dom.searchCloseBtn) {
+      dom.searchCloseBtn.addEventListener('click', function () {
+        closeSearch();
+      });
+    }
+    if (dom.searchPrevBtn) {
+      dom.searchPrevBtn.addEventListener('click', function () {
+        searchPrev();
+      });
+    }
+    if (dom.searchNextBtn) {
+      dom.searchNextBtn.addEventListener('click', function () {
+        searchNext();
+      });
+    }
+    if (dom.searchInput) {
+      dom.searchInput.addEventListener('input', function () {
+        state.searchQuery = dom.searchInput.value;
+        state.searchActiveIndex = 1;
+        applySearchAndFilter();
+      });
+      dom.searchInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          if (e.shiftKey) {
+            searchPrev();
+          } else {
+            searchNext();
+          }
+        } else if (e.key === 'Escape') {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          closeSearch();
+        }
+      });
+    }
+    if (dom.filterAllBtn) {
+      dom.filterAllBtn.addEventListener('click', function () {
+        setSearchCategory('all');
+      });
+    }
+    if (dom.filterCodeBtn) {
+      dom.filterCodeBtn.addEventListener('click', function () {
+        setSearchCategory('code_exe');
+      });
+    }
+    if (dom.filterToolBtn) {
+      dom.filterToolBtn.addEventListener('click', function () {
+        setSearchCategory('tool');
+      });
+    }
+    if (dom.filterThoughtBtn) {
+      dom.filterThoughtBtn.addEventListener('click', function () {
+        setSearchCategory('thought');
+      });
+    }
+    if (dom.filterErrorBtn) {
+      dom.filterErrorBtn.addEventListener('click', function () {
+        setSearchCategory('error');
       });
     }
     if (dom.sidebarServerSelect) {
@@ -1725,6 +2064,19 @@
     dom.stop = byId('stop-btn');
     dom.newChat = byId('new-chat-btn');
     dom.connection = byId('connection-pill') || byId('connection');
+    dom.searchToggleBtn = byId('search-toggle-btn');
+    dom.searchDrawer = byId('search-drawer');
+    dom.searchInput = byId('search-input');
+    dom.searchCount = byId('search-count');
+    dom.searchPrevBtn = byId('search-prev-btn');
+    dom.searchNextBtn = byId('search-next-btn');
+    dom.searchCloseBtn = byId('search-close-btn');
+    dom.searchFilters = byId('search-filters');
+    dom.filterAllBtn = byId('filter-all-btn');
+    dom.filterCodeBtn = byId('filter-code-btn');
+    dom.filterToolBtn = byId('filter-tool-btn');
+    dom.filterThoughtBtn = byId('filter-thought-btn');
+    dom.filterErrorBtn = byId('filter-error-btn');
 
     if (dom.messages) {
       dom.messages.addEventListener('click', onMessagesClick);
@@ -1807,6 +2159,7 @@
 
     setConnection('offline');
     applyProgress(false, '');
+    closeSearch();
     showLogin();
   }
 

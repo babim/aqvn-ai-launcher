@@ -11,6 +11,12 @@ AQVN Workspace combines three unified components into a single native binary:
 1. **Accelerated Webview Container**: Embedded native desktop webview that loads the **100% full-featured Upstream Web Interface** (Sidebar, Chat, DAG Work Map, Right Canvas, Plugins, Settings, Themes, Prompts) accelerated through local asset pre-caching:
    - **Local Asset Cache**: Static assets (Inter fonts, CSS, JS libraries) are cached locally on SSD/memory, achieving instant launch times (<100ms FCP) significantly faster than loading over the public web.
    - **Desktop Notification & Tray Integration**: Native bridge detects agent task completion events and dispatches OS desktop notifications (`notify_task_complete`) when the app is hidden/minimized, updates System Tray status (Idle 🟢 / Busy 🟡), provides a dynamic **Server Profiles** submenu with checkmark selection for switching endpoints on-the-fly, and features an **Open Workspace Folder** launcher.
+   - **Multi-Theme Engine**: 4 curated OKLCH themes (AQVN Dark, OLED Black, Cyberpunk Terminal, Clean Studio Light) with instant topbar toggle and anti-flicker restoration.
+   - **In-Chat Search & Filtering**: `Ctrl+F` / `Cmd+F` search drawer with live match navigation (Enter / Shift+Enter) and category filter pills (`All`, `Code Execution`, `Tool Ops`, `Thoughts`, `Errors`).
+   - **Transcript Export & Sharing**: Conversation export dropdown supporting Markdown (`.md`), structured JSON (`.json`), and 1-click clipboard copying.
+   - **Workspace File Explorer & Uploader**: Sidebar tab switcher between Sessions and Workspace file browser (`~/Workspace`) with drag-and-drop file ingestion into chat or workspace dropzones.
+   - **Interactive Terminal / PTY Drawer**: Collapsible `Alt+T` bottom drawer streaming real-time PTY terminal output with an interactive command prompt.
+   - **Real-Time Topbar Telemetry**: Status pill displaying live CPU %, RAM RSS, WebSocket ping latency, and agent state (`Idle`, `Thinking`, `Executing`) with a detailed diagnostics modal.
    - **Native Navigation**: Internal app links and iframe canvases navigate inside the webview without opening an external browser; external hyperlinks open cleanly in the system default browser.
    - **Native Context Menu & Zoom Controls**: Right-click opens a native OS context menu with live scale indicator (`Zoom (100%)`), `Zoom In` (`CmdOrCtrl+=`), `Zoom Out` (`CmdOrCtrl+-`), and `Reset Zoom` (`CmdOrCtrl+0`) driving native WebviewWindow viewport scaling directly.
    - **Window & Webview Shortcuts Engine**: Native `zoom_hotkeys_enabled(false)` eliminates WebView2 double-triggering, while window menu accelerators bind `F1` (Help), `F5` (Reload), `CmdOrCtrl+,` (Settings), `CmdOrCtrl+Shift+R` (Hard Refresh), and `F11` (Focus Mode) across all focused elements including nested iframes.
@@ -20,8 +26,12 @@ AQVN Workspace combines three unified components into a single native binary:
    - **Resilient Network & Proxy Layer**:
      - Upstream HTTP client retry with exponential backoff (`MAX_UPSTREAM_ATTEMPTS = 3`, 100ms base delay) on transient connection failures (`is_connect`, `is_timeout`) and a dedicated 10s connection timeout.
      - 60s activity timeout WebSocket heartbeat watchdog (`HEARTBEAT_INTERVAL_SECS = 15`) terminating hung or idle bridge sessions to trigger clean client reconnection.
+     - Decorrelated jitter exponential backoff reconnect algorithm preventing thundering-herd spikes on network interruptions.
+     - Wired `reconnect_network` Tauri command to cleanly abort gateway sessions and refresh loopback bridge state on demand.
    - **Remote Files (`connector_file_op`)**: Unified sandboxed file read, write, patch, and file-browser operations merging `config.allowed_paths` with `config.workspace_path`, supporting Transfer Protocol v1 chunked uploads with full-file SHA-256 integrity verification on final chunk.
    - **Remote Execution (`connector_exec_op`)**: Local PTY terminal session execution via `portable-pty` with session listing (`list_sessions`) and lifecycle management (`kill_session`).
+   - **Host Telemetry Protocol (`connector_telemetry_op`)**: Real-time performance telemetry reporting host CPU usage percentage, RSS memory footprint, and system load.
+   - **Process Inspector Protocol (`connector_process_op`)**: Process inspection protocol to query running processes, inspect resource usage, and issue targeted PID termination signals.
    - **Host Browser Automation (`connector_browser_op`)**: Chrome DevTools Protocol (CDP port 9222) bridge with multi-tab management (`list_tabs`, `new_tab`, `activate_tab`, `close_tab`) and tab-specific targeting.
    - **Host Desktop Control (`connector_computer_use_op`)**: Native screen capture with multi-display selection (`display_id`), high-contrast crosshair cursor overlay (`show_cursor: true`), and OS-native mouse/keyboard event injection.
    - **A0 Workspace Remote Tools & Control**: Full compatibility with upstream workspace assistants:
@@ -31,7 +41,61 @@ AQVN Workspace combines three unified components into a single native binary:
      - **Configurable Workspace Sandbox**: Configurable `workspace_path` in Settings with dynamic directory tree snapshots (`connector_remote_tree_update`) sent to the agent.
      - **Persistent Device Gateway ID**: Deterministic machine-bound gateway identifier prevents `multiple_hosts` safety lockouts across reconnects.
    - **Security Scopes**: Independent user controls to grant/revoke permissions for files, terminal, browser, and desktop.
-3. **Backend RFC Host Bridge (Legacy/Direct)**: High-performance HTTP daemon (`POST /api/rfc` on port `55080`) and embedded SSH terminal server (port `55022`, powered by `russh`) for direct local network control.
+3. **Backend RFC Host Bridge (Legacy/Direct)**: High-performance HTTP daemon (`POST /api/rfc` on port `55080`) and embedded SSH terminal server (port `55022`, powered by `russh`) for direct local network control, reinforced with supervisor auto-recovery and peer IP rate limiting.
+
+---
+
+## Enterprise Capabilities & Features
+
+### 1. Multi-Theme Engine
+- **4 Curated OKLCH Themes**:
+  - `AQVN Dark` (default): Precision dark theme optimized for long-session visual comfort.
+  - `OLED Black`: True `#000000` pitch-black mode engineered for OLED displays and battery conservation.
+  - `Cyberpunk Terminal`: High-contrast retro terminal theme with phosphor greens and electric cyan highlights.
+  - `Clean Studio Light`: High-clarity light theme tailored for daylight environments and document reviews.
+- **Instant Toggle & Anti-Flicker Persistence**: Quick-toggle theme button in the topbar, selection dropdown in Settings, and synchronous anti-flicker CSS variable restoration on application launch.
+
+### 2. In-Chat Search & Context Filtering
+- **Keyboard Shortcut Overlay**: `Ctrl+F` / `Cmd+F` opens the in-chat search drawer above the transcript.
+- **Match Navigation & Real-Time Highlighting**: Instant keyword highlighting across message nodes, match count indicator (`current / total`), and match jumping via `Enter` (next match) and `Shift+Enter` (previous match).
+- **Category Filter Pills**: Fast single-click context filtering to isolate specific transcript elements:
+  - `All`: Full chronological conversation flow.
+  - `Code Execution`: Command executions, compiler runs, and script outputs.
+  - `Tool Ops`: Tool invocations, parameters, and structured result payloads.
+  - `Thoughts`: Inner reasoning traces, planning chains, and agent deliberations.
+  - `Errors`: Exceptions, execution warnings, and error diagnostics.
+
+### 3. Transcript Export & Session Sharing
+- **Multi-Format Export Dropdown**:
+  - **Export Markdown (`.md`)**: Formatted Markdown document with role indicators and syntax-highlighted code fences.
+  - **Export JSON (`.json`)**: Structured JSON dump with message metadata, execution telemetry, and timestamps.
+- **1-Click Clipboard Sharing**: One-click "Copy Transcript" button to instantly copy the conversation to the system clipboard.
+
+### 4. Workspace File Explorer & Drag-and-Drop Uploader
+- **Sidebar Tab Switcher**: Top-level tabs in the sidebar allow seamless switching between **Sessions** history and the **Workspace** file tree.
+- **Live File Browser**: Real-time browsing of `~/Workspace` showcasing filenames, file sizes, and modification timestamps.
+- **Drag-and-Drop Ingestion**: Drag files directly from your desktop file manager into either the chat composer or the workspace dropzone for immediate upload and attachment.
+
+### 5. Interactive Terminal / PTY Drawer
+- **Collapsible Drawer**: `Alt+T` keyboard shortcut or bottom-bar toggle button reveals an embedded PTY terminal drawer.
+- **Live Output Streaming & Interactive Prompt**: Real-time terminal streaming of active PTY sessions with a manual command prompt for executing ad-hoc shell commands directly within the sandboxed environment.
+
+### 6. Real-Time Topbar Telemetry Status Widget
+- **Topbar Status Pill**: Compact live status pill in the topbar monitoring:
+  - Host CPU usage percentage (`CPU: X%`).
+  - Resident Set Size memory consumption (`RAM: X MB`).
+  - WebSocket round-trip ping latency (`Ping: X ms`).
+  - Agent activity states (`Idle` 🟢, `Thinking` 🟡, `Executing` 🔵).
+- **Detailed Diagnostics Modal**: Clicking the telemetry pill opens a detailed diagnostic popup with host uptime, system metrics, and connection health statistics.
+
+### 7. Backend Resilience & Protocol Extensions
+- **Supervisor Auto-Recovery**: RFC HTTP and SSH daemon supervisors automatically detect socket dropouts or process termination, triggering automatic restarts with exponential backoff and jitter.
+- **Peer IP Rate Limiting**: Inbound sliding-window rate limiters validate physical peer socket IPs on public listeners, eliminating bypasses from spoofed `X-Forwarded-For` headers.
+- **Gateway Decorrelated Jitter Backoff**: Outbound WebSocket client reconnects use decorrelated jitter exponential backoff to prevent thundering herd spikes during network reconnects.
+- **Host Telemetry & Process Inspector Protocols**:
+  - `connector_telemetry_op`: Real-time host performance reporting (CPU, RAM, system load).
+  - `connector_process_op`: Remote process manager to list active processes, check resource consumption, and trigger PID-targeted termination (`kill_session`).
+- **Wired Network Reconnect IPC**: Exposes the `reconnect_network` Tauri command, safely terminating hung gateway sockets and refreshing loopback proxy cookie jars on demand.
 
 ---
 
@@ -49,7 +113,9 @@ AQVN Workspace combines three unified components into a single native binary:
 The system is designed with defense-in-depth principles:
 
 - **Master Toggle Default OFF**: Both the RFC HTTP server (port 55080) and SSH bridge (port 55022) are closed by default. No listening socket is bound until the user explicitly toggles "Allow agent control" in Settings and configures a non-empty password.
-- **Inbound Rate Limiting & Auth Lockout**: The RFC server enforces a 60 req/min sliding-window rate limit (HTTP 429), and the SSH daemon enforces client IP lockout after 5 consecutive failed authentication attempts.
+- **Supervisor Auto-Recovery**: Both RFC HTTP and SSH daemons run under supervisor loops with exponential backoff and crash recovery, ensuring persistent bridge availability across transient failures or socket dropouts.
+- **Inbound Rate Limiting & Auth Lockout**: The RFC server enforces a 60 req/min sliding-window rate limit (HTTP 429), and the SSH daemon enforces client IP lockout after 5 consecutive failed authentication attempts. Direct peer IP socket validation protects public listeners against spoofed `X-Forwarded-For` bypasses.
+- **Gateway Decorrelated Jitter Backoff**: Outbound WebSocket client connections apply decorrelated jitter exponential backoff to eliminate reconnection stampedes across distributed client fleets.
 - **Strict Path Sandboxing**: All incoming path arguments across RFC file operations are jailed to configured `allowed_paths` merged with `workspace_path`. Paths are canonicalized, symlink escapes are blocked, parent traversals (`..`) are denied, and virtual prefixes (`/a0/...`) resolve strictly within the sandbox root. Any sandbox boundary violation immediately yields HTTP 403 Forbidden.
 - **IPC Capability Scope & CSP**: The `shell:allow-open` capability is strictly filtered to `^https?://` and `^mailto:` scheme regexes, and a strict Content Security Policy blocks unauthorized script execution.
 - **Constant-Time HMAC Authentication**: Incoming RFC requests require an HMAC-SHA256 signature calculated over the exact received request payload bytes. Hashes are verified using constant-time comparison (`subtle` / `hmac::Mac::verify_slice`) to protect against timing attacks. Invalid or missing signatures return HTTP 403 Forbidden.

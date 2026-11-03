@@ -1327,3 +1327,134 @@ body.focus-mode #chat-pane {
   color: var(--muted);
   font-size: 0.88rem;
 }
+
+/* ------------------------------------------------------------------ */
+/* Interactive PTY Terminal Drawer (Alt+T)                            */
+/* ------------------------------------------------------------------ */
+
+.terminal-drawer {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  min-height: 140px;
+  max-height: 380px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #070d16;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.terminal-drawer[hidden] {
+  display: none !important;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #0d1726;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+
+.terminal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.terminal-badge {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.terminal-status {
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+}
+
+.terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-action-btn {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+}
+
+.terminal-action-btn:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.terminal-output {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 10px 12px;
+  background: #070d16;
+  color: #38bdf8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-output:focus-visible {
+  outline: none;
+}
+
+.terminal-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #0b1220;
+  border-top: 1px solid var(--line);
+}
+
+.terminal-prompt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ok);
+  user-select: none;
+}
+
+.terminal-input {
+  flex: 1 1 auto;
+  padding: 4px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  background: transparent;
+  border: none;
+  color: var(--ink);
+}
+
+.terminal-input:focus-visible {
+  outline: none;
+}
+
+.terminal-send-btn {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 6px;
+}

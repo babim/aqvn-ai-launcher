@@ -187,7 +187,8 @@ __harness__.exports = (function () {
     'applySearchAndFilter', 'searchNext', 'searchPrev', 'matchesCategory',
     'upsertLog', 'mergeLogs', 'placeRow', 'clearLogs', 'exportMarkdown', 'exportJson', 'copyTranscript',
     'openExportMenu', 'closeExportMenu', 'toggleExportMenu',
-    'switchSidebarTab', 'loadWorkspaceFiles', 'renderWorkspaceFiles', 'uploadWorkspaceFiles', 'formatFileSize', 'formatFileTimestamp'
+    'switchSidebarTab', 'loadWorkspaceFiles', 'renderWorkspaceFiles', 'uploadWorkspaceFiles', 'formatFileSize', 'formatFileTimestamp',
+    'toggleTerminal', 'setTerminalCollapsed', 'appendTerminalOutput', 'clearTerminalOutput', 'sendTerminalCommand'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -329,10 +330,20 @@ __harness__.exports = (function () {
     'filter-error-btn', 'messages', 'export-toggle-btn', 'export-menu',
     'export-md-btn', 'export-json-btn', 'copy-transcript-btn',
     'tab-sessions-btn', 'tab-workspace-btn', 'sessions-view', 'workspace-view',
-    'workspace-file-list', 'workspace-upload-dropzone', 'workspace-refresh-btn'
+    'workspace-file-list', 'workspace-upload-dropzone', 'workspace-refresh-btn',
+    'terminal-drawer', 'toggle-terminal-btn', 'terminal-output', 'terminal-input',
+    'terminal-send-btn', 'terminal-clear-btn', 'terminal-close-btn'
   ].forEach((id) => {
     dom[id] = getEl(id);
   });
+  dom.terminalDrawer = getEl('terminal-drawer');
+  dom.terminalDrawer.hidden = true;
+  dom.toggleTerminalBtn = getEl('toggle-terminal-btn');
+  dom.terminalOutput = getEl('terminal-output');
+  dom.terminalInput = getEl('terminal-input');
+  dom.terminalSendBtn = getEl('terminal-send-btn');
+  dom.terminalClearBtn = getEl('terminal-clear-btn');
+  dom.terminalCloseBtn = getEl('terminal-close-btn');
   dom.tabSessionsBtn = getEl('tab-sessions-btn');
   dom.tabSessionsBtn.classList.add('active');
   dom.tabWorkspaceBtn = getEl('tab-workspace-btn');
@@ -3941,6 +3952,146 @@ describe('VAL-WORK-002: Workspace drag-and-drop file upload', () => {
     );
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* VAL-TERM-001: Collapsible bottom PTY terminal drawer & streaming   */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-TERM-001: Interactive PTY terminal drawer streaming', () => {
+  test('VAL-TERM-001: ui/index.html exposes terminal drawer, toggle button, output, and input controls', () => {
+    const html = readIndexHtml();
+
+    assert.match(html, /id="terminal-drawer"/, 'index.html must have #terminal-drawer');
+    assert.match(html, /id="toggle-terminal-btn"/, 'index.html must have #toggle-terminal-btn');
+    assert.match(html, /id="terminal-output"/, 'index.html must have #terminal-output');
+    assert.match(html, /id="terminal-input"/, 'index.html must have #terminal-input');
+    assert.match(html, /id="terminal-send-btn"/, 'index.html must have #terminal-send-btn');
+    assert.match(html, /id="terminal-clear-btn"/, 'index.html must have #terminal-clear-btn');
+    assert.match(html, /id="terminal-close-btn"/, 'index.html must have #terminal-close-btn');
+  });
+
+  test('VAL-TERM-001: Alt+T and #toggle-terminal-btn toggle #terminal-drawer and focus input', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state } = harness.exports;
+
+    assert.equal(dom.terminalDrawer.hidden, true, 'Terminal drawer starts hidden');
+
+    // Alt+T toggles drawer open
+    let prevented = false;
+    harness.document.fire('keydown', {
+      altKey: true,
+      key: 't',
+      preventDefault: () => {
+        prevented = true;
+      }
+    });
+
+    assert.equal(prevented, true, 'Alt+T must call preventDefault()');
+    assert.equal(dom.terminalDrawer.hidden, false, 'Alt+T opens #terminal-drawer');
+    assert.equal(state.terminalOpen, true, 'state.terminalOpen must be true');
+
+    // Alt+T toggles drawer closed
+    harness.document.fire('keydown', {
+      altKey: true,
+      key: 't',
+      preventDefault: () => {}
+    });
+    assert.equal(dom.terminalDrawer.hidden, true, 'Alt+T closes #terminal-drawer');
+    assert.equal(state.terminalOpen, false, 'state.terminalOpen must be false');
+
+    // Toggle button opens drawer
+    dom.toggleTerminalBtn.dispatch('click', {});
+    assert.equal(dom.terminalDrawer.hidden, false, 'toggle button opens drawer');
+    assert.equal(state.terminalOpen, true);
+
+    // Close button closes drawer
+    dom.terminalCloseBtn.dispatch('click', {});
+    assert.equal(dom.terminalDrawer.hidden, true, 'close button closes drawer');
+    assert.equal(state.terminalOpen, false);
+  });
+
+  test('VAL-TERM-001: Active PTY output streams into terminal container in real time', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, appendTerminalOutput, clearTerminalOutput } = harness.exports;
+
+    // Simulate streaming chunks from PTY
+    appendTerminalOutput('$ ls -la\n');
+    appendTerminalOutput('drwxr-xr-x 2 babim babim 4096 Nov 3 12:00 src\n');
+    appendTerminalOutput('-rw-r--r-- 1 babim babim 1024 Nov 3 12:00 Cargo.toml\n');
+
+    assert.match(dom.terminalOutput.textContent, /\$ ls -la/);
+    assert.match(dom.terminalOutput.textContent, /Cargo\.toml/);
+
+    // Test clear output
+    clearTerminalOutput();
+    assert.equal(dom.terminalOutput.textContent, '');
+  });
+
+  test('VAL-TERM-001: Bridge socket pty_output events stream directly into terminal container', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, connectSocket } = harness.exports;
+
+    connectSocket();
+    const ptyHandler = harness.listeners['pty_output'] || harness.listeners['terminal_output'] || harness.listeners['connector_exec_op_result'];
+    assert.ok(ptyHandler, 'Socket listener for pty_output or terminal_output must be registered');
+
+    ptyHandler({ output: 'Streaming log chunk 1\n' });
+    assert.match(dom.terminalOutput.textContent, /Streaming log chunk 1/);
+
+    ptyHandler('Streaming log chunk 2\n');
+    assert.match(dom.terminalOutput.textContent, /Streaming log chunk 2/);
+  });
+
+  test('VAL-TERM-001: Manual command input sends command via exec API and appends echo', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, sendTerminalCommand } = harness.exports;
+
+    let apiCalls = [];
+    harness.context.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ ok: true, token: 'csrf-token' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/exec')) {
+        apiCalls.push(JSON.parse(opts.body));
+        return new Response(JSON.stringify({ ok: true, output: 'Linux debian 6.1\n', exit_code: 0 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    dom.terminalInput.value = 'uname -a';
+    await sendTerminalCommand();
+
+    assert.equal(apiCalls.length, 1, 'Should call /api/exec');
+    assert.equal(apiCalls[0].command || apiCalls[0].code, 'uname -a');
+    assert.match(dom.terminalOutput.textContent, /uname -a/, 'Output must show command prompt');
+    assert.match(dom.terminalOutput.textContent, /Linux debian/, 'Output must show returned stream');
+    assert.equal(dom.terminalInput.value, '', 'Input should be cleared after send');
+  });
+
+  test('VAL-TERM-001: ui/chat.css styles terminal drawer, output container, and prompt bar', () => {
+    const css = readChatCss();
+
+    assert.match(css, /\.terminal-drawer/, 'CSS must style .terminal-drawer');
+    assert.match(css, /\.terminal-header/, 'CSS must style .terminal-header');
+    assert.match(css, /\.terminal-output/, 'CSS must style .terminal-output');
+    assert.match(css, /\.terminal-bar|\.terminal-prompt/, 'CSS must style prompt bar');
+  });
+});
+
 
 
 

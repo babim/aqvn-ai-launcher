@@ -70,7 +70,8 @@
     searchActiveIndex: 0,
     searchMatchesCount: 0,
     sidebarTab: 'sessions',
-    workspaceFiles: []
+    workspaceFiles: [],
+    terminalOpen: false
   };
 
   function byId(id) {
@@ -1006,6 +1007,9 @@
 
     socket.on('state_push', onStatePush);
     socket.on('server_restart', onServerRestart);
+    socket.on('pty_output', onPtyOutput);
+    socket.on('terminal_output', onPtyOutput);
+    socket.on('connector_exec_op_result', onPtyOutput);
 
     state.socket = socket;
     socket.connect();
@@ -1245,6 +1249,67 @@
     setCanvasCollapsed(!state.canvasCollapsed);
   }
 
+  function onPtyOutput(data) {
+    if (!data) return;
+    var chunk = typeof data === 'string' ? data : (data.output || data.chunk || data.data || '');
+    if (chunk) {
+      appendTerminalOutput(chunk);
+    }
+  }
+
+  function setTerminalCollapsed(collapsed) {
+    state.terminalOpen = !collapsed;
+    if (dom.terminalDrawer) {
+      if (collapsed) {
+        dom.terminalDrawer.setAttribute('hidden', '');
+        dom.terminalDrawer.hidden = true;
+      } else {
+        dom.terminalDrawer.removeAttribute('hidden');
+        dom.terminalDrawer.hidden = false;
+        if (dom.terminalInput && typeof dom.terminalInput.focus === 'function') {
+          dom.terminalInput.focus();
+        }
+      }
+    }
+    if (dom.toggleTerminalBtn) {
+      dom.toggleTerminalBtn.setAttribute('aria-pressed', collapsed ? 'false' : 'true');
+    }
+  }
+
+  function toggleTerminal() {
+    setTerminalCollapsed(state.terminalOpen);
+  }
+
+  function appendTerminalOutput(text) {
+    if (!dom.terminalOutput || text == null) return;
+    dom.terminalOutput.textContent = (dom.terminalOutput.textContent || '') + String(text);
+    dom.terminalOutput.scrollTop = dom.terminalOutput.scrollHeight;
+  }
+
+  function clearTerminalOutput() {
+    if (!dom.terminalOutput) return;
+    dom.terminalOutput.textContent = '';
+  }
+
+  async function sendTerminalCommand() {
+    if (!dom.terminalInput) return;
+    var cmd = dom.terminalInput.value.trim();
+    if (!cmd) return;
+    dom.terminalInput.value = '';
+
+    appendTerminalOutput('$ ' + cmd + '\n');
+    try {
+      var res = await apiCall('exec', { command: cmd, code: cmd });
+      if (res && res.output) {
+        appendTerminalOutput(res.output);
+      } else if (res && res.error) {
+        appendTerminalOutput('Error: ' + res.error + '\n');
+      }
+    } catch (err) {
+      appendTerminalOutput('Error: ' + (err.message || String(err)) + '\n');
+    }
+  }
+
   /* The Intel Suite lives behind the bridge proxy, so the iframe points at
    * the proxy origin when one is known. */
   function loadCanvas() {
@@ -1450,6 +1515,8 @@
       toggleSidebar();
     } else if (key === 'c') {
       toggleCanvas();
+    } else if (key === 't') {
+      toggleTerminal();
     } else {
       return false;
     }
@@ -2163,6 +2230,18 @@
     dom.workspaceUploadDropzone = byId('workspace-upload-dropzone');
     dom.workspaceFileInput = byId('workspace-file-input');
     dom.workspaceRefreshBtn = byId('workspace-refresh-btn');
+    dom.terminalDrawer = byId('terminal-drawer');
+    dom.toggleTerminalBtn = byId('toggle-terminal-btn');
+    dom.terminalOutput = byId('terminal-output');
+    dom.terminalInput = byId('terminal-input');
+    dom.terminalForm = byId('terminal-form');
+    dom.terminalSendBtn = byId('terminal-send-btn');
+    dom.terminalClearBtn = byId('terminal-clear-btn');
+    dom.terminalCloseBtn = byId('terminal-close-btn');
+
+    if (dom.terminalDrawer) {
+      dom.terminalDrawer.hidden = true;
+    }
 
     if (dom.exportMenu) {
       dom.exportMenu.hidden = true;
@@ -2324,6 +2403,28 @@
           }
           setActiveServer(target);
         }
+      });
+    }
+
+    if (dom.toggleTerminalBtn) {
+      dom.toggleTerminalBtn.addEventListener('click', function () {
+        toggleTerminal();
+      });
+    }
+    if (dom.terminalCloseBtn) {
+      dom.terminalCloseBtn.addEventListener('click', function () {
+        setTerminalCollapsed(true);
+      });
+    }
+    if (dom.terminalClearBtn) {
+      dom.terminalClearBtn.addEventListener('click', function () {
+        clearTerminalOutput();
+      });
+    }
+    if (dom.terminalForm) {
+      dom.terminalForm.addEventListener('submit', function (e) {
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        sendTerminalCommand();
       });
     }
 

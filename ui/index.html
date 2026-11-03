@@ -139,6 +139,14 @@
           aria-label="Hard refresh"
         >&#8635;</button>
         <button
+          id="toggle-terminal-btn"
+          type="button"
+          class="icon-btn"
+          title="Toggle terminal drawer (Alt+T)"
+          aria-label="Toggle terminal drawer"
+          aria-pressed="false"
+        >&#128435;</button>
+        <button
           id="theme-toggle-btn"
           type="button"
           class="icon-btn"
@@ -342,6 +350,32 @@
             ></textarea>
             <button id="send-btn" type="submit">Send</button>
           </form>
+
+          <section id="terminal-drawer" class="terminal-drawer" aria-label="Interactive Terminal" hidden>
+            <div class="terminal-header">
+              <div class="terminal-title-group">
+                <span class="terminal-badge">&#128435; Terminal</span>
+                <span id="terminal-status" class="terminal-status">Ready</span>
+              </div>
+              <div class="terminal-actions">
+                <button id="terminal-clear-btn" type="button" class="terminal-action-btn" title="Clear terminal">Clear</button>
+                <button id="terminal-close-btn" type="button" class="terminal-action-btn" title="Close terminal (Alt+T)">&times;</button>
+              </div>
+            </div>
+            <pre id="terminal-output" class="terminal-output" role="region" aria-live="polite" tabindex="0"></pre>
+            <form id="terminal-form" class="terminal-form">
+              <span class="terminal-prompt">$</span>
+              <input
+                id="terminal-input"
+                type="text"
+                class="terminal-input"
+                placeholder="Type shell command..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button id="terminal-send-btn" type="submit" class="terminal-send-btn">Run</button>
+            </form>
+          </section>
         </div>
 
         <div

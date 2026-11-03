@@ -690,7 +690,14 @@
         return true;
       }
     } else if (e.altKey && !isCtrl && !e.shiftKey) {
-      if (key === 's' || code === 'KeyS' || key === 'c' || code === 'KeyC') {
+      if (
+        key === 's' ||
+        code === 'KeyS' ||
+        key === 'c' ||
+        code === 'KeyC' ||
+        key === 't' ||
+        code === 'KeyT'
+      ) {
         return true;
       }
     } else if (isCtrl && !e.altKey) {

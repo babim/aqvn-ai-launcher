@@ -20,6 +20,9 @@ pub const MSG_TYPE_COMPUTER_USE_OP_RESULT: &str = "connector_computer_use_op_res
 pub const MSG_TYPE_TELEMETRY_OP: &str = "connector_telemetry_op";
 pub const MSG_TYPE_TELEMETRY_OP_RESULT: &str = "connector_telemetry_op_result";
 
+pub const MSG_TYPE_PROCESS_OP: &str = "connector_process_op";
+pub const MSG_TYPE_PROCESS_OP_RESULT: &str = "connector_process_op_result";
+
 pub const MSG_TYPE_GATEWAY_CONTROL: &str = "connector_gateway_control";
 pub const MSG_TYPE_GATEWAY_CONTROL_RESULT: &str = "connector_gateway_control_result";
 
@@ -1042,6 +1045,59 @@ pub struct ConnectorTelemetryOpResult {
     pub arch: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<HostSystemMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProcessEntry {
+    pub pid: u32,
+    pub ppid: u32,
+    pub name: String,
+    pub cmd: String,
+    pub cpu_percent: f64,
+    pub memory_rss_kb: u64,
+    pub user: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectorProcessOp {
+    #[serde(rename = "type", default)]
+    pub msg_type: Option<String>,
+    #[serde(default)]
+    pub op: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub op_id: Option<String>,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub pid: Option<u32>,
+    #[serde(default)]
+    pub signal: Option<i32>,
+    #[serde(default)]
+    pub params: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConnectorProcessOpResult {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub op: String,
+    pub id: String,
+    #[serde(default)]
+    pub op_id: String,
+    pub success: bool,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub processes: Vec<ProcessEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub killed: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }

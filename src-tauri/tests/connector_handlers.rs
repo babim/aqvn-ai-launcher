@@ -299,3 +299,106 @@ async fn test_telemetry_op_handling_val_tel_001() {
     // Clean up mock override
     set_test_system_metrics(None);
 }
+
+#[tokio::test]
+async fn test_process_op_handling_val_proc_001() {
+    use aqvn_workspace_lib::connector::handlers::dispatch_message;
+    use aqvn_workspace_lib::connector::handlers::process::{
+        handle_process_op, list_user_processes,
+    };
+    use aqvn_workspace_lib::connector::protocol::{
+        ConnectorProcessOpResult, MSG_TYPE_PROCESS_OP, MSG_TYPE_PROCESS_OP_RESULT,
+    };
+    use serde_json::{json, Value};
+
+    // 1. Direct unit verification: list_user_processes
+    let procs = list_user_processes();
+    assert!(!procs.is_empty(), "Must list at least 1 running process");
+    let current_pid = std::process::id();
+    let me = procs.iter().find(|p| p.pid == current_pid);
+    assert!(
+        me.is_some(),
+        "Current test process (PID {}) must be present in process list",
+        current_pid
+    );
+
+    // 2. Dispatch via dispatch_message: action=list
+    let list_req = json!({
+        "type": MSG_TYPE_PROCESS_OP,
+        "id": "proc-req-001",
+        "op_id": "proc-op-001",
+        "action": "list",
+    });
+
+    let resp_str = dispatch_message(&list_req.to_string())
+        .await
+        .expect("dispatch_message must handle connector_process_op");
+    let resp: Value = serde_json::from_str(&resp_str).expect("valid JSON response");
+
+    assert_eq!(resp["type"], MSG_TYPE_PROCESS_OP_RESULT);
+    assert_eq!(resp["op"], MSG_TYPE_PROCESS_OP_RESULT);
+    assert_eq!(resp["id"], "proc-req-001");
+    assert_eq!(resp["op_id"], "proc-op-001");
+    assert_eq!(resp["success"], true);
+    assert_eq!(resp["status"], "ok");
+    assert_eq!(resp["action"], "list");
+    let items = resp["processes"].as_array().expect("processes array");
+    assert!(!items.is_empty(), "processes list must not be empty");
+
+    let typed: ConnectorProcessOpResult =
+        serde_json::from_value(resp.clone()).expect("parse ConnectorProcessOpResult");
+    assert!(typed.success);
+    assert!(!typed.processes.is_empty());
+
+    // 3. Test terminate_process and action=kill on a spawned dummy process
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("failed to spawn sleep child");
+    let child_pid = child.id();
+
+    // Verify child is in list
+    let procs_after_spawn = list_user_processes();
+    assert!(
+        procs_after_spawn.iter().any(|p| p.pid == child_pid),
+        "Spawned child {} must be in process list",
+        child_pid
+    );
+
+    // Dispatch kill action
+    let kill_req = json!({
+        "type": MSG_TYPE_PROCESS_OP,
+        "id": "proc-req-002",
+        "op_id": "proc-op-002",
+        "action": "kill",
+        "pid": child_pid,
+    });
+
+    let kill_resp_str = dispatch_message(&kill_req.to_string())
+        .await
+        .expect("dispatch_message must handle kill action");
+    let kill_resp: Value = serde_json::from_str(&kill_resp_str).expect("valid JSON response");
+
+    assert_eq!(kill_resp["type"], MSG_TYPE_PROCESS_OP_RESULT);
+    assert_eq!(kill_resp["id"], "proc-req-002");
+    assert_eq!(kill_resp["success"], true);
+    assert_eq!(kill_resp["status"], "ok");
+    assert_eq!(kill_resp["action"], "kill");
+    assert_eq!(kill_resp["killed"], true);
+    assert_eq!(kill_resp["pid"], child_pid);
+
+    // Wait for child to exit
+    let _ = child.wait();
+
+    // 4. Test kill on non-existent or invalid PID fails gracefully without crash
+    let invalid_kill_req = json!({
+        "type": MSG_TYPE_PROCESS_OP,
+        "id": "proc-req-003",
+        "action": "kill",
+        "pid": 999999999,
+    });
+    let err_resp_str = handle_process_op(&invalid_kill_req).await;
+    let err_resp: Value = serde_json::from_str(&err_resp_str).expect("valid JSON");
+    assert_eq!(err_resp["action"], "kill");
+    assert_eq!(err_resp["killed"], false);
+}

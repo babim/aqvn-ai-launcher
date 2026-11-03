@@ -4720,6 +4720,32 @@ describe('VAL-DEBT-004: Tooling and CI hygiene', () => {
   });
 });
 
+describe('VAL-DEBT-005: OpenSpec completed changes archive', () => {
+  test('VAL-DEBT-005: openspec/changes has zero lingering active change1* directories', () => {
+    const changesDir = new URL('../../openspec/changes', import.meta.url);
+    const active = fs.readdirSync(changesDir).filter((f) => f.startsWith('change1'));
+    assert.equal(active.length, 0, `Expected zero active change1* directories in openspec/changes, found: ${active.join(', ')}`);
+  });
+
+  test('VAL-DEBT-005: archived changes exist in openspec/changes/archive/ with tasks marked complete', () => {
+    const archiveDir = new URL('../../openspec/changes/archive', import.meta.url);
+    assert.ok(fs.existsSync(archiveDir), 'openspec/changes/archive must exist');
+    const archived = fs.readdirSync(archiveDir);
+
+    for (let i = 129; i <= 161; i++) {
+      const match = archived.find((f) => f.includes(`change${i}-`));
+      assert.ok(match, `change${i} must be archived in openspec/changes/archive`);
+
+      const tasksMdPath = new URL(`../../openspec/changes/archive/${match}/tasks.md`, import.meta.url);
+      if (fs.existsSync(tasksMdPath)) {
+        const content = fs.readFileSync(tasksMdPath, 'utf8');
+        assert.doesNotMatch(content, /^- \[ \] /m, `tasks.md in ${match} must not contain unchecked tasks`);
+      }
+    }
+  });
+});
+
+
 
 
 

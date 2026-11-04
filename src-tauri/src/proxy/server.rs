@@ -360,13 +360,14 @@ struct LoginBody {
 
 async fn handle_health(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
     let origin = request_origin(&headers);
-    if let Some(response) = reject_bad_origin(origin.as_deref()) {
-        return with_cors(response, origin.as_deref());
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
     }
     let upstream = state.upstream().await;
     with_cors(
         Json(json!({ "ok": true, "target": upstream.target().origin() })).into_response(),
         origin.as_deref(),
+        state.port(),
     )
 }
 
@@ -377,12 +378,13 @@ struct FcpPayload {
 }
 
 async fn handle_benchmark_fcp(
+    State(state): State<ProxyState>,
     headers: HeaderMap,
     body: Result<Json<FcpPayload>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     let origin = request_origin(&headers);
-    if let Some(response) = reject_bad_origin(origin.as_deref()) {
-        return with_cors(response, origin.as_deref());
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
     }
     if let Ok(Json(payload)) = body {
         let doc = json!({
@@ -394,6 +396,7 @@ async fn handle_benchmark_fcp(
     with_cors(
         Json(json!({ "ok": true })).into_response(),
         origin.as_deref(),
+        state.port(),
     )
 }
 
@@ -409,11 +412,15 @@ async fn handle_proxy_csrf(
     headers: HeaderMap,
 ) -> Response {
     let origin = request_origin(&headers);
-    if let Some(response) = reject_bad_origin(origin.as_deref()) {
-        return with_cors(response, origin.as_deref());
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
     }
     if method == Method::OPTIONS {
-        return with_cors(StatusCode::NO_CONTENT.into_response(), origin.as_deref());
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
     }
     let upstream = state.upstream().await;
     let response = match upstream.csrf().await {
@@ -443,19 +450,20 @@ async fn handle_proxy_csrf(
         }
         Err(err) => text_response(StatusCode::BAD_GATEWAY, err),
     };
-    with_cors(response, origin.as_deref())
+    with_cors(response, origin.as_deref(), state.port())
 }
 
 /// Manual clear cache handler exposing `/proxy/clear_disk_cache` and `/proxy/cache/clear`.
 async fn handle_clear_disk_cache(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
     let origin = request_origin(&headers);
-    if let Some(response) = reject_bad_origin(origin.as_deref()) {
-        return with_cors(response, origin.as_deref());
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
     }
     state.cache().clear_disk_cache().await;
     with_cors(
         Json(json!({ "ok": true, "cleared": true })).into_response(),
         origin.as_deref(),
+        state.port(),
     )
 }
 
@@ -467,13 +475,17 @@ async fn handle_login(
     body: axum::body::Bytes,
 ) -> Response {
     let origin = request_origin(&headers);
-    if let Some(response) = reject_bad_origin(origin.as_deref()) {
-        return with_cors(response, origin.as_deref());
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
     }
     // The webview sends JSON, so the browser preflights /login. A 4xx
     // preflight is a hard CORS failure, so answer it before parsing a body.
     if method == Method::OPTIONS {
-        return with_cors(StatusCode::NO_CONTENT.into_response(), origin.as_deref());
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
     }
     if method == Method::GET {
         return handle_forward_raw(State(state), method, uri, headers, body).await;
@@ -485,6 +497,7 @@ async fn handle_login(
                 format!("method {method} is not supported for {LOGIN_PATH}"),
             ),
             origin.as_deref(),
+            state.port(),
         );
     }
 
@@ -504,6 +517,7 @@ async fn handle_login(
                         format!("login body must be JSON {{username,password}}: {err}"),
                     ),
                     origin.as_deref(),
+                    state.port(),
                 );
             }
         };
@@ -514,6 +528,7 @@ async fn handle_login(
                     "username and password are required".to_string(),
                 ),
                 origin.as_deref(),
+                state.port(),
             );
         }
 
@@ -526,7 +541,7 @@ async fn handle_login(
             )
                 .into_response(),
         };
-        return with_cors(response, origin.as_deref());
+        return with_cors(response, origin.as_deref(), state.port());
     }
 
     let mut username = String::new();
@@ -575,7 +590,7 @@ async fn handle_login(
             (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response()
         }
     };
-    with_cors(response, origin.as_deref())
+    with_cors(response, origin.as_deref(), state.port())
 }
 
 async fn handle_api(
@@ -586,11 +601,15 @@ async fn handle_api(
     body: axum::body::Bytes,
 ) -> Response {
     let origin = request_origin(&headers);
-    if let Some(response) = reject_bad_origin(origin.as_deref()) {
-        return with_cors(response, origin.as_deref());
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
     }
     if method == Method::OPTIONS {
-        return with_cors(StatusCode::NO_CONTENT.into_response(), origin.as_deref());
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
     }
     if !matches!(
         method,
@@ -602,6 +621,7 @@ async fn handle_api(
                 format!("method {method} is not proxied"),
             ),
             origin.as_deref(),
+            state.port(),
         );
     }
 
@@ -609,6 +629,7 @@ async fn handle_api(
         return with_cors(
             text_response(StatusCode::METHOD_NOT_ALLOWED, "unsupported method"),
             origin.as_deref(),
+            state.port(),
         );
     };
     let content_type = headers
@@ -624,7 +645,7 @@ async fn handle_api(
             body.to_vec(),
         )
         .await;
-    upstream_response(result, origin.as_deref())
+    upstream_response(result, origin.as_deref(), state.port())
 }
 
 /// Raw passthrough for root path, webui assets, and fallback unhandled paths (`/`, `/login.css`, `/vendor/*`, `/css/*`, `/js/*`, `/plugins/*`, `/extensions/*`, `/public/*`, `/ui/*`, `/sw.js`, `/components/*`).
@@ -640,16 +661,21 @@ async fn handle_forward_raw(
     body: axum::body::Bytes,
 ) -> Response {
     let origin = request_origin(&headers);
-    if let Some(response) = reject_bad_origin(origin.as_deref()) {
-        return with_cors(response, origin.as_deref());
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
     }
     if method == Method::OPTIONS {
-        return with_cors(StatusCode::NO_CONTENT.into_response(), origin.as_deref());
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
     }
     let Ok(upstream_method) = reqwest::Method::from_bytes(method.as_str().as_bytes()) else {
         return with_cors(
             text_response(StatusCode::METHOD_NOT_ALLOWED, "unsupported method"),
             origin.as_deref(),
+            state.port(),
         );
     };
     let upstream = state.upstream().await;
@@ -680,7 +706,7 @@ async fn handle_forward_raw(
                         header::CACHE_CONTROL,
                         HeaderValue::from_static("public, max-age=31536000, immutable"),
                     );
-                    return with_cors(response, origin.as_deref());
+                    return with_cors(response, origin.as_deref(), state.port());
                 }
             }
 
@@ -705,7 +731,7 @@ async fn handle_forward_raw(
                 header::CACHE_CONTROL,
                 HeaderValue::from_static("public, max-age=31536000, immutable"),
             );
-            return with_cors(response, origin.as_deref());
+            return with_cors(response, origin.as_deref(), state.port());
         }
     }
 
@@ -772,29 +798,36 @@ async fn handle_forward_raw(
                 );
             }
 
-            with_cors(response, origin.as_deref())
+            with_cors(response, origin.as_deref(), state.port())
         }
         Err(err) => with_cors(
             text_response(StatusCode::BAD_GATEWAY, err),
             origin.as_deref(),
+            state.port(),
         ),
     }
 }
 
 async fn handle_socket_io(State(state): State<ProxyState>, request: Request<Body>) -> Response {
     let origin = request_origin(request.headers());
-    if let Some(response) = reject_bad_origin(origin.as_deref()) {
-        return with_cors(response, origin.as_deref());
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
     }
     if request.method() == Method::OPTIONS {
-        return with_cors(StatusCode::NO_CONTENT.into_response(), origin.as_deref());
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
     }
 
     if is_websocket_upgrade(&request) {
         let (mut parts, _body) = request.into_parts();
         let upgrade = match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
             Ok(upgrade) => upgrade,
-            Err(rejection) => return with_cors(rejection.into_response(), origin.as_deref()),
+            Err(rejection) => {
+                return with_cors(rejection.into_response(), origin.as_deref(), state.port())
+            }
         };
         let path_and_query = path_and_query(&parts.uri);
         let upstream = state.upstream().await;
@@ -807,12 +840,14 @@ async fn handle_socket_io(State(state): State<ProxyState>, request: Request<Body
         return with_cors(
             text_response(StatusCode::PAYLOAD_TOO_LARGE, "request body too large"),
             origin.as_deref(),
+            state.port(),
         );
     };
     let Ok(method) = reqwest::Method::from_bytes(parts.method.as_str().as_bytes()) else {
         return with_cors(
             text_response(StatusCode::METHOD_NOT_ALLOWED, "unsupported method"),
             origin.as_deref(),
+            state.port(),
         );
     };
     let content_type = parts
@@ -829,10 +864,14 @@ async fn handle_socket_io(State(state): State<ProxyState>, request: Request<Body
             bytes.to_vec(),
         )
         .await;
-    upstream_response(result, origin.as_deref())
+    upstream_response(result, origin.as_deref(), state.port())
 }
 
-fn upstream_response(result: Result<ForwardResponse, String>, origin: Option<&str>) -> Response {
+fn upstream_response(
+    result: Result<ForwardResponse, String>,
+    origin: Option<&str>,
+    proxy_port: u16,
+) -> Response {
     match result {
         Ok(outcome) => {
             let mut response = Response::new(Body::from(outcome.body));
@@ -843,9 +882,13 @@ fn upstream_response(result: Result<ForwardResponse, String>, origin: Option<&st
                     response.headers_mut().insert(header::CONTENT_TYPE, value);
                 }
             }
-            with_cors(response, origin)
+            with_cors(response, origin, proxy_port)
         }
-        Err(err) => with_cors(text_response(StatusCode::BAD_GATEWAY, err), origin),
+        Err(err) => with_cors(
+            text_response(StatusCode::BAD_GATEWAY, err),
+            origin,
+            proxy_port,
+        ),
     }
 }
 
@@ -868,9 +911,9 @@ fn request_origin(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
-fn reject_bad_origin(origin: Option<&str>) -> Option<Response> {
+fn reject_bad_origin(origin: Option<&str>, proxy_port: u16) -> Option<Response> {
     match origin {
-        Some(origin) if !allowed_origin(origin) => Some(text_response(
+        Some(origin) if !allowed_origin(origin, proxy_port) => Some(text_response(
             StatusCode::FORBIDDEN,
             format!("bridge proxy: origin {origin:?} is not allowed"),
         )),
@@ -880,7 +923,7 @@ fn reject_bad_origin(origin: Option<&str>) -> Option<Response> {
 
 /// The webview origins and local validation servers may talk to the proxy.
 /// Everything else is rejected so arbitrary web pages cannot drive it.
-pub fn allowed_origin(origin: &str) -> bool {
+pub fn allowed_origin(origin: &str, proxy_port: u16) -> bool {
     if origin == "tauri://localhost" {
         return true;
     }
@@ -890,17 +933,18 @@ pub fn allowed_origin(origin: &str) -> bool {
     if url.scheme() != "http" && url.scheme() != "https" {
         return false;
     }
-    matches!(
-        url.host_str(),
-        Some("localhost") | Some("127.0.0.1") | Some("tauri.localhost")
-    )
+    match url.host_str() {
+        Some("tauri.localhost") => true,
+        Some("localhost") | Some("127.0.0.1") => proxy_port > 0 && url.port() == Some(proxy_port),
+        _ => false,
+    }
 }
 
-fn with_cors(mut response: Response, origin: Option<&str>) -> Response {
+fn with_cors(mut response: Response, origin: Option<&str>, proxy_port: u16) -> Response {
     let Some(origin) = origin else {
         return response;
     };
-    if !allowed_origin(origin) {
+    if !allowed_origin(origin, proxy_port) {
         return response;
     }
     let Ok(value) = HeaderValue::from_str(origin) else {
@@ -964,10 +1008,10 @@ mod tests {
             "tauri://localhost",
             "http://tauri.localhost",
             "https://tauri.localhost",
-            "http://localhost:3155",
-            "http://127.0.0.1:8080",
+            "http://localhost:55088",
+            "http://127.0.0.1:55088",
         ] {
-            assert!(allowed_origin(origin), "{origin} must be allowed");
+            assert!(allowed_origin(origin, 55088), "{origin} must be allowed");
         }
     }
 
@@ -976,11 +1020,14 @@ mod tests {
         for origin in [
             "https://evil.example",
             "http://localhost.evil.example",
+            "http://localhost:3000",
+            "http://localhost:3155",
+            "http://127.0.0.1:8080",
             "file://",
             "null",
             "not a url",
         ] {
-            assert!(!allowed_origin(origin), "{origin} must be rejected");
+            assert!(!allowed_origin(origin, 55088), "{origin} must be rejected");
         }
     }
 

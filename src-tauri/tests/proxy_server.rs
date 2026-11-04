@@ -717,7 +717,7 @@ async fn cors_preflight_is_answered() {
 
     let response = client()
         .request(reqwest::Method::OPTIONS, format!("{}/api/echo", proxy.base))
-        .header(header::ORIGIN, "http://localhost:3155")
+        .header(header::ORIGIN, &proxy.base)
         .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
         .header(
             header::ACCESS_CONTROL_REQUEST_HEADERS,
@@ -733,7 +733,7 @@ async fn cors_preflight_is_answered() {
             .headers()
             .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
             .and_then(|value| value.to_str().ok()),
-        Some("http://localhost:3155")
+        Some(proxy.base.as_str())
     );
 }
 

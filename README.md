@@ -230,6 +230,34 @@ task bench
 bash tools/benchmark.sh
 ```
 
+### 6. Workspace File Explorer 2.0 & Diff Inspection
+- **Hierarchical Directory Tree & Breadcrumbs**: Navigate through nested directories with breadcrumbs toolbar (`~/Workspace > path > to > dir`).
+- **File Preview & In-App Editor**: Inspect Markdown with rendered HTML, code with syntax highlighting, and images. Built-in inline editor allows quick atomic saves directly to the workspace.
+- **File CRUD & Directory Archive**: Create new files, folders, rename, delete, and download entire folders as compressed ZIP archives.
+- **Visual Patch Diff Viewer**: Side-by-side or unified green/red diff modal inspecting agent code edits with hunk markers.
+
+### 7. Interactive PTY Terminal Engine 2.0
+- **ANSI VT100 Color Rendering**: Full support for 16-color, 256-color, RGB truecolor, bold, dim, and line clear escape sequences.
+- **Command History Ring-Buffer**: Navigate past shell commands using `ArrowUp` and `ArrowDown` keys.
+- **Dynamic PTY Window Resizing**: Synchronizes terminal dimensions (`cols`, `rows`) to backend `portable-pty` on window or drawer resize.
+- **Multi-Tab Terminal Shells**: Add and switch between multiple independent shell sessions (`+ Shell`).
+
+### 8. Agent Activity Feed, Human-in-the-Loop Approval & Audit Trail
+- **Live Activity Drawer**: Topbar badge tracking active agent tool calls, displaying a real-time timeline of file reads, writes, and commands.
+- **Action Approval Gate**: Prompts user confirmation before executing sensitive commands (e.g. shell execution, file deletion) with options for `Allow Once`, `Allow for Session`, or `Deny`.
+- **Security Policy Presets**: Configurable policy modes (`Permissive`, `Supervised`, `Strict`) in Settings governing approval thresholds.
+- **Immutable Audit Trail Export**: Comprehensive audit log of all agent operations and approval decisions, exportable to JSON or CSV.
+
+### 9. Modern UI Polish & Multi-Server Gateway Radar
+- **Toast Notifications**: Lightweight floating notification toasts with auto-dismiss (3s) for status, success, and errors.
+- **Smart Scroll Anchoring**: Prevents jerky scroll jumps during message streaming when reviewing history; reveals a floating `↓ New messages below (N)` jump button.
+- **Message Action Bar & Code Collapse**: Hover action toolbar on messages to copy raw Markdown or quote-reply into composer; collapsible blocks for code/terminal output over 50 lines.
+- **Command Palette (`Ctrl+K`) & Shortcuts Sheet (`?`)**: Instant action palette for switching themes, running shortcuts, and navigating UI.
+- **Topbar Fast Server Switcher**: Dropdown button in topbar to switch between saved server profiles on-the-fly without logging out.
+- **Connection Health Radar**: Periodic latency sparkline (last 20 pings) and connection quality grading (`Excellent`, `Fair`, `Poor`) in diagnostics modal.
+
+```
+
 ### E2E Test Suites
 
 - **RFC Protocol & Sandbox**: `python3 tools/spec_client.py`

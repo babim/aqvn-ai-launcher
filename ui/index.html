@@ -277,8 +277,16 @@
           <div id="workspace-view" class="sidebar-tab-panel" role="tabpanel" aria-labelledby="tab-workspace-btn" hidden>
             <div class="sidebar-head">
               <span class="sidebar-title">Workspace</span>
-              <button id="workspace-refresh-btn" type="button" class="sidebar-btn" title="Refresh files">&#8635;</button>
+              <div class="workspace-head-actions">
+                <button id="workspace-new-file-btn" type="button" class="sidebar-btn" title="New file">+ File</button>
+                <button id="workspace-new-folder-btn" type="button" class="sidebar-btn" title="New folder">+ Folder</button>
+                <button id="workspace-zip-btn" type="button" class="sidebar-btn" title="Download folder as ZIP">&#128230; ZIP</button>
+                <button id="workspace-refresh-btn" type="button" class="sidebar-btn" title="Refresh files">&#8635;</button>
+              </div>
             </div>
+            <nav id="workspace-breadcrumbs" class="workspace-breadcrumbs" aria-label="Folder breadcrumbs">
+              <button type="button" class="breadcrumb-item active" data-path="">~/Workspace</button>
+            </nav>
             <div
               id="workspace-upload-dropzone"
               class="workspace-dropzone"
@@ -477,6 +485,45 @@
         <div class="diagnostics-footer">
           <button id="reconnect-now-btn" type="button" class="btn btn-primary reconnect-btn">Reconnect Now</button>
           <button id="reconnect-btn" type="button" class="reconnect-btn" style="display:none;" aria-hidden="true">Reconnect Now</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- File Preview & Editor Modal (VAL-WORK-002, VAL-WORK-003) -->
+    <div id="file-preview-modal" class="file-preview-modal" role="dialog" aria-modal="true" aria-labelledby="file-preview-title" hidden>
+      <div class="file-preview-dialog">
+        <div class="file-preview-header">
+          <div class="file-preview-title-wrap">
+            <span class="file-preview-icon">&#128196;</span>
+            <h2 id="file-preview-title">Preview</h2>
+          </div>
+          <div class="file-preview-actions">
+            <button id="file-preview-edit-btn" type="button" class="btn btn-secondary">Edit</button>
+            <button id="file-preview-save-btn" type="button" class="btn btn-primary" hidden>Save</button>
+            <button id="close-file-preview-btn" type="button" class="icon-btn close-btn" aria-label="Close Preview">&times;</button>
+          </div>
+        </div>
+        <div id="file-preview-body" class="file-preview-body">
+          <div id="file-preview-content" class="file-preview-content"></div>
+          <textarea id="file-editor-textarea" class="file-editor-textarea" spellcheck="false" hidden></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Visual Patch & Diff Viewer Modal (VAL-WORK-005) -->
+    <div id="diff-viewer-modal" class="diff-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="diff-viewer-title" hidden>
+      <div class="diff-viewer-dialog">
+        <div class="diff-viewer-header">
+          <div class="diff-viewer-title-wrap">
+            <span class="diff-viewer-icon">&#128221;</span>
+            <h2 id="diff-viewer-title">Visual Diff</h2>
+          </div>
+          <div class="diff-viewer-actions">
+            <button id="close-diff-viewer-btn" type="button" class="icon-btn close-btn" aria-label="Close Diff">&times;</button>
+          </div>
+        </div>
+        <div id="diff-viewer-body" class="diff-viewer-body">
+          <pre id="diff-viewer-content" class="diff-viewer-content"></pre>
         </div>
       </div>
     </div>

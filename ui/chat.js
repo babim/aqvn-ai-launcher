@@ -2059,15 +2059,58 @@
     }
   }
 
-  async function loadWorkspaceFiles() {
+  state.workspaceCurrentPath = '';
+  state.previewingFile = null;
+
+  async function loadWorkspaceFiles(subpath) {
+    if (typeof subpath === 'string') {
+      state.workspaceCurrentPath = subpath;
+    }
+    renderBreadcrumbs();
     try {
-      var res = await apiCall('files_list', { path: '' });
+      var res = await apiCall('files_list', { path: state.workspaceCurrentPath });
       var entries = (res && (res.entries || (res.data && res.data.entries))) || [];
       state.workspaceFiles = entries;
       renderWorkspaceFiles();
     } catch (err) {
-      // If remote fails or offline, attempt to render empty/current
       renderWorkspaceFiles();
+    }
+  }
+
+  function renderBreadcrumbs() {
+    if (!dom.workspaceBreadcrumbs) return;
+    dom.workspaceBreadcrumbs.innerHTML = '';
+
+    var rootBtn = document.createElement('button');
+    rootBtn.type = 'button';
+    rootBtn.className = 'breadcrumb-item' + (!state.workspaceCurrentPath ? ' active' : '');
+    rootBtn.textContent = '~/Workspace';
+    rootBtn.dataset.path = '';
+    rootBtn.onclick = function() { loadWorkspaceFiles(''); };
+    dom.workspaceBreadcrumbs.appendChild(rootBtn);
+
+    if (state.workspaceCurrentPath) {
+      var segments = state.workspaceCurrentPath.split('/').filter(Boolean);
+      var accum = '';
+      segments.forEach(function(seg, i) {
+        accum += (accum ? '/' : '') + seg;
+        var sep = document.createElement('span');
+        sep.className = 'breadcrumb-sep';
+        sep.textContent = '>';
+        dom.workspaceBreadcrumbs.appendChild(sep);
+
+        var segBtn = document.createElement('button');
+        segBtn.type = 'button';
+        var isLast = i === segments.length - 1;
+        segBtn.className = 'breadcrumb-item' + (isLast ? ' active' : '');
+        segBtn.textContent = seg;
+        segBtn.dataset.path = accum;
+        if (!isLast) {
+          var targetPath = accum;
+          segBtn.onclick = function() { loadWorkspaceFiles(targetPath); };
+        }
+        dom.workspaceBreadcrumbs.appendChild(segBtn);
+      });
     }
   }
 
@@ -2085,7 +2128,8 @@
     state.workspaceFiles.forEach(function (file) {
       var item = document.createElement('div');
       item.className = 'workspace-file-item ' + (file.is_dir ? 'is-dir' : 'is-file');
-      item.dataset.path = file.path || file.name;
+      var filePath = file.path || file.name;
+      item.dataset.path = filePath;
 
       var icon = file.is_dir ? '&#128193;' : '&#128196;';
       var parts = [];
@@ -2096,14 +2140,215 @@
         parts.push(formatFileTimestamp(file.modified));
       }
 
+      var chevron = file.is_dir ? '<span class="file-chevron">&#8250;</span>' : '';
+      var actions = '<div class="file-item-actions">' +
+        (!file.is_dir ? '<button type="button" class="file-action-icon preview-btn" title="Preview">&#128065;</button>' : '') +
+        '<button type="button" class="file-action-icon delete-btn" title="Delete">&#128465;</button>' +
+      '</div>';
+
       item.innerHTML =
         '<span class="file-icon">' + icon + '</span>' +
         '<div class="file-info">' +
           '<div class="file-name">' + escapeHtml(file.name || file.path) + '</div>' +
           '<div class="file-meta">' + escapeHtml(parts.join(' • ')) + '</div>' +
-        '</div>';
+        '</div>' +
+        chevron +
+        actions;
+
+      item.addEventListener('click', function(e) {
+        if (e.target.closest('.delete-btn')) {
+          e.stopPropagation();
+          deleteWorkspaceItem(filePath, file.is_dir);
+          return;
+        }
+        if (e.target.closest('.preview-btn')) {
+          e.stopPropagation();
+          openFilePreview(file);
+          return;
+        }
+        if (file.is_dir) {
+          loadWorkspaceFiles(filePath);
+        } else {
+          openFilePreview(file);
+        }
+      });
+
       dom.workspaceFileList.appendChild(item);
     });
+  }
+
+  async function openFilePreview(file) {
+    if (!dom.filePreviewModal) return;
+    state.previewingFile = file;
+    var filePath = file.path || file.name;
+    if (dom.filePreviewTitle) {
+      dom.filePreviewTitle.textContent = file.name || filePath;
+    }
+    if (dom.filePreviewContent) {
+      dom.filePreviewContent.innerHTML = '<p class="loading">Loading content...</p>';
+      dom.filePreviewContent.hidden = false;
+    }
+    if (dom.fileEditorTextarea) {
+      dom.fileEditorTextarea.hidden = true;
+      dom.fileEditorTextarea.value = '';
+    }
+    if (dom.filePreviewEditBtn) {
+      dom.filePreviewEditBtn.hidden = false;
+      dom.filePreviewEditBtn.textContent = 'Edit';
+    }
+    if (dom.filePreviewSaveBtn) {
+      dom.filePreviewSaveBtn.hidden = true;
+    }
+    dom.filePreviewModal.hidden = false;
+
+    if (isBinaryFile(file)) {
+      if (/\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i.test(filePath)) {
+        try {
+          var res = await apiCall('files_read', { path: filePath, binary: true });
+          var b64 = res.data || res.content || '';
+          dom.filePreviewContent.innerHTML = '<img src="data:image/png;base64,' + b64 + '" alt="' + escapeHtml(filePath) + '" />';
+          if (dom.filePreviewEditBtn) dom.filePreviewEditBtn.hidden = true;
+          return;
+        } catch (e) {}
+      }
+      dom.filePreviewContent.innerHTML = '<p class="notice">Binary file (' + formatFileSize(file.size || 0) + '). Preview not available.</p>';
+      if (dom.filePreviewEditBtn) dom.filePreviewEditBtn.hidden = true;
+      return;
+    }
+
+    try {
+      var res = await apiCall('files_read', { path: filePath });
+      var text = (res && (typeof res.content === 'string' ? res.content : (res.data || ''))) || '';
+      state.previewingFile.content = text;
+
+      if (/\.md$/i.test(filePath) && typeof marked !== 'undefined' && marked.parse) {
+        dom.filePreviewContent.innerHTML = marked.parse(text);
+      } else {
+        dom.filePreviewContent.innerHTML = '<pre><code>' + escapeHtml(text) + '</code></pre>';
+        if (typeof hljs !== 'undefined' && hljs.highlightElement) {
+          var codeEl = dom.filePreviewContent.querySelector('code');
+          if (codeEl) hljs.highlightElement(codeEl);
+        }
+      }
+    } catch (err) {
+      dom.filePreviewContent.innerHTML = '<p class="error">Failed to load file: ' + escapeHtml(err.message || String(err)) + '</p>';
+    }
+  }
+
+  function closeFilePreview() {
+    if (dom.filePreviewModal) dom.filePreviewModal.hidden = true;
+    state.previewingFile = null;
+  }
+
+  function toggleFileEditor() {
+    if (!state.previewingFile) return;
+    var isEditing = !dom.fileEditorTextarea.hidden;
+    if (isEditing) {
+      dom.fileEditorTextarea.hidden = true;
+      dom.filePreviewContent.hidden = false;
+      dom.filePreviewEditBtn.textContent = 'Edit';
+      dom.filePreviewSaveBtn.hidden = true;
+    } else {
+      dom.fileEditorTextarea.value = state.previewingFile.content || '';
+      dom.fileEditorTextarea.hidden = false;
+      dom.filePreviewContent.hidden = true;
+      dom.filePreviewEditBtn.textContent = 'Cancel';
+      dom.filePreviewSaveBtn.hidden = false;
+      dom.fileEditorTextarea.focus();
+    }
+  }
+
+  async function saveFileEditor() {
+    if (!state.previewingFile) return;
+    var filePath = state.previewingFile.path || state.previewingFile.name;
+    var newContent = dom.fileEditorTextarea.value;
+    try {
+      await apiCall('files_write', { path: filePath, content: newContent });
+      state.previewingFile.content = newContent;
+      toggleFileEditor();
+      openFilePreview(state.previewingFile);
+      loadWorkspaceFiles(state.workspaceCurrentPath);
+    } catch (err) {
+      alert('Save failed: ' + (err.message || String(err)));
+    }
+  }
+
+  async function createWorkspaceFile() {
+    var name = prompt('Enter new file name:');
+    if (!name) return;
+    var targetPath = (state.workspaceCurrentPath ? state.workspaceCurrentPath + '/' : '') + name.trim();
+    try {
+      await apiCall('files_write', { path: targetPath, content: '' });
+      loadWorkspaceFiles(state.workspaceCurrentPath);
+    } catch (err) {
+      alert('Create file failed: ' + (err.message || String(err)));
+    }
+  }
+
+  async function createWorkspaceFolder() {
+    var name = prompt('Enter new folder name:');
+    if (!name) return;
+    var targetPath = (state.workspaceCurrentPath ? state.workspaceCurrentPath + '/' : '') + name.trim();
+    try {
+      await apiCall('files_mkdir', { path: targetPath });
+      loadWorkspaceFiles(state.workspaceCurrentPath);
+    } catch (err) {
+      alert('Create folder failed: ' + (err.message || String(err)));
+    }
+  }
+
+  async function deleteWorkspaceItem(path, isDir) {
+    if (!confirm('Are you sure you want to delete ' + (isDir ? 'folder' : 'file') + ' "' + path + '"?')) {
+      return;
+    }
+    try {
+      await apiCall('files_remove', { path: path });
+      loadWorkspaceFiles(state.workspaceCurrentPath);
+    } catch (err) {
+      alert('Delete failed: ' + (err.message || String(err)));
+    }
+  }
+
+  async function downloadWorkspaceZip() {
+    try {
+      var res = await apiCall('files_zip', { path: state.workspaceCurrentPath || '.' });
+      if (res && res.path) {
+        alert('ZIP archive created at: ' + res.path);
+      } else {
+        alert('ZIP archive created successfully.');
+      }
+    } catch (err) {
+      alert('ZIP download failed: ' + (err.message || String(err)));
+    }
+  }
+
+  function openDiffViewer(title, diffText) {
+    if (!dom.diffViewerModal) return;
+    if (dom.diffViewerTitle) {
+      dom.diffViewerTitle.textContent = title || 'Visual Diff';
+    }
+    if (dom.diffViewerContent) {
+      dom.diffViewerContent.innerHTML = '';
+      var lines = (diffText || '').split('\n');
+      lines.forEach(function(line) {
+        var span = document.createElement('span');
+        if (line.startsWith('+')) {
+          span.className = 'diff-line-add';
+        } else if (line.startsWith('-')) {
+          span.className = 'diff-line-del';
+        } else if (line.startsWith('@@')) {
+          span.className = 'diff-line-hunk';
+        }
+        span.textContent = line;
+        dom.diffViewerContent.appendChild(span);
+        dom.diffViewerContent.appendChild(document.createTextNode('\n'));
+      });
+    }
+    dom.diffViewerModal.hidden = false;
+  }
+
+  function closeDiffViewer() {
+    if (dom.diffViewerModal) dom.diffViewerModal.hidden = true;
   }
 
   var BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|ico|tiff?|avif|heic|heif|pdf|zip|tar|gz|tgz|bz2|xz|7z|rar|wasm|bin|exe|dll|dylib|so|mp3|mp4|wav|ogg|flac|aac|m4a|mov|avi|mkv|webm|iso|dmg|apk|jar|class|woff2?|ttf|otf|eot|doc|docx|xls|xlsx|ppt|pptx)$/i;
@@ -2383,9 +2628,24 @@
     dom.sessionsView = byId('sessions-view');
     dom.workspaceView = byId('workspace-view');
     dom.workspaceFileList = byId('workspace-file-list');
+    dom.workspaceBreadcrumbs = byId('workspace-breadcrumbs');
+    dom.workspaceNewFileBtn = byId('workspace-new-file-btn');
+    dom.workspaceNewFolderBtn = byId('workspace-new-folder-btn');
+    dom.workspaceZipBtn = byId('workspace-zip-btn');
     dom.workspaceUploadDropzone = byId('workspace-upload-dropzone');
     dom.workspaceFileInput = byId('workspace-file-input');
     dom.workspaceRefreshBtn = byId('workspace-refresh-btn');
+    dom.filePreviewModal = byId('file-preview-modal');
+    dom.filePreviewTitle = byId('file-preview-title');
+    dom.filePreviewEditBtn = byId('file-preview-edit-btn');
+    dom.filePreviewSaveBtn = byId('file-preview-save-btn');
+    dom.closeFilePreviewBtn = byId('close-file-preview-btn');
+    dom.filePreviewContent = byId('file-preview-content');
+    dom.fileEditorTextarea = byId('file-editor-textarea');
+    dom.diffViewerModal = byId('diff-viewer-modal');
+    dom.diffViewerTitle = byId('diff-viewer-title');
+    dom.closeDiffViewerBtn = byId('close-diff-viewer-btn');
+    dom.diffViewerContent = byId('diff-viewer-content');
     dom.terminalDrawer = byId('terminal-drawer');
     dom.toggleTerminalBtn = byId('toggle-terminal-btn');
     dom.terminalOutput = byId('terminal-output');
@@ -2428,6 +2688,27 @@
       dom.workspaceRefreshBtn.addEventListener('click', function () {
         loadWorkspaceFiles();
       });
+    }
+    if (dom.workspaceNewFileBtn) {
+      dom.workspaceNewFileBtn.addEventListener('click', createWorkspaceFile);
+    }
+    if (dom.workspaceNewFolderBtn) {
+      dom.workspaceNewFolderBtn.addEventListener('click', createWorkspaceFolder);
+    }
+    if (dom.workspaceZipBtn) {
+      dom.workspaceZipBtn.addEventListener('click', downloadWorkspaceZip);
+    }
+    if (dom.closeFilePreviewBtn) {
+      dom.closeFilePreviewBtn.addEventListener('click', closeFilePreview);
+    }
+    if (dom.filePreviewEditBtn) {
+      dom.filePreviewEditBtn.addEventListener('click', toggleFileEditor);
+    }
+    if (dom.filePreviewSaveBtn) {
+      dom.filePreviewSaveBtn.addEventListener('click', saveFileEditor);
+    }
+    if (dom.closeDiffViewerBtn) {
+      dom.closeDiffViewerBtn.addEventListener('click', closeDiffViewer);
     }
     setupDragAndDropUploader();
 

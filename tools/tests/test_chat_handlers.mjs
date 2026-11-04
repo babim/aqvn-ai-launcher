@@ -4758,6 +4758,48 @@ describe('VAL-SEC-006: Proxy query parameter open-redirect protection', () => {
   });
 });
 
+describe('Milestone 2: Workspace File Explorer 2.0 (VAL-WORK-001..005)', () => {
+  test('VAL-WORK-001: Hierarchical directory navigation & breadcrumbs', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="workspace-breadcrumbs"/, 'Breadcrumbs container must exist in index.html');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function renderBreadcrumbs\(\)/, 'renderBreadcrumbs must be defined in chat.js');
+    assert.match(chatJs, /breadcrumb-item/, 'breadcrumb item styling used');
+  });
+
+  test('VAL-WORK-002 & VAL-WORK-003: File preview modal and inline editor', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="file-preview-modal"/, 'file-preview-modal must exist');
+    assert.match(indexHtml, /id="file-editor-textarea"/, 'file-editor-textarea must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function openFilePreview\(/, 'openFilePreview must be defined');
+    assert.match(chatJs, /function toggleFileEditor\(\)/, 'toggleFileEditor must be defined');
+    assert.match(chatJs, /function saveFileEditor\(\)/, 'saveFileEditor must be defined');
+  });
+
+  test('VAL-WORK-004: Workspace CRUD buttons and ZIP archive download', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="workspace-new-file-btn"/, 'New file button must exist');
+    assert.match(indexHtml, /id="workspace-new-folder-btn"/, 'New folder button must exist');
+    assert.match(indexHtml, /id="workspace-zip-btn"/, 'ZIP download button must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /createWorkspaceFile/, 'createWorkspaceFile must exist');
+    assert.match(chatJs, /createWorkspaceFolder/, 'createWorkspaceFolder must exist');
+    assert.match(chatJs, /deleteWorkspaceItem/, 'deleteWorkspaceItem must exist');
+    assert.match(chatJs, /downloadWorkspaceZip/, 'downloadWorkspaceZip must exist');
+  });
+
+  test('VAL-WORK-005: Visual diff / patch viewer', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="diff-viewer-modal"/, 'diff-viewer-modal must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function openDiffViewer\(/, 'openDiffViewer must be defined');
+    const chatCss = fs.readFileSync(new URL('../../ui/chat.css', import.meta.url), 'utf8');
+    assert.match(chatCss, /\.diff-line-add/, 'diff addition styling exists');
+    assert.match(chatCss, /\.diff-line-del/, 'diff deletion styling exists');
+  });
+});
+
 
 
 

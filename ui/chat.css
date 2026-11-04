@@ -662,6 +662,213 @@ button:disabled {
   font-size: 0.70rem;
 }
 
+.workspace-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.workspace-head-actions .sidebar-btn {
+  padding: 3px 6px;
+  font-size: 0.72rem;
+  margin-left: 0;
+}
+
+.workspace-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  font-size: 0.75rem;
+  overflow-x: auto;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.breadcrumb-item {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.breadcrumb-item:hover {
+  background: var(--accent-soft);
+}
+
+.breadcrumb-item.active {
+  color: var(--ink);
+  font-weight: 600;
+  cursor: default;
+}
+
+.breadcrumb-sep {
+  color: var(--muted);
+  user-select: none;
+}
+
+.workspace-file-item.is-dir {
+  cursor: pointer;
+}
+
+.workspace-file-item .file-chevron {
+  font-size: 0.8rem;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.workspace-file-item .file-item-actions {
+  display: none;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.workspace-file-item:hover .file-item-actions {
+  display: flex;
+}
+
+.file-action-icon {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.file-action-icon:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.file-preview-modal,
+.diff-viewer-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+}
+
+.file-preview-modal[hidden],
+.diff-viewer-modal[hidden] {
+  display: none !important;
+}
+
+.file-preview-dialog,
+.diff-viewer-dialog {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.file-preview-header,
+.diff-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.file-preview-title-wrap,
+.diff-viewer-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-preview-title-wrap h2,
+.diff-viewer-title-wrap h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.file-preview-actions,
+.diff-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-preview-body,
+.diff-viewer-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 250px;
+}
+
+.file-preview-content {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.file-preview-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.file-editor-textarea {
+  width: 100%;
+  height: 350px;
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.diff-viewer-content {
+  margin: 0;
+  font-family: monospace;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-line-add {
+  color: var(--ok);
+  background: oklch(from var(--ok) l c h / 0.12);
+  display: block;
+}
+
+.diff-line-del {
+  color: var(--danger);
+  background: oklch(from var(--danger) l c h / 0.12);
+  display: block;
+}
+
+.diff-line-hunk {
+  color: var(--accent);
+  font-weight: 600;
+  display: block;
+  margin: 4px 0;
+}
+
 .workspace-empty-msg {
   padding: 16px 8px;
   text-align: center;

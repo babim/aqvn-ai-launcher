@@ -1813,3 +1813,246 @@ body.focus-mode #chat-pane {
   font-weight: 600;
   border-radius: 6px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Agent Activity Feed & Approval Gate (VAL-AGENT-001..004)           */
+/* ------------------------------------------------------------------ */
+
+.activity-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+#activity-badge-count {
+  font-size: 0.70rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.agent-activity-drawer {
+  position: fixed;
+  top: 50px;
+  right: 12px;
+  width: 380px;
+  max-width: 90vw;
+  max-height: 80vh;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  z-index: 950;
+  overflow: hidden;
+}
+
+.agent-activity-drawer[hidden] {
+  display: none !important;
+}
+
+.activity-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.activity-drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.activity-status-badge {
+  font-size: 0.68rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.activity-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.activity-drawer-actions .btn-sm {
+  padding: 3px 6px;
+  font-size: 0.70rem;
+}
+
+.activity-feed-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.78rem;
+}
+
+.activity-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border-left: 3px solid var(--accent);
+}
+
+.activity-item.status-denied {
+  border-left-color: var(--danger);
+}
+
+.activity-item.status-allowed {
+  border-left-color: var(--ok);
+}
+
+.activity-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.activity-item-title {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.activity-item-detail {
+  font-family: monospace;
+  font-size: 0.74rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-empty-msg {
+  padding: 20px 10px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* Approval Modal */
+.agent-approval-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+}
+
+.agent-approval-modal[hidden] {
+  display: none !important;
+}
+
+.agent-approval-dialog {
+  background: #0f172a;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 25px 35px -5px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+}
+
+.approval-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.approval-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.approval-warning-icon {
+  font-size: 1.4rem;
+  color: #ef4444;
+}
+
+.approval-title-wrap h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #f8fafc;
+}
+
+.approval-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+.approval-desc {
+  margin: 0;
+  color: var(--muted);
+}
+
+.approval-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.approval-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.approval-val {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.approval-cmd {
+  margin: 0;
+  padding: 8px 10px;
+  background: #070d16;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: #f87171;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.approval-risk {
+  margin: 4px 0 0;
+  font-size: 0.76rem;
+  color: #facc15;
+}
+
+.approval-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.2);
+}

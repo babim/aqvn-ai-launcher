@@ -30,7 +30,8 @@
     task_chime_volume: 0.5,
     task_chime_tone: 'classic',
     app_language: 'vi',
-    app_theme: 'aqvn-dark'
+    app_theme: 'aqvn-dark',
+    security_policy: 'supervised'
   };
 
   let store = null;
@@ -68,6 +69,7 @@
   const sshPasswordInput = document.getElementById('ssh-password');
   const rfcPortInput = document.getElementById('rfc-port');
   const sshPortInput = document.getElementById('ssh-port');
+  const securityPolicyInput = document.getElementById('security-policy');
   const allowedPathsList = document.getElementById('allowed-paths-list');
   const allowedPathInput = document.getElementById('allowed-path-input');
   const addAllowedPathBtn = document.getElementById('add-allowed-path');
@@ -530,6 +532,11 @@
         taskChimeToneInput.value = ['classic', 'bell', 'beep', 'subtle'].includes(tone) ? tone : DEFAULTS.task_chime_tone;
       }
 
+      const securityPolicy = await store.get('security_policy');
+      if (securityPolicyInput) {
+        securityPolicyInput.value = securityPolicy || DEFAULTS.security_policy;
+      }
+
       const appLanguage = await store.get('app_language');
       let savedLocalLang = null;
       try {
@@ -694,6 +701,9 @@
       const appTheme = appThemeSelect ? appThemeSelect.value : DEFAULTS.app_theme;
       await store.set('app_theme', appTheme);
 
+      const securityPolicy = securityPolicyInput ? securityPolicyInput.value : DEFAULTS.security_policy;
+      await store.set('security_policy', securityPolicy);
+
       await store.save();
 
       if (window.bridge && typeof window.bridge.saveServerProfiles === 'function') {
@@ -709,6 +719,7 @@
         localStorage.setItem('aqvn_task_chime_tone', taskChimeTone);
         localStorage.setItem('aqvn_lang', appLanguage);
         localStorage.setItem('aqvn_theme', appTheme);
+        localStorage.setItem('aqvn_security_policy', securityPolicy);
       } catch (e) {}
 
       document.documentElement.setAttribute('data-theme', appTheme);

@@ -483,6 +483,19 @@
           </div>
         </section>
 
+        <section class="card" id="security-policy-section">
+          <h2>Security & Approval Policy</h2>
+          <div class="form-group">
+            <label for="security-policy">Policy Preset</label>
+            <select id="security-policy" name="security_policy">
+              <option value="permissive">Permissive (Autonomous execution - no confirmation)</option>
+              <option value="supervised" selected>Supervised (Recommended - prompt on shell & file deletion)</option>
+              <option value="strict">Strict (High Security - prompt on all writes and commands)</option>
+            </select>
+            <div class="help-text">Controls when the AI agent must prompt for human approval before executing actions.</div>
+          </div>
+        </section>
+
         <section class="card">
           <h2 data-i18n="server_title">Server Configuration</h2>
           <div class="form-group">

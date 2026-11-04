@@ -4832,6 +4832,46 @@ describe('Milestone 3: Interactive PTY Terminal Engine 2.0 (VAL-TERM-001..005)',
   });
 });
 
+describe('Milestone 4: Agent Security & Approval Gate (VAL-AGENT-001..004)', () => {
+  test('VAL-AGENT-001: Real-time agent activity drawer and badge', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="agent-activity-drawer"/, 'agent-activity-drawer must exist');
+    assert.match(indexHtml, /id="activity-badge-count"/, 'activity-badge-count must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function recordAgentActivity\(/, 'recordAgentActivity must be defined');
+    assert.match(chatJs, /function toggleActivityDrawer\(\)/, 'toggleActivityDrawer must be defined');
+  });
+
+  test('VAL-AGENT-002: Human-in-the-loop action approval modal', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="agent-approval-modal"/, 'agent-approval-modal must exist');
+    assert.match(indexHtml, /id="approval-deny-btn"/, 'approval-deny-btn must exist');
+    assert.match(indexHtml, /id="approval-allow-once-btn"/, 'approval-allow-once-btn must exist');
+    assert.match(indexHtml, /id="approval-allow-session-btn"/, 'approval-allow-session-btn must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function requestActionApproval\(/, 'requestActionApproval must return Promise');
+  });
+
+  test('VAL-AGENT-003: Security policy presets in settings', () => {
+    const settingsHtml = fs.readFileSync(new URL('../../ui/settings.html', import.meta.url), 'utf8');
+    assert.match(settingsHtml, /id="security-policy"/, 'security-policy select must exist in settings.html');
+    assert.match(settingsHtml, /value="supervised"/, 'supervised preset exists');
+    assert.match(settingsHtml, /value="permissive"/, 'permissive preset exists');
+    assert.match(settingsHtml, /value="strict"/, 'strict preset exists');
+    const settingsJs = fs.readFileSync(new URL('../../ui/settings.js', import.meta.url), 'utf8');
+    assert.match(settingsJs, /security_policy/, 'security_policy stored in settings');
+  });
+
+  test('VAL-AGENT-004: Immutable audit trail recording and export', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="audit-export-json-btn"/, 'Export JSON button must exist');
+    assert.match(indexHtml, /id="audit-export-csv-btn"/, 'Export CSV button must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function exportAuditJson\(\)/, 'exportAuditJson must be defined');
+    assert.match(chatJs, /function exportAuditCsv\(\)/, 'exportAuditCsv must be defined');
+  });
+});
+
 
 
 

@@ -164,6 +164,14 @@
           aria-label="Hard refresh"
         >&#8635;</button>
         <button
+          id="toggle-activity-btn"
+          type="button"
+          class="icon-btn activity-btn"
+          title="Agent Activity Feed & Audit Trail"
+          aria-label="Agent Activity Feed"
+          aria-pressed="false"
+        >&#9889; <span id="activity-badge-count">0</span></button>
+        <button
           id="toggle-terminal-btn"
           type="button"
           class="icon-btn"
@@ -528,6 +536,53 @@
         </div>
         <div id="diff-viewer-body" class="diff-viewer-body">
           <pre id="diff-viewer-content" class="diff-viewer-content"></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Activity Feed & Audit Trail Drawer (VAL-AGENT-001, VAL-AGENT-004) -->
+    <div id="agent-activity-drawer" class="agent-activity-drawer" role="region" aria-label="Agent Activity Feed" hidden>
+      <div class="activity-drawer-header">
+        <div class="activity-drawer-title">
+          <span>&#9889; Agent Activity Feed</span>
+          <span id="activity-live-status" class="activity-status-badge">Idle</span>
+        </div>
+        <div class="activity-drawer-actions">
+          <button id="audit-export-json-btn" type="button" class="btn btn-secondary btn-sm" title="Export Audit JSON">Export JSON</button>
+          <button id="audit-export-csv-btn" type="button" class="btn btn-secondary btn-sm" title="Export Audit CSV">Export CSV</button>
+          <button id="close-activity-drawer-btn" type="button" class="icon-btn close-btn" aria-label="Close Activity">&times;</button>
+        </div>
+      </div>
+      <div id="activity-feed-list" class="activity-feed-list">
+        <div class="activity-empty-msg">No agent actions recorded yet.</div>
+      </div>
+    </div>
+
+    <!-- Human-in-the-Loop Action Approval Modal (VAL-AGENT-002) -->
+    <div id="agent-approval-modal" class="agent-approval-modal" role="dialog" aria-modal="true" aria-labelledby="approval-title" hidden>
+      <div class="agent-approval-dialog">
+        <div class="approval-header">
+          <div class="approval-title-wrap">
+            <span class="approval-warning-icon">&#9888;</span>
+            <h2 id="approval-title">Agent Action Approval Required</h2>
+          </div>
+        </div>
+        <div class="approval-body">
+          <p class="approval-desc">The AI agent is requesting permission to execute the following sensitive operation:</p>
+          <div class="approval-field">
+            <span class="approval-label">Action / Tool:</span>
+            <span id="approval-tool-name" class="approval-val">shell_exec</span>
+          </div>
+          <div class="approval-field">
+            <span class="approval-label">Target / Command:</span>
+            <pre id="approval-tool-cmd" class="approval-cmd">$ cargo test</pre>
+          </div>
+          <p id="approval-risk-desc" class="approval-risk">Risk level: Moderate (modifies local workspace files or runs local process).</p>
+        </div>
+        <div class="approval-footer">
+          <button id="approval-deny-btn" type="button" class="btn btn-danger">Deny</button>
+          <button id="approval-allow-once-btn" type="button" class="btn btn-secondary">Allow Once</button>
+          <button id="approval-allow-session-btn" type="button" class="btn btn-primary">Allow for Session</button>
         </div>
       </div>
     </div>

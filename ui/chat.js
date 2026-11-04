@@ -1533,6 +1533,120 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Agent Activity Feed & Security Approval Gate (VAL-AGENT-001..004)  */
+  /* ------------------------------------------------------------------ */
+
+  state.auditTrail = [];
+  state.sessionAllowedTools = new Set();
+  state.pendingApprovalResolver = null;
+
+  function recordAgentActivity(action, target, status, detail) {
+    var entry = {
+      id: 'act-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      timestamp: new Date().toISOString(),
+      action: action || 'TOOL',
+      target: target || '',
+      status: status || 'success',
+      detail: detail || ''
+    };
+    state.auditTrail.push(entry);
+
+    if (dom.activityBadgeCount) {
+      dom.activityBadgeCount.textContent = String(state.auditTrail.length);
+    }
+
+    if (dom.activityFeedList) {
+      var emptyMsg = dom.activityFeedList.querySelector('.activity-empty-msg');
+      if (emptyMsg) emptyMsg.remove();
+
+      var item = document.createElement('div');
+      item.className = 'activity-item status-' + (status === 'denied' ? 'denied' : (status === 'allowed' ? 'allowed' : 'ok'));
+      item.innerHTML =
+        '<div class="activity-item-head">' +
+          '<span class="activity-item-title">' + escapeHtml(entry.action) + '</span>' +
+          '<span class="activity-item-time">' + new Date(entry.timestamp).toLocaleTimeString() + '</span>' +
+        '</div>' +
+        '<div class="activity-item-detail">' + escapeHtml(entry.target + (entry.detail ? ' — ' + entry.detail : '')) + '</div>';
+      dom.activityFeedList.insertBefore(item, dom.activityFeedList.firstChild);
+    }
+  }
+
+  function toggleActivityDrawer() {
+    if (!dom.agentActivityDrawer) return;
+    var isHidden = dom.agentActivityDrawer.hidden;
+    dom.agentActivityDrawer.hidden = !isHidden;
+    if (dom.toggleActivityBtn) {
+      dom.toggleActivityBtn.setAttribute('aria-pressed', isHidden ? 'true' : 'false');
+    }
+  }
+
+  function requestActionApproval(tool, command, riskDesc) {
+    var policy = 'supervised';
+    try {
+      policy = localStorage.getItem('aqvn_security_policy') || 'supervised';
+    } catch (e) {}
+
+    if (policy === 'permissive') {
+      recordAgentActivity(tool, command, 'allowed', 'Auto-allowed (Permissive mode)');
+      return Promise.resolve(true);
+    }
+
+    if (state.sessionAllowedTools.has(tool)) {
+      recordAgentActivity(tool, command, 'allowed', 'Allowed (Session rule)');
+      return Promise.resolve(true);
+    }
+
+    if (!dom.agentApprovalModal) {
+      recordAgentActivity(tool, command, 'allowed', 'Auto-allowed (No approval UI)');
+      return Promise.resolve(true);
+    }
+
+    if (dom.approvalToolName) dom.approvalToolName.textContent = tool;
+    if (dom.approvalToolCmd) dom.approvalToolCmd.textContent = command;
+    if (dom.approvalRiskDesc && riskDesc) dom.approvalRiskDesc.textContent = riskDesc;
+
+    dom.agentApprovalModal.hidden = false;
+
+    return new Promise(function(resolve) {
+      state.pendingApprovalResolver = function(allowed, forSession) {
+        dom.agentApprovalModal.hidden = true;
+        state.pendingApprovalResolver = null;
+        if (allowed) {
+          if (forSession) {
+            state.sessionAllowedTools.add(tool);
+          }
+          recordAgentActivity(tool, command, 'allowed', forSession ? 'Approved for session' : 'Approved once');
+          resolve(true);
+        } else {
+          recordAgentActivity(tool, command, 'denied', 'Denied by user');
+          resolve(false);
+        }
+      };
+    });
+  }
+
+  function exportAuditJson() {
+    var blob = new Blob([JSON.stringify(state.auditTrail, null, 2)], { type: 'application/json' });
+    downloadBlob(blob, 'aqvn-audit-trail-' + new Date().toISOString().slice(0, 10) + '.json');
+  }
+
+  function exportAuditCsv() {
+    var headers = ['timestamp', 'action', 'target', 'status', 'detail'];
+    var rows = state.auditTrail.map(function(e) {
+      return [
+        JSON.stringify(e.timestamp),
+        JSON.stringify(e.action),
+        JSON.stringify(e.target),
+        JSON.stringify(e.status),
+        JSON.stringify(e.detail)
+      ].join(',');
+    });
+    var csv = [headers.join(',')].concat(rows).join('\n');
+    var blob = new Blob([csv], { type: 'text/csv' });
+    downloadBlob(blob, 'aqvn-audit-trail-' + new Date().toISOString().slice(0, 10) + '.csv');
+  }
+
+  /* ------------------------------------------------------------------ */
   /* UI zoom and hard refresh                                           */
   /* ------------------------------------------------------------------ */
 
@@ -2815,6 +2929,20 @@
     dom.diffViewerTitle = byId('diff-viewer-title');
     dom.closeDiffViewerBtn = byId('close-diff-viewer-btn');
     dom.diffViewerContent = byId('diff-viewer-content');
+    dom.toggleActivityBtn = byId('toggle-activity-btn');
+    dom.activityBadgeCount = byId('activity-badge-count');
+    dom.agentActivityDrawer = byId('agent-activity-drawer');
+    dom.closeActivityDrawerBtn = byId('close-activity-drawer-btn');
+    dom.activityFeedList = byId('activity-feed-list');
+    dom.auditExportJsonBtn = byId('audit-export-json-btn');
+    dom.auditExportCsvBtn = byId('audit-export-csv-btn');
+    dom.agentApprovalModal = byId('agent-approval-modal');
+    dom.approvalToolName = byId('approval-tool-name');
+    dom.approvalToolCmd = byId('approval-tool-cmd');
+    dom.approvalRiskDesc = byId('approval-risk-desc');
+    dom.approvalDenyBtn = byId('approval-deny-btn');
+    dom.approvalAllowOnceBtn = byId('approval-allow-once-btn');
+    dom.approvalAllowSessionBtn = byId('approval-allow-session-btn');
     dom.terminalDrawer = byId('terminal-drawer');
     dom.terminalTabs = byId('terminal-tabs');
     dom.terminalAddTabBtn = byId('terminal-add-tab-btn');
@@ -2880,6 +3008,33 @@
     }
     if (dom.closeDiffViewerBtn) {
       dom.closeDiffViewerBtn.addEventListener('click', closeDiffViewer);
+    }
+    if (dom.toggleActivityBtn) {
+      dom.toggleActivityBtn.addEventListener('click', toggleActivityDrawer);
+    }
+    if (dom.closeActivityDrawerBtn) {
+      dom.closeActivityDrawerBtn.addEventListener('click', toggleActivityDrawer);
+    }
+    if (dom.auditExportJsonBtn) {
+      dom.auditExportJsonBtn.addEventListener('click', exportAuditJson);
+    }
+    if (dom.auditExportCsvBtn) {
+      dom.auditExportCsvBtn.addEventListener('click', exportAuditCsv);
+    }
+    if (dom.approvalDenyBtn) {
+      dom.approvalDenyBtn.addEventListener('click', function() {
+        if (state.pendingApprovalResolver) state.pendingApprovalResolver(false, false);
+      });
+    }
+    if (dom.approvalAllowOnceBtn) {
+      dom.approvalAllowOnceBtn.addEventListener('click', function() {
+        if (state.pendingApprovalResolver) state.pendingApprovalResolver(true, false);
+      });
+    }
+    if (dom.approvalAllowSessionBtn) {
+      dom.approvalAllowSessionBtn.addEventListener('click', function() {
+        if (state.pendingApprovalResolver) state.pendingApprovalResolver(true, true);
+      });
     }
     setupDragAndDropUploader();
 

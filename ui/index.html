@@ -94,7 +94,15 @@
   <body>
     <header class="topbar">
       <a class="brand" href="index.html">AQVN Workspace</a>
-      <span id="active-server-url" class="server-badge" title="Active Server URL">https://a0.matmagoc.com</span>
+      <div class="server-dropdown-wrap">
+        <button id="active-server-btn" type="button" class="server-badge server-btn" title="Click to switch active server">
+          <span id="active-server-url">https://a0.matmagoc.com</span> &#9662;
+        </button>
+        <div id="server-profile-dropdown" class="server-profile-dropdown" hidden>
+          <div class="dropdown-header">Switch Server Profile</div>
+          <div id="server-dropdown-list" class="server-dropdown-list"></div>
+        </div>
+      </div>
       <span
         id="connection-pill"
         class="conn"
@@ -378,6 +386,9 @@
             </div>
           </div>
           <div id="messages" class="messages" role="log" aria-live="polite"></div>
+          <button id="scroll-bottom-btn" type="button" class="scroll-bottom-btn" hidden>
+            &darr; New messages below (<span id="unread-count">0</span>)
+          </button>
           <p id="status-line" class="status" role="status" hidden></p>
           <p id="chat-error" class="error" role="alert" hidden></p>
           <form id="composer" class="composer">
@@ -493,6 +504,14 @@
             <span class="diagnostic-label">Agent State</span>
             <span id="diagnostics-agent-state" class="diagnostic-value" data-metric="agent-state">Idle</span>
           </div>
+          <div class="diagnostic-row">
+            <span class="diagnostic-label">Connection Quality</span>
+            <span id="diagnostics-quality" class="diagnostic-value" data-metric="quality">Excellent</span>
+          </div>
+          <div class="diagnostic-row">
+            <span class="diagnostic-label">Latency Sparkline</span>
+            <div id="latency-sparkline" class="latency-sparkline" title="Last 20 pings (ms)"></div>
+          </div>
         </div>
         <div class="diagnostics-footer">
           <button id="reconnect-now-btn" type="button" class="btn btn-primary reconnect-btn">Reconnect Now</button>
@@ -583,6 +602,39 @@
           <button id="approval-deny-btn" type="button" class="btn btn-danger">Deny</button>
           <button id="approval-allow-once-btn" type="button" class="btn btn-secondary">Allow Once</button>
           <button id="approval-allow-session-btn" type="button" class="btn btn-primary">Allow for Session</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification Container (VAL-UI-001) -->
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+    <!-- Command Palette Modal (VAL-UI-004) -->
+    <div id="command-palette-modal" class="command-palette-modal" role="dialog" aria-modal="true" aria-labelledby="palette-title" hidden>
+      <div class="command-palette-dialog">
+        <div class="palette-input-wrap">
+          <span class="palette-search-icon">&#128269;</span>
+          <input id="command-palette-input" type="search" placeholder="Type a command or search... (Esc to close)" autocomplete="off" spellcheck="false" />
+        </div>
+        <div id="command-palette-results" class="command-palette-results" role="listbox"></div>
+      </div>
+    </div>
+
+    <!-- Keyboard Shortcuts Cheat Sheet Modal (VAL-UI-004) -->
+    <div id="shortcuts-modal" class="shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" hidden>
+      <div class="shortcuts-dialog">
+        <div class="shortcuts-header">
+          <h2 id="shortcuts-title">Keyboard Shortcuts</h2>
+          <button id="close-shortcuts-btn" type="button" class="icon-btn close-btn" aria-label="Close Shortcuts">&times;</button>
+        </div>
+        <div class="shortcuts-body">
+          <div class="shortcut-row"><span class="shortcut-key">Ctrl+K</span><span class="shortcut-desc">Open Command Palette</span></div>
+          <div class="shortcut-row"><span class="shortcut-key">Ctrl+F</span><span class="shortcut-desc">Find in Conversation</span></div>
+          <div class="shortcut-row"><span class="shortcut-key">Alt+S</span><span class="shortcut-desc">Toggle Sessions Sidebar</span></div>
+          <div class="shortcut-row"><span class="shortcut-key">Alt+T</span><span class="shortcut-desc">Toggle PTY Terminal</span></div>
+          <div class="shortcut-row"><span class="shortcut-key">Alt+C</span><span class="shortcut-desc">Toggle Intel Suite Canvas</span></div>
+          <div class="shortcut-row"><span class="shortcut-key">F11 / Ctrl+Shift+F</span><span class="shortcut-desc">Toggle Focus Mode</span></div>
+          <div class="shortcut-row"><span class="shortcut-key">? / Ctrl+/</span><span class="shortcut-desc">Show Shortcuts Cheat Sheet</span></div>
         </div>
       </div>
     </div>

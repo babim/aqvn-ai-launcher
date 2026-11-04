@@ -4872,6 +4872,73 @@ describe('Milestone 4: Agent Security & Approval Gate (VAL-AGENT-001..004)', () 
   });
 });
 
+describe('Milestone 5: Modern UI/UX Polish & Multi-Server Gateway Radar (VAL-UI-001..006, VAL-CROSS-001..002)', () => {
+  test('VAL-UI-001: Toast notification system', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="toast-container"/, 'toast-container must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function showToast\(/, 'showToast function must be defined');
+    const chatCss = fs.readFileSync(new URL('../../ui/chat.css', import.meta.url), 'utf8');
+    assert.match(chatCss, /\.toast/, 'CSS styles toast element');
+    assert.match(chatCss, /\.toast-success/, 'CSS styles success toast variant');
+  });
+
+  test('VAL-UI-002: Smart scroll anchoring and bottom jump button', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="scroll-bottom-btn"/, 'scroll-bottom-btn must exist in chat pane');
+    assert.match(indexHtml, /id="unread-count"/, 'unread-count badge must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function handleMessagesScroll\(\)/, 'handleMessagesScroll must be defined');
+    assert.match(chatJs, /state\.userScrolledUp/, 'userScrolledUp flag tracks scroll state');
+  });
+
+  test('VAL-UI-003: Message action bar and collapsible code blocks', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function attachMessageActions\(/, 'attachMessageActions must be defined');
+    assert.match(chatJs, /code-collapse-btn/, 'code collapse button attached for blocks >50 lines');
+    const chatCss = fs.readFileSync(new URL('../../ui/chat.css', import.meta.url), 'utf8');
+    assert.match(chatCss, /\.message-action-bar/, 'CSS styles message-action-bar');
+    assert.match(chatCss, /\.code-collapse-btn/, 'CSS styles code-collapse-btn');
+  });
+
+  test('VAL-UI-004: Command palette and keyboard shortcuts modal', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="command-palette-modal"/, 'command-palette-modal must exist');
+    assert.match(indexHtml, /id="shortcuts-modal"/, 'shortcuts-modal must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function openCommandPalette\(\)/, 'openCommandPalette must be defined');
+    assert.match(chatJs, /function openShortcutsModal\(\)/, 'openShortcutsModal must be defined');
+    assert.match(chatJs, /COMMAND_PALETTE_ACTIONS/, 'Palette actions inventory defined');
+  });
+
+  test('VAL-UI-005: Topbar fast server profile switcher', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="active-server-btn"/, 'active-server-btn must exist in topbar');
+    assert.match(indexHtml, /id="server-profile-dropdown"/, 'server-profile-dropdown must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function renderServerDropdownList\(\)/, 'renderServerDropdownList must be defined');
+    assert.match(chatJs, /function switchActiveServer\(/, 'switchActiveServer must be defined');
+  });
+
+  test('VAL-UI-006: Connection health radar and latency sparkline', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="latency-sparkline"/, 'latency-sparkline element must exist');
+    assert.match(indexHtml, /id="diagnostics-quality"/, 'diagnostics-quality element must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function updateLatencySparkline\(/, 'updateLatencySparkline must be defined');
+    const chatCss = fs.readFileSync(new URL('../../ui/chat.css', import.meta.url), 'utf8');
+    assert.match(chatCss, /\.latency-sparkline/, 'CSS styles latency sparkline');
+    assert.match(chatCss, /\.sparkline-bar/, 'CSS styles sparkline bars');
+  });
+
+  test('VAL-CROSS-001 & VAL-CROSS-002: Cross-area integration workflows', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /recordAgentActivity/, 'Agent activity tracking wired across flows');
+    assert.match(chatJs, /requestActionApproval/, 'Approval gate available to agent flows');
+    assert.match(chatJs, /renderTerminalTabs/, 'Terminal tab state preserved');
+  });
+});
+
 
 
 

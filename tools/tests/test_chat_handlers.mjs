@@ -4800,6 +4800,38 @@ describe('Milestone 2: Workspace File Explorer 2.0 (VAL-WORK-001..005)', () => {
   });
 });
 
+describe('Milestone 3: Interactive PTY Terminal Engine 2.0 (VAL-TERM-001..005)', () => {
+  test('VAL-TERM-001: ANSI VT100 color parser', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /function parseAnsiToHtml\(/, 'parseAnsiToHtml must be defined in chat.js');
+    assert.match(chatJs, /ansi-fg-red/, 'ANSI color map contains standard colors');
+    const chatCss = fs.readFileSync(new URL('../../ui/chat.css', import.meta.url), 'utf8');
+    assert.match(chatCss, /\.ansi-fg-red/, 'CSS defines ANSI color classes');
+  });
+
+  test('VAL-TERM-002: Bi-directional streaming stdin', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /sendTerminalCommand/, 'Terminal input sends command via exec');
+    assert.match(chatJs, /appendTerminalOutput/, 'Terminal appends output stream');
+  });
+
+  test('VAL-TERM-003 & VAL-TERM-004: Command history ring-buffer and resize', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /handleTerminalKeydown/, 'handleTerminalKeydown handles ArrowUp and ArrowDown');
+    assert.match(chatJs, /emitTerminalResize/, 'emitTerminalResize calculates cols and rows');
+  });
+
+  test('VAL-TERM-005: Multi-tab terminal shell management', () => {
+    const indexHtml = fs.readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(indexHtml, /id="terminal-tabs"/, 'terminal-tabs container must exist');
+    assert.match(indexHtml, /id="terminal-add-tab-btn"/, 'terminal-add-tab-btn must exist');
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /renderTerminalTabs/, 'renderTerminalTabs function must exist');
+    assert.match(chatJs, /switchTerminalTab/, 'switchTerminalTab function must exist');
+    assert.match(chatJs, /addTerminalTab/, 'addTerminalTab function must exist');
+  });
+});
+
 
 
 

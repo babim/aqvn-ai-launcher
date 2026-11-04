@@ -388,6 +388,10 @@
             <div class="terminal-header">
               <div class="terminal-title-group">
                 <span class="terminal-badge">&#128435; Terminal</span>
+                <div id="terminal-tabs" class="terminal-tabs" role="tablist">
+                  <button type="button" class="terminal-tab active" data-tab-id="1">Shell 1</button>
+                </div>
+                <button id="terminal-add-tab-btn" type="button" class="terminal-add-tab-btn" title="Add Shell Tab">+</button>
                 <span id="terminal-status" class="terminal-status">Ready</span>
               </div>
               <div class="terminal-actions">
@@ -395,7 +399,7 @@
                 <button id="terminal-close-btn" type="button" class="terminal-action-btn" title="Close terminal (Alt+T)">&times;</button>
               </div>
             </div>
-            <pre id="terminal-output" class="terminal-output" role="region" aria-live="polite" tabindex="0"></pre>
+            <div id="terminal-output" class="terminal-output" role="region" aria-live="polite" tabindex="0"></div>
             <form id="terminal-form" class="terminal-form">
               <span class="terminal-prompt">$</span>
               <input

@@ -1740,6 +1740,73 @@ body.focus-mode #chat-pane {
   outline: none;
 }
 
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.terminal-tab {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid transparent;
+  color: var(--muted);
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.terminal-tab:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink);
+}
+
+.terminal-tab.active {
+  background: var(--accent-soft);
+  color: var(--ink);
+  border-color: var(--line);
+  font-weight: 600;
+}
+
+.terminal-add-tab-btn {
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-size: 0.75rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.terminal-add-tab-btn:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+/* ANSI VT100 Theme Colors */
+.ansi-bold { font-weight: 700; }
+.ansi-dim { opacity: 0.7; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; }
+
+.ansi-fg-black { color: #1e293b; }
+.ansi-fg-red { color: #ef4444; }
+.ansi-fg-green { color: #22c55e; }
+.ansi-fg-yellow { color: #eab308; }
+.ansi-fg-blue { color: #3b82f6; }
+.ansi-fg-magenta { color: #d946ef; }
+.ansi-fg-cyan { color: #06b6d4; }
+.ansi-fg-white { color: #f8fafc; }
+
+.ansi-fg-bright-black { color: #64748b; }
+.ansi-fg-bright-red { color: #f87171; }
+.ansi-fg-bright-green { color: #4ade80; }
+.ansi-fg-bright-yellow { color: #facc15; }
+.ansi-fg-bright-blue { color: #60a5fa; }
+.ansi-fg-bright-magenta { color: #e879f9; }
+.ansi-fg-bright-cyan { color: #22d3ee; }
+.ansi-fg-bright-white { color: #ffffff; }
+
 .terminal-send-btn {
   padding: 4px 10px;
   font-size: 0.75rem;

@@ -910,3 +910,32 @@ async fn test_cdp_multi_tab_management() {
 
     set_test_cdp_endpoint(None);
 }
+
+#[tokio::test]
+async fn test_cdp_profile_pid_isolation() {
+    let temp_dir = std::env::temp_dir();
+    let current_pid = std::process::id();
+    let dead_pid = 4_194_300; // PID beyond max on standard Linux/macOS
+
+    let live_dir = temp_dir.join(format!("aqvn-cdp-profile-9222-{current_pid}-testlive"));
+    let dead_dir = temp_dir.join(format!("aqvn-cdp-profile-9222-{dead_pid}-testdead"));
+
+    let _ = std::fs::create_dir_all(&live_dir);
+    let _ = std::fs::create_dir_all(&dead_dir);
+
+    assert!(live_dir.exists());
+    assert!(dead_dir.exists());
+
+    browser::sweep_stale_cdp_profiles();
+
+    assert!(
+        live_dir.exists(),
+        "CDP profile belonging to active PID must be preserved"
+    );
+    assert!(
+        !dead_dir.exists(),
+        "CDP profile belonging to dead PID must be swept"
+    );
+
+    let _ = std::fs::remove_dir_all(&live_dir);
+}

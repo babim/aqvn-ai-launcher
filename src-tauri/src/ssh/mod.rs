@@ -20,7 +20,9 @@ pub fn session_cwd(allowed_paths: &[String]) -> std::path::PathBuf {
 }
 
 fn expand_tilde(raw: &str) -> std::path::PathBuf {
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from);
     if let Some(home) = home {
         if let Some(rest) = raw.strip_prefix("~/") {
             return home.join(rest);

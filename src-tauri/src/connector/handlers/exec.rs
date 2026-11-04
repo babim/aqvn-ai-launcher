@@ -1274,6 +1274,25 @@ pub async fn handle_exec_op_streaming(
             );
         };
 
+        #[cfg(not(target_os = "android"))]
+        if let Some(reason) = crate::ssh::guard::check(command) {
+            return json!({
+                "type": MSG_TYPE_EXEC_OP_RESULT,
+                "op": MSG_TYPE_EXEC_OP_RESULT,
+                "id": id,
+                "op_id": op_id,
+                "session_id": session_id,
+                "session": session_id,
+                "runtime": runtime,
+                "status": "denied",
+                "success": false,
+                "exit_code": 1,
+                "done": true,
+                "error": format!("command denied by security guard: {reason}"),
+            })
+            .to_string();
+        }
+
         let strip_ansi_enabled = extract_strip_ansi(envelope);
 
         // Determine working directory

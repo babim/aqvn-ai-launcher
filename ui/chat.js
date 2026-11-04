@@ -319,11 +319,18 @@
     if (fromQuery) {
       var clean = trimBase(fromQuery);
       try {
-        window.localStorage.setItem(PROXY_KEY, clean);
+        var parsed = new URL(clean, window.location.href);
+        if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1') {
+          try {
+            window.localStorage.setItem(PROXY_KEY, clean);
+          } catch (err) {
+            /* storage may be unavailable; the query value still works */
+          }
+          return clean;
+        }
       } catch (err) {
-        /* storage may be unavailable; the query value still works */
+        /* invalid URL syntax */
       }
-      return clean;
     }
     try {
       return trimBase(window.localStorage.getItem(PROXY_KEY) || '');

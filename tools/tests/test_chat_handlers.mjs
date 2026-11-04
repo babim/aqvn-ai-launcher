@@ -4721,10 +4721,15 @@ describe('VAL-DEBT-004: Tooling and CI hygiene', () => {
 });
 
 describe('VAL-DEBT-005: OpenSpec completed changes archive', () => {
-  test('VAL-DEBT-005: openspec/changes has zero lingering active change1* directories', () => {
+  test('VAL-DEBT-005: openspec/changes has zero lingering active change129-change161 directories', () => {
     const changesDir = new URL('../../openspec/changes', import.meta.url);
-    const active = fs.readdirSync(changesDir).filter((f) => f.startsWith('change1'));
-    assert.equal(active.length, 0, `Expected zero active change1* directories in openspec/changes, found: ${active.join(', ')}`);
+    const active = fs.readdirSync(changesDir).filter((f) => {
+      const match = f.match(/^change(\d+)-/);
+      if (!match) return false;
+      const num = parseInt(match[1], 10);
+      return num >= 129 && num <= 161;
+    });
+    assert.equal(active.length, 0, `Expected zero lingering change129-161 directories in openspec/changes, found: ${active.join(', ')}`);
   });
 
   test('VAL-DEBT-005: archived changes exist in openspec/changes/archive/ with tasks marked complete', () => {
@@ -4742,6 +4747,14 @@ describe('VAL-DEBT-005: OpenSpec completed changes archive', () => {
         assert.doesNotMatch(content, /^- \[ \] /m, `tasks.md in ${match} must not contain unchecked tasks`);
       }
     }
+  });
+});
+
+describe('VAL-SEC-006: Proxy query parameter open-redirect protection', () => {
+  test('VAL-SEC-006: non-loopback proxy query param is rejected', () => {
+    const chatJsPath = new URL('../../ui/chat.js', import.meta.url);
+    const content = fs.readFileSync(chatJsPath, 'utf8');
+    assert.match(content, /parsed\.hostname === 'localhost' \|\| parsed\.hostname === '127\.0\.0\.1' \|\| parsed\.hostname === '::1'/);
   });
 });
 

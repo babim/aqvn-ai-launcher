@@ -190,6 +190,7 @@ fn expand_tilde(raw: &str) -> PathBuf {
 
 fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_default()
 }
@@ -313,5 +314,28 @@ mod tests {
         let home = home_dir();
         let sandbox = Sandbox::from_allowed_paths(&["~/Workspace".to_string()]);
         assert_eq!(sandbox.roots(), [home.join("Workspace")]);
+    }
+
+    #[test]
+    fn test_home_dir_userprofile_fallback() {
+        let prev_home = std::env::var_os("HOME");
+        let prev_profile = std::env::var_os("USERPROFILE");
+
+        std::env::remove_var("HOME");
+        std::env::set_var("USERPROFILE", "/test/userprofile");
+
+        assert_eq!(home_dir(), PathBuf::from("/test/userprofile"));
+
+        // restore environment
+        if let Some(h) = prev_home {
+            std::env::set_var("HOME", h);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        if let Some(p) = prev_profile {
+            std::env::set_var("USERPROFILE", p);
+        } else {
+            std::env::remove_var("USERPROFILE");
+        }
     }
 }

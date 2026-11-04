@@ -164,6 +164,10 @@ pub struct GatewayConfig {
     pub workspace_path: String,
     #[serde(default)]
     pub allowed_paths: Vec<String>,
+    #[serde(default)]
+    pub tls_skip_verify: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_ca_cert_path: Option<String>,
 }
 
 impl Default for GatewayConfig {
@@ -182,6 +186,8 @@ impl Default for GatewayConfig {
             reconnect_delay_ms: DEFAULT_RECONNECT_DELAY_MS,
             workspace_path: crate::config::DEFAULT_WORKSPACE_PATH.to_string(),
             allowed_paths: Vec::new(),
+            tls_skip_verify: false,
+            tls_ca_cert_path: None,
         }
     }
 }
@@ -202,6 +208,8 @@ impl GatewayConfig {
             scope_desktop: app_config.scope_desktop,
             workspace_path: app_config.workspace_path.clone(),
             allowed_paths: app_config.allowed_paths.clone(),
+            tls_skip_verify: app_config.tls_skip_verify,
+            tls_ca_cert_path: app_config.tls_ca_cert_path.clone(),
             ..Default::default()
         }
     }
@@ -446,6 +454,53 @@ impl GatewayClient {
 
         let request = build_request(&ws_url)?;
 
+        #[cfg(not(target_os = "android"))]
+        let connector = if self.config.tls_skip_verify || self.config.tls_ca_cert_path.is_some() {
+            let mut builder = native_tls::TlsConnector::builder();
+            if self.config.tls_skip_verify {
+                builder.danger_accept_invalid_certs(true);
+                builder.danger_accept_invalid_hostnames(true);
+            }
+            if let Some(ref path) = self.config.tls_ca_cert_path {
+                if let Ok(pem) = std::fs::read(path) {
+                    if let Ok(cert) = native_tls::Certificate::from_pem(&pem) {
+                        builder.add_root_certificate(cert);
+                    }
+                }
+            }
+            builder
+                .build()
+                .ok()
+                .map(tokio_tungstenite::Connector::NativeTls)
+        } else {
+            None
+        };
+
+        #[cfg(not(target_os = "android"))]
+        let (mut stream, is_legacy) = match tokio_tungstenite::connect_async_tls_with_config(
+            request,
+            None,
+            false,
+            connector.clone(),
+        )
+        .await
+        {
+            Ok(pair) => (pair.0, false),
+            Err(tokio_tungstenite::tungstenite::Error::Http(resp))
+                if resp.status() == axum::http::StatusCode::NOT_FOUND =>
+            {
+                let legacy_url = build_legacy_ws_url(&self.config.server_url)?;
+                let legacy_req = build_request(&legacy_url)?;
+                let pair = tokio_tungstenite::connect_async_tls_with_config(
+                    legacy_req, None, false, connector,
+                )
+                .await
+                .map_err(|e| format!("websocket connect error to {legacy_url}: {e}"))?;
+                (pair.0, true)
+            }
+            Err(e) => return Err(format!("websocket connect error to {ws_url}: {e}")),
+        };
+        #[cfg(target_os = "android")]
         let (mut stream, is_legacy) = match tokio_tungstenite::connect_async(request).await {
             Ok(pair) => (pair.0, false),
             Err(tokio_tungstenite::tungstenite::Error::Http(resp))

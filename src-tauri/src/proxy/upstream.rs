@@ -687,6 +687,31 @@ impl Upstream {
             }
         }
 
+        #[cfg(not(target_os = "android"))]
+        let connector = if self.tls_skip_verify || self.tls_ca_cert_path.is_some() {
+            let mut builder = native_tls::TlsConnector::builder();
+            if self.tls_skip_verify {
+                builder.danger_accept_invalid_certs(true);
+                builder.danger_accept_invalid_hostnames(true);
+            }
+            if let Some(ref path) = self.tls_ca_cert_path {
+                if let Ok(pem) = std::fs::read(path) {
+                    if let Ok(cert) = native_tls::Certificate::from_pem(&pem) {
+                        builder.add_root_certificate(cert);
+                    }
+                }
+            }
+            builder
+                .build()
+                .ok()
+                .map(tokio_tungstenite::Connector::NativeTls)
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "android"))]
+        let handshake =
+            tokio_tungstenite::connect_async_tls_with_config(request, None, false, connector);
+        #[cfg(target_os = "android")]
         let handshake = tokio_tungstenite::connect_async(request);
         match tokio::time::timeout(ws_handshake_timeout(), handshake).await {
             Ok(Ok((stream, _response))) => Ok(stream),

@@ -95,6 +95,19 @@ pub fn sweep_stale_cdp_profiles() {
             if p.is_dir() && !active_set.contains(&p) {
                 if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
                     if name.starts_with("aqvn-cdp-profile-") {
+                        let parts: Vec<&str> = name.split('-').collect();
+                        if parts.len() >= 5 {
+                            if let Ok(pid) = parts[4].parse::<u32>() {
+                                #[cfg(unix)]
+                                {
+                                    let is_alive =
+                                        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 };
+                                    if is_alive {
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
                         let _ = cleanup_profile_dir(&p);
                     }
                 }

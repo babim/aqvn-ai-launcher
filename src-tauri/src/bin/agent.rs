@@ -1539,6 +1539,46 @@ mod tests {
     }
 
     #[test]
+    fn test_agent_host_pool_remote_control_settings_val_host_pool_002() {
+        let args = vec![
+            "start".to_string(),
+            "--server".to_string(),
+            "https://pool.agentzero.internal:55088".to_string(),
+            "--workspace".to_string(),
+            "/var/aqvn/workspace".to_string(),
+            "--scopes".to_string(),
+            "files,code_execution".to_string(),
+        ];
+
+        let parsed = parse_cli_args(&args).expect("parse_cli_args succeeds");
+        assert_eq!(parsed.action, CliAction::Start);
+        assert_eq!(
+            parsed.options.workspace.as_deref(),
+            Some("/var/aqvn/workspace")
+        );
+        assert_eq!(
+            parsed.options.scopes.as_deref(),
+            Some("files,code_execution")
+        );
+
+        let mut settings = AgentSettings::default();
+        parsed.options.apply_to(&mut settings);
+
+        assert_eq!(settings.workspace_path, "/var/aqvn/workspace");
+        assert_eq!(settings.active_scopes(), vec!["files", "code_execution"]);
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let gw_config = settings.to_gateway_config();
+            assert_eq!(gw_config.workspace_path, "/var/aqvn/workspace");
+            assert!(gw_config.scope_files);
+            assert!(gw_config.scope_exec);
+            assert!(!gw_config.scope_browser);
+            assert!(!gw_config.scope_desktop);
+        }
+    }
+
+    #[test]
     fn test_parse_cli_args_invalid_arguments_val_agent_cli_003() {
         // Unknown option
         let res = parse_cli_args(&["start".to_string(), "--invalid-option".to_string()]);

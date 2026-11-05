@@ -29,7 +29,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
 axum = { version = "0.8", default-features = false, features = ["ws", "http1", "json", "tokio"] }
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 url = "2"
 serde = { version = "1", features = ["derive"] }

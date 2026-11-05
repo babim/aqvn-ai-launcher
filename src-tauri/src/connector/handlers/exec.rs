@@ -1192,6 +1192,49 @@ pub async fn handle_exec_op_streaming(
             .to_string();
         }
 
+        if action == "resize" {
+            let cols = envelope
+                .get("cols")
+                .or_else(|| envelope.get("columns"))
+                .and_then(Value::as_u64)
+                .unwrap_or(80) as u16;
+            let rows = envelope
+                .get("rows")
+                .or_else(|| envelope.get("lines"))
+                .and_then(Value::as_u64)
+                .unwrap_or(24) as u16;
+
+            let session_arc = if let Ok(lock) = SESSIONS.lock() {
+                lock.as_ref().and_then(|map| map.get(&session_id).cloned())
+            } else {
+                None
+            };
+
+            let resized = if let Some(arc) = session_arc {
+                let mut session = arc.lock().await;
+                session.resize(cols, rows);
+                true
+            } else {
+                false
+            };
+
+            return json!({
+                "type": MSG_TYPE_EXEC_OP_RESULT,
+                "op": MSG_TYPE_EXEC_OP_RESULT,
+                "id": id,
+                "op_id": op_id,
+                "session_id": session_id,
+                "session": session_id,
+                "action": "resize",
+                "cols": cols,
+                "rows": rows,
+                "status": if resized { "ok" } else { "session_not_found" },
+                "success": resized,
+                "done": true,
+            })
+            .to_string();
+        }
+
         // Automatically reap idle / dead sessions periodically or on requests
         ensure_background_reaper_started();
         let _ = reap_idle_sessions(DEFAULT_MAX_IDLE_DURATION).await;

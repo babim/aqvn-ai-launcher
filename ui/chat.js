@@ -1725,8 +1725,8 @@
   }
 
   function exportAuditJson() {
-    var blob = new Blob([JSON.stringify(state.auditTrail, null, 2)], { type: 'application/json' });
-    downloadBlob(blob, 'aqvn-audit-trail-' + new Date().toISOString().slice(0, 10) + '.json');
+    var content = JSON.stringify(state.auditTrail, null, 2);
+    triggerDownload(content, 'aqvn-audit-trail-' + new Date().toISOString().slice(0, 10) + '.json', 'application/json');
   }
 
   function exportAuditCsv() {
@@ -1741,8 +1741,7 @@
       ].join(',');
     });
     var csv = [headers.join(',')].concat(rows).join('\n');
-    var blob = new Blob([csv], { type: 'text/csv' });
-    downloadBlob(blob, 'aqvn-audit-trail-' + new Date().toISOString().slice(0, 10) + '.csv');
+    triggerDownload(csv, 'aqvn-audit-trail-' + new Date().toISOString().slice(0, 10) + '.csv', 'text/csv');
   }
 
   /* ------------------------------------------------------------------ */
@@ -1787,7 +1786,7 @@
     }
   }
 
-  function scrollToBottom() {
+  function jumpToBottom() {
     if (!dom.messages) return;
     dom.messages.scrollTop = dom.messages.scrollHeight;
     state.userScrolledUp = false;
@@ -1869,7 +1868,7 @@
   }
 
   var COMMAND_PALETTE_ACTIONS = [
-    { title: 'New Conversation', run: function() { resetChat(); } },
+    { title: 'New Conversation', run: function() { newChat(); } },
     { title: 'Toggle Terminal Drawer', run: function() { toggleTerminal(); } },
     { title: 'Toggle Sessions Sidebar', run: function() { toggleSidebar(); } },
     { title: 'Toggle Intel Suite Canvas', run: function() { toggleCanvas(); } },
@@ -1878,8 +1877,16 @@
     { title: 'Switch Theme: Cyberpunk', run: function() { applyTheme('cyberpunk-terminal'); } },
     { title: 'Switch Theme: Clean Light', run: function() { applyTheme('clean-studio-light'); } },
     { title: 'Clear Terminal Output', run: function() { clearTerminalOutput(); } },
-    { title: 'Export Markdown Transcript', run: function() { exportMarkdown(); } },
-    { title: 'Export JSON Transcript', run: function() { exportJson(); } },
+    { title: 'Export Markdown Transcript', run: function() {
+        var md = exportMarkdown();
+        var filename = 'transcript-' + (state.context || 'conversation') + '-' + Date.now() + '.md';
+        triggerDownload(md, filename, 'text/markdown');
+    } },
+    { title: 'Export JSON Transcript', run: function() {
+        var json = exportJson();
+        var filename = 'transcript-' + (state.context || 'conversation') + '-' + Date.now() + '.json';
+        triggerDownload(json, filename, 'application/json');
+    } },
     { title: 'Show Keyboard Shortcuts', run: function() { openShortcutsModal(); } }
   ];
 
@@ -1980,11 +1987,8 @@
   async function switchActiveServer(url) {
     if (dom.serverProfileDropdown) dom.serverProfileDropdown.hidden = true;
     if (dom.activeServerUrl) dom.activeServerUrl.textContent = url;
-    state.base = url;
-    try {
-      localStorage.setItem('aqvn_server_url', url);
-    } catch (e) {}
-
+    if (dom.serverUrl) dom.serverUrl.value = url;
+    await setActiveServer(url);
     showToast('Switched to server: ' + url, 'success');
     connectSocket();
   }
@@ -3632,7 +3636,7 @@
     }
 
     if (dom.scrollBottomBtn) {
-      dom.scrollBottomBtn.addEventListener('click', scrollToBottom);
+      dom.scrollBottomBtn.addEventListener('click', jumpToBottom);
     }
 
     if (dom.messages) {

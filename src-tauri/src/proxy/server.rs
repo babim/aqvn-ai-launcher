@@ -959,11 +959,13 @@ fn with_cors(mut response: Response, origin: Option<&str>, proxy_port: u16) -> R
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
     headers.insert(
         header::ACCESS_CONTROL_ALLOW_METHODS,
-        HeaderValue::from_static("GET, POST, OPTIONS"),
+        HeaderValue::from_static("GET, POST, PUT, PATCH, DELETE, OPTIONS"),
     );
     headers.insert(
         header::ACCESS_CONTROL_ALLOW_HEADERS,
-        HeaderValue::from_static("Content-Type, X-CSRF-Token, Accept"),
+        HeaderValue::from_static(
+            "Content-Type, X-CSRF-Token, Accept, Authorization, If-None-Match, Cache-Control",
+        ),
     );
     headers.append(header::VARY, HeaderValue::from_static("Origin"));
     response

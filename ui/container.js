@@ -222,6 +222,10 @@
       ? Math.max(0, Math.min(1, volumeOverride))
       : getTaskChimeVolume();
 
+    if (volume <= 0) {
+      return null;
+    }
+
     try {
       var AudioCtx =
         (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) ||

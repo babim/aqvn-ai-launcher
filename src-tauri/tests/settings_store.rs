@@ -99,6 +99,7 @@ fn config_json_serde_roundtrip() {
         task_notification_enabled: false,
         task_chime_volume: 0.8,
         task_chime_tone: "bell".to_string(),
+        security_policy: "supervised".to_string(),
         window_state: None,
         tls_ca_cert_path: None,
         tls_skip_verify: false,
@@ -279,6 +280,17 @@ fn load_from_file_applies_partial_settings() {
     assert_eq!(loaded5.task_chime_tone, "bell");
 
     let _ = std::fs::remove_file(path5);
+
+    // Test partial settings with security_policy
+    let path6 = std::env::temp_dir().join(format!(
+        "aqvn-settings-policy-{}-{unique}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path6, r#"{"security_policy": "strict"}"#).expect("write settings fixture 6");
+    let loaded6 =
+        aqvn_workspace_lib::config::load_from_file(&path6).expect("settings file 6 must parse");
+    assert_eq!(loaded6.security_policy, "strict");
+    let _ = std::fs::remove_file(path6);
 }
 
 #[test]

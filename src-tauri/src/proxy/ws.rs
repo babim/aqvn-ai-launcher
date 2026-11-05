@@ -121,7 +121,7 @@ pub async fn bridge_with_watchdog(
                 let client_elapsed = now.duration_since(last_client_activity);
                 let server_elapsed = now.duration_since(last_server_activity);
 
-                if client_elapsed >= inactivity_timeout || server_elapsed >= inactivity_timeout {
+                if client_elapsed >= inactivity_timeout && server_elapsed >= inactivity_timeout {
                     println!(
                         "Bridge proxy: websocket inactivity timeout (client: {:.1}s, server: {:.1}s >= {:.1}s), terminating bridge",
                         client_elapsed.as_secs_f64(),
@@ -144,10 +144,10 @@ pub async fn bridge_with_watchdog(
             message = client_stream.next() => {
                 let Some(message) = message else { break };
                 let Ok(message) = message else { break };
-                last_client_activity = tokio::time::Instant::now();
                 if is_watchdog_pong(&message) {
                     continue;
                 }
+                last_client_activity = tokio::time::Instant::now();
                 let Some(message) = to_server(message) else { continue };
                 log_engineio("browser->server", &message);
                 if server_sink.send(message).await.is_err() {
@@ -157,10 +157,10 @@ pub async fn bridge_with_watchdog(
             message = server_stream.next() => {
                 let Some(message) = message else { break };
                 let Ok(message) = message else { break };
-                last_server_activity = tokio::time::Instant::now();
                 if is_server_watchdog_pong(&message) {
                     continue;
                 }
+                last_server_activity = tokio::time::Instant::now();
                 log_engineio("server->browser", &message);
                 let Some(message) = to_client(message) else { continue };
                 if client_sink.send(message).await.is_err() {
@@ -175,11 +175,17 @@ pub async fn bridge_with_watchdog(
 }
 
 fn is_watchdog_pong(message: &ClientMessage) -> bool {
-    matches!(message, ClientMessage::Pong(bytes) if bytes.as_ref() == WATCHDOG_PROBE)
+    match message {
+        ClientMessage::Pong(bytes) | ClientMessage::Ping(bytes) => bytes.as_ref() == WATCHDOG_PROBE,
+        _ => false,
+    }
 }
 
 fn is_server_watchdog_pong(message: &ServerMessage) -> bool {
-    matches!(message, ServerMessage::Pong(bytes) if bytes.as_ref() == WATCHDOG_PROBE)
+    match message {
+        ServerMessage::Pong(bytes) | ServerMessage::Ping(bytes) => bytes.as_ref() == WATCHDOG_PROBE,
+        _ => false,
+    }
 }
 
 /// Engine.IO pings are text frames `"2"`; the client answers `"3"`.

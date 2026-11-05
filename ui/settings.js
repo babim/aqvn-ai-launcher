@@ -761,6 +761,7 @@
       if (taskChimeVolumeDisplay) taskChimeVolumeDisplay.textContent = '50%';
     }
     if (taskChimeToneInput) taskChimeToneInput.value = DEFAULTS.task_chime_tone;
+    if (securityPolicyInput) securityPolicyInput.value = DEFAULTS.security_policy;
     if (appThemeSelect) appThemeSelect.value = DEFAULTS.app_theme;
     document.documentElement.setAttribute('data-theme', DEFAULTS.app_theme);
     setLanguage(DEFAULTS.app_language);

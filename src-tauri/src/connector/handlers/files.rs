@@ -840,7 +840,21 @@ fn op_patch(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
         );
     };
 
-    if let Err(err) = fs::write(&jailed, updated.as_bytes()) {
+    let parent_dir = jailed.parent().unwrap_or_else(|| Path::new("."));
+    let file_stem = jailed
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    static TMP_PATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let seq = TMP_PATCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = parent_dir.join(format!(
+        ".{}.patch.tmp.{}.{}",
+        file_stem,
+        std::process::id(),
+        seq
+    ));
+
+    if let Err(err) = fs::write(&tmp_path, updated.as_bytes()) {
         return make_error_reply(
             id,
             op_id,
@@ -851,14 +865,13 @@ fn op_patch(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
     }
 
     let expected_sha256 = parse_expected_sha256(envelope);
-    let computed_sha256 = match compute_file_sha256(&jailed) {
+    let computed_sha256 = match compute_file_sha256(&tmp_path) {
         Ok(hash) => {
             if let Some(ref exp) = expected_sha256 {
                 let norm_exp = exp.trim().trim_start_matches("sha256:").to_lowercase();
                 let norm_comp = hash.to_lowercase();
                 if norm_exp != norm_comp {
-                    // Rollback file to original pre-patch state
-                    let _ = fs::write(&jailed, original.as_bytes());
+                    let _ = fs::remove_file(&tmp_path);
                     let mut err_reply = serde_json::from_str::<Value>(&make_error_reply(
                         id,
                         op_id,
@@ -884,19 +897,32 @@ fn op_patch(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
             Some(hash)
         }
         Err(e) => {
-            if expected_sha256.is_some() {
-                let _ = fs::write(&jailed, original.as_bytes());
-                return make_error_reply(
-                    id,
-                    op_id,
-                    "patch",
-                    Some(raw_path),
-                    format!("failed to compute SHA-256 for patched file: {e}. File rolled back."),
-                );
-            }
-            None
+            let _ = fs::remove_file(&tmp_path);
+            return make_error_reply(
+                id,
+                op_id,
+                "patch",
+                Some(raw_path),
+                format!("failed to compute SHA-256 for patched file: {e}. File rolled back."),
+            );
         }
     };
+
+    let rename_res = fs::rename(&tmp_path, &jailed).or_else(|_| {
+        fs::copy(&tmp_path, &jailed).map(|_| {
+            let _ = fs::remove_file(&tmp_path);
+        })
+    });
+    if let Err(err) = rename_res {
+        let _ = fs::remove_file(&tmp_path);
+        return make_error_reply(
+            id,
+            op_id,
+            "patch",
+            Some(raw_path),
+            format!("failed to rename patched file: {err}"),
+        );
+    }
 
     let total_lines = count_content_lines(&updated);
     let checksum = calculate_checksum(updated.as_bytes());
@@ -1164,6 +1190,22 @@ fn op_files_mkdir(id: &str, op_id: &str, raw_path: &str, sandbox: &Sandbox) -> S
 }
 
 fn op_files_remove(id: &str, op_id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
+    let trimmed = raw_path.trim();
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == "/"
+        || trimmed == "/a0"
+        || trimmed == "/a0/"
+    {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_remove",
+            Some(raw_path),
+            "cannot remove workspace root directory",
+        );
+    }
+
     let normalized = normalize_requested_path(raw_path);
     let jailed = match sandbox.jail(&normalized) {
         Ok(p) => p,
@@ -1171,6 +1213,21 @@ fn op_files_remove(id: &str, op_id: &str, raw_path: &str, sandbox: &Sandbox) -> 
             return make_error_reply(id, op_id, "files_remove", Some(raw_path), err.to_string())
         }
     };
+
+    if sandbox
+        .canonical_roots()
+        .unwrap_or_default()
+        .iter()
+        .any(|r| r == &jailed)
+    {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_remove",
+            Some(raw_path),
+            "cannot remove workspace root directory",
+        );
+    }
 
     if !jailed.exists() {
         return make_error_reply(
@@ -1230,6 +1287,16 @@ fn op_files_rename(id: &str, op_id: &str, envelope: &Value, sandbox: &Sandbox) -
         .and_then(Value::as_str)
         .unwrap_or_default();
 
+    if src_raw.trim().is_empty() || dst_raw.trim().is_empty() {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_rename",
+            None,
+            "src and dst paths cannot be empty",
+        );
+    }
+
     let src_norm = normalize_requested_path(src_raw);
     let dst_norm = normalize_requested_path(dst_raw);
 
@@ -1245,6 +1312,21 @@ fn op_files_rename(id: &str, op_id: &str, envelope: &Value, sandbox: &Sandbox) -
             return make_error_reply(id, op_id, "files_rename", Some(dst_raw), err.to_string())
         }
     };
+
+    if sandbox
+        .canonical_roots()
+        .unwrap_or_default()
+        .iter()
+        .any(|r| r == &src_jailed)
+    {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_rename",
+            Some(src_raw),
+            "cannot rename workspace root directory",
+        );
+    }
 
     if !src_jailed.exists() {
         return make_error_reply(

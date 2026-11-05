@@ -176,12 +176,18 @@ pub struct AppConfig {
     pub task_chime_volume: f32,
     #[serde(default = "default_task_chime_tone")]
     pub task_chime_tone: String,
+    #[serde(default = "default_security_policy")]
+    pub security_policy: String,
     #[serde(default)]
     pub window_state: Option<WindowState>,
     #[serde(default)]
     pub tls_ca_cert_path: Option<String>,
     #[serde(default)]
     pub tls_skip_verify: bool,
+}
+
+fn default_security_policy() -> String {
+    "supervised".to_string()
 }
 
 impl Default for AppConfig {
@@ -216,6 +222,7 @@ impl Default for AppConfig {
             task_notification_enabled: true,
             task_chime_volume: DEFAULT_TASK_CHIME_VOLUME,
             task_chime_tone: DEFAULT_TASK_CHIME_TONE.to_string(),
+            security_policy: default_security_policy(),
             window_state: None,
             tls_ca_cert_path: None,
             tls_skip_verify: false,
@@ -399,6 +406,11 @@ impl AppConfig {
                 config.task_chime_tone = s.to_string();
             }
         }
+        if let Some(val) = store.get("security_policy") {
+            if let Some(s) = val.as_str() {
+                config.security_policy = s.to_string();
+            }
+        }
         if let Some(val) = store.get("window_state") {
             if !val.is_null() {
                 if let Ok(ws) = serde_json::from_value::<WindowState>(val.clone()) {
@@ -468,6 +480,7 @@ impl AppConfig {
             serde_json::json!(self.task_chime_volume),
         );
         store.set("task_chime_tone", serde_json::json!(self.task_chime_tone));
+        store.set("security_policy", serde_json::json!(self.security_policy));
         store.set("window_state", serde_json::json!(self.window_state));
         store.set("tls_ca_cert_path", serde_json::json!(self.tls_ca_cert_path));
         store.set("tls_skip_verify", serde_json::json!(self.tls_skip_verify));

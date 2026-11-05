@@ -1704,3 +1704,113 @@ async fn test_atomic_write_preserves_original_on_mismatch() {
     set_test_sandbox(None);
     let _ = std::fs::remove_dir_all(&sandbox_dir);
 }
+
+#[tokio::test]
+async fn test_root_directory_guard_against_deletion_and_rename() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (sandbox_dir, sandbox) = create_temp_sandbox();
+    set_test_sandbox(Some(sandbox.clone()));
+
+    // Attempt to remove root via "."
+    let remove_dot = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-rm-root-dot",
+        "action": "files_remove",
+        "path": "."
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&remove_dot, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], false);
+    assert!(reply["error"]
+        .as_str()
+        .unwrap()
+        .contains("cannot remove workspace root"));
+    assert!(sandbox_dir.exists(), "sandbox dir must still exist");
+
+    // Attempt to remove root via "/"
+    let remove_slash = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-rm-root-slash",
+        "action": "files_remove",
+        "path": "/"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&remove_slash, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], false);
+    assert!(reply["error"]
+        .as_str()
+        .unwrap()
+        .contains("cannot remove workspace root"));
+    assert!(sandbox_dir.exists());
+
+    // Attempt to rename root
+    let rename_root = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-rename-root",
+        "action": "files_rename",
+        "src": ".",
+        "dst": "renamed_root"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&rename_root, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], false);
+    assert!(reply["error"]
+        .as_str()
+        .unwrap()
+        .contains("cannot rename workspace root"));
+    assert!(sandbox_dir.exists());
+
+    set_test_sandbox(None);
+    let _ = std::fs::remove_dir_all(&sandbox_dir);
+}
+
+#[tokio::test]
+async fn test_atomic_patch_staging_and_rollback() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (sandbox_dir, sandbox) = create_temp_sandbox();
+    set_test_sandbox(Some(sandbox.clone()));
+
+    let target_file = "patch_target.txt";
+    let on_disk = sandbox_dir.join(target_file);
+    std::fs::write(&on_disk, "Hello Initial World\nLine 2\n").unwrap();
+
+    // 1. Successful patch
+    let valid_patch = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-patch-valid",
+        "action": "patch",
+        "path": target_file,
+        "old_text": "Initial",
+        "new_text": "Patched"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&valid_patch, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], true);
+    assert_eq!(
+        std::fs::read_to_string(&on_disk).unwrap(),
+        "Hello Patched World\nLine 2\n"
+    );
+
+    // 2. Patch with mismatched expected_sha256 triggers rollback
+    let bad_sha_patch = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-patch-bad-sha",
+        "action": "patch",
+        "path": target_file,
+        "old_text": "Patched",
+        "new_text": "Corrupted",
+        "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    });
+    let reply_str = files::handle_file_op_with_sandbox(&bad_sha_patch, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], false);
+    assert_eq!(reply["rollback"], true);
+    // Original content before bad patch must be preserved
+    assert_eq!(
+        std::fs::read_to_string(&on_disk).unwrap(),
+        "Hello Patched World\nLine 2\n"
+    );
+
+    set_test_sandbox(None);
+    let _ = std::fs::remove_dir_all(&sandbox_dir);
+}

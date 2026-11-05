@@ -4939,6 +4939,60 @@ describe('Milestone 5: Modern UI/UX Polish & Multi-Server Gateway Radar (VAL-UI-
   });
 });
 
+describe('Phase 2 Hardening: Outbox, Terminal memory, a11y & preview sanitization', () => {
+  test('Outbox deduplicates identical message_id on queue insertion', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { queueOutbox, readOutbox } = harness.exports;
+
+    queueOutbox('first text', 'msg-dup-1');
+    const firstCount = readOutbox().length;
+    queueOutbox('first text again', 'msg-dup-1');
+    const secondCount = readOutbox().length;
+
+    assert.equal(firstCount, secondCount, 'Duplicate message_id must not add extra entry to outbox');
+  });
+
+  test('Terminal output limits scrollback to 2,000 lines and provides tab closing', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /lines\.slice\(-2000\)\.join\('\\n'\)/, 'Scrollback capped at 2000 lines');
+    assert.match(chatJs, /function closeTerminalTab\(/, 'closeTerminalTab must be defined');
+    assert.match(chatJs, /terminal-tab-close/, 'Tab close button rendered');
+  });
+
+  test('Subfolder uploads preserve active workspace path', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /state\.workspaceCurrentPath\s*\?[\s\S]*?state\.workspaceCurrentPath[\s\S]*?name\s*:\s*name/, 'Upload path scopes into subfolder');
+  });
+
+  test('Command palette supports Arrow navigation and option roles', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /setAttribute\('role',\s*'option'\)/, 'Palette items have role="option"');
+    assert.match(chatJs, /e\.key === 'ArrowDown'/, 'ArrowDown navigation supported');
+    assert.match(chatJs, /e\.key === 'ArrowUp'/, 'ArrowUp navigation supported');
+  });
+
+  test('File preview uses renderMarkdown to sanitize raw HTML', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /dom\.filePreviewContent\.innerHTML = renderMarkdown\(text\)/, 'Markdown preview uses sanitizing renderer');
+    assert.match(chatJs, /dom\.filePreviewContent\.innerHTML = ''/, 'closeFilePreview clears content DOM');
+  });
+
+  test('Light mode styles avoid hardcoded dark background in topbar and terminal', () => {
+    const chatCss = fs.readFileSync(new URL('../../ui/chat.css', import.meta.url), 'utf8');
+    assert.match(chatCss, /\.topbar\s*\{[^}]*background:\s*var\(--panel\)/, 'Topbar uses var(--panel)');
+    assert.match(chatCss, /\.terminal-drawer\s*\{[^}]*background:\s*var\(--panel\)/, 'Terminal drawer uses var(--panel)');
+  });
+
+  test('Modal focus trap and universal Escape key dismiss open dialogs', () => {
+    const chatJs = fs.readFileSync(new URL('../../ui/chat.js', import.meta.url), 'utf8');
+    assert.match(chatJs, /activeModal\s*&&\s*e\.key === 'Tab'/, 'Tab focus trap on active modal');
+    assert.match(chatJs, /e\.key === 'Escape'/, 'Escape handler present');
+    assert.match(chatJs, /closeFilePreview\(\)/, 'Escape closes preview modal');
+    assert.match(chatJs, /closeDiffViewer\(\)/, 'Escape closes diff viewer');
+  });
+});
+
 
 
 

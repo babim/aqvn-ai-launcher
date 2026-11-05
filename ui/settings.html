@@ -154,6 +154,14 @@
       input:checked + .slider {
         background-color: #0284c7;
       }
+      .toggle-switch input:focus-visible + .slider {
+        outline: 2px solid #22d3ee;
+        outline-offset: 3px;
+      }
+      button:focus-visible, select:focus-visible {
+        outline: 2px solid #22d3ee;
+        outline-offset: 2px;
+      }
       input:checked + .slider:before {
         transform: translateX(22px);
         background-color: #ffffff;
@@ -419,7 +427,7 @@
           </div>
 
           <div class="form-group" style="margin-top: 14px;">
-            <label for="task-chime-volume" data-i18n="task_chime_volume_label">Chime Volume / Âm lượng chuông (<span id="task-chime-volume-display">50%</span>)</label>
+            <label for="task-chime-volume"><span data-i18n="task_chime_volume_label">Chime Volume / Âm lượng chuông</span> (<span id="task-chime-volume-display">50%</span>)</label>
             <input
               type="range"
               id="task-chime-volume"

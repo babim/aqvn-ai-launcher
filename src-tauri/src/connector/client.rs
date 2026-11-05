@@ -605,10 +605,10 @@ impl GatewayClient {
                         frame = stream.next() => {
                             match frame {
                                 Some(Ok(Message::Text(text))) => {
-                                    if text.starts_with("40/ws") {
+                                    if text.starts_with("40/ws") || text.starts_with("42/ws") {
                                         active_namespace = Some("/ws".to_string());
                                         ns_connected = true;
-                                    } else if text.starts_with("40") {
+                                    } else if text.starts_with("40") || text.starts_with("42") {
                                         active_namespace = None;
                                         ns_connected = true;
                                     } else if text.starts_with(EIO_PACKET_PING) {

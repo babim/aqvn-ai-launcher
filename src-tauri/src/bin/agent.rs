@@ -30,7 +30,7 @@ COMMANDS:
     status      Show connection status and diagnostics
 
 OPTIONS:
-    -s, --server <URL>       Agent Zero server URL
+    -s, --server <URL>       AQVN Gateway server URL
     -u, --user <USER>        Username for authentication
     -p, --pass <PASS>        Password for authentication
     -t, --token <TOKEN>      Session token or API key
@@ -767,7 +767,7 @@ pub async fn run_start<W: Write>(
                 .wait_for_handshake(Duration::from_secs(10))
                 .await
             {
-                println!("Node successfully registered in Agent Zero client pool.");
+                println!("Node successfully registered in AQVN client pool.");
             }
         });
 

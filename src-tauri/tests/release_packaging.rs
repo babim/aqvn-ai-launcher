@@ -137,3 +137,110 @@ fn val_rel_003_macos_job_and_step_timeouts_in_release_workflow() {
         "release.yml must configure timeout-minutes: 60 across all runner jobs (linux, windows, macos, android)"
     );
 }
+
+#[test]
+fn val_agent_rel_001_headless_linux_release_binary() {
+    // 1. Verify Cargo.toml release profile configuration
+    let cargo_toml = fs::read_to_string(manifest_dir().join("Cargo.toml"))
+        .expect("must read src-tauri/Cargo.toml");
+    assert!(
+        cargo_toml.contains("[profile.release]"),
+        "Cargo.toml must configure [profile.release]"
+    );
+    assert!(
+        cargo_toml.contains("strip = true"),
+        "[profile.release] must configure strip = true"
+    );
+    assert!(
+        cargo_toml.contains("opt-level = \"z\"") || cargo_toml.contains("opt-level = \"s\""),
+        "[profile.release] must configure size optimization (opt-level = \"z\" or \"s\")"
+    );
+    assert!(
+        cargo_toml.contains("lto = true"),
+        "[profile.release] must configure lto = true"
+    );
+    assert!(
+        cargo_toml.contains("panic = \"abort\""),
+        "[profile.release] must configure panic = \"abort\""
+    );
+    assert!(
+        cargo_toml.contains("codegen-units = 1"),
+        "[profile.release] must configure codegen-units = 1"
+    );
+
+    // 2. Check binary path
+    let bin_path = manifest_dir().join("target/release/aqvn-agent");
+    if !bin_path.exists() {
+        let status = std::process::Command::new("cargo")
+            .arg("build")
+            .arg("--release")
+            .arg("--bin")
+            .arg("aqvn-agent")
+            .current_dir(manifest_dir())
+            .status()
+            .expect("cargo build --release --bin aqvn-agent must execute");
+        assert!(
+            status.success(),
+            "cargo build --release --bin aqvn-agent must succeed"
+        );
+    }
+
+    assert!(
+        bin_path.exists(),
+        "release binary must exist at src-tauri/target/release/aqvn-agent"
+    );
+
+    // 3. Binary size must be under 15MB
+    let metadata = fs::metadata(&bin_path).expect("must get binary metadata");
+    let size = metadata.len();
+    const MAX_SIZE_BYTES: u64 = 15 * 1024 * 1024;
+    assert!(
+        size > 0 && size <= MAX_SIZE_BYTES,
+        "release binary size must be > 0 and <= 15MB ({} bytes), got: {} bytes ({:.2} MB)",
+        MAX_SIZE_BYTES,
+        size,
+        size as f64 / (1024.0 * 1024.0)
+    );
+
+    // 4. Permissions must be 755 on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = metadata.permissions().mode();
+        let perm_octal = mode & 0o777;
+        assert_eq!(
+            perm_octal, 0o755,
+            "release binary permissions must be 755 (rwxr-xr-x), got: {:o}",
+            perm_octal
+        );
+    }
+
+    // 5. Binary is stripped of debug symbols
+    if let Ok(output) = std::process::Command::new("file").arg(&bin_path).output() {
+        if output.status.success() {
+            let info = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                info.contains("stripped"),
+                "release binary must be stripped of debug symbols, got: {info}"
+            );
+        }
+    }
+
+    // 6. Execution works headless with 0 status code
+    let output = std::process::Command::new(&bin_path)
+        .arg("--version")
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY")
+        .output()
+        .expect("release binary must execute in headless environment");
+
+    assert!(
+        output.status.success(),
+        "aqvn-agent --version must exit with code 0"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("aqvn-agent"),
+        "aqvn-agent --version must print agent identifier, got: {stdout}"
+    );
+}

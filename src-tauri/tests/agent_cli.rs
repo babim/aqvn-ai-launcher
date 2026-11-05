@@ -520,3 +520,172 @@ fn test_agent_cli_config_non_interactive_val_agent_cli_003() {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn test_agent_cli_install_and_uninstall_user_unit_val_agent_cli_004() {
+    let bin = agent_bin();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_agent_cli_install_user_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let unit_path = temp_dir.join("aqvn-agent.service");
+
+    // 1. aqvn-agent install --user
+    let output = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("install")
+        .arg("--user")
+        .arg("--workspace")
+        .arg("/tmp/test-agent-ws-cli")
+        .output()
+        .expect("execute install --user");
+
+    assert!(
+        output.status.success(),
+        "aqvn-agent install must exit with 0"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Installing aqvn-agent systemd service..."));
+    assert!(stdout.contains("Systemd unit file (user) written to:"));
+    assert!(stdout.contains("aqvn-agent systemd service installed and enabled successfully."));
+
+    assert!(unit_path.exists(), "unit file must be written to disk");
+    let content = std::fs::read_to_string(&unit_path).expect("read generated unit file");
+    assert!(content.contains("[Unit]"), "must have [Unit] section");
+    assert!(content.contains("Description=AQVN Standalone Headless Agent & Multi-Host Bridge"));
+    assert!(content.contains("After=network.target"));
+    assert!(content.contains("[Service]"), "must have [Service] section");
+    assert!(content.contains("Type=simple"));
+    assert!(content.contains("ExecStart="), "must declare ExecStart");
+    assert!(
+        content.contains("start"),
+        "ExecStart must invoke start command"
+    );
+    assert!(
+        content.contains("WorkingDirectory=/tmp/test-agent-ws-cli"),
+        "must set WorkingDirectory"
+    );
+    assert!(
+        content.contains("Restart=always"),
+        "must specify Restart=always"
+    );
+    assert!(content.contains("RestartSec=5"));
+    assert!(content.contains("[Install]"), "must have [Install] section");
+    assert!(
+        content.contains("WantedBy=default.target"),
+        "user unit must target default.target"
+    );
+
+    // 2. aqvn-agent uninstall --user
+    let output_uninst = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("uninstall")
+        .arg("--user")
+        .output()
+        .expect("execute uninstall --user");
+
+    assert!(
+        output_uninst.status.success(),
+        "aqvn-agent uninstall must exit with 0"
+    );
+    let stdout_uninst = String::from_utf8_lossy(&output_uninst.stdout);
+    assert!(stdout_uninst.contains("Uninstalling aqvn-agent systemd service..."));
+    assert!(stdout_uninst.contains("Removed unit file:"));
+    assert!(stdout_uninst.contains("aqvn-agent systemd service uninstalled cleanly."));
+
+    assert!(
+        !unit_path.exists(),
+        "unit file must be removed after uninstall"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_agent_cli_install_system_unit_val_agent_cli_004() {
+    let bin = agent_bin();
+    let temp_dir =
+        std::env::temp_dir().join(format!("test_agent_cli_install_sys_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let unit_path = temp_dir.join("aqvn-agent.service");
+
+    let output = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("install")
+        .arg("--system")
+        .arg("--workspace")
+        .arg("/srv/test-agent-sys")
+        .output()
+        .expect("execute install --system");
+
+    assert!(
+        output.status.success(),
+        "aqvn-agent install --system must exit with 0"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Systemd unit file (system) written to:"));
+
+    assert!(unit_path.exists(), "unit file must exist");
+    let content = std::fs::read_to_string(&unit_path).expect("read system unit file");
+    assert!(content.contains("Restart=always"));
+    assert!(content.contains("WorkingDirectory=/srv/test-agent-sys"));
+    assert!(
+        content.contains("WantedBy=multi-user.target"),
+        "system unit must target multi-user.target"
+    );
+
+    let output_uninst = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("uninstall")
+        .arg("--system")
+        .output()
+        .expect("execute uninstall --system");
+
+    assert!(output_uninst.status.success());
+    assert!(!unit_path.exists(), "system unit file must be removed");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_agent_cli_install_with_custom_config_val_agent_cli_004() {
+    let bin = agent_bin();
+    let temp_dir =
+        std::env::temp_dir().join(format!("test_agent_cli_install_cfg_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let unit_path = temp_dir.join("aqvn-agent.service");
+    let config_path = temp_dir.join("custom-settings.json");
+    std::fs::write(&config_path, "{}").expect("write dummy config");
+
+    let output = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("install")
+        .arg("--config")
+        .arg(&config_path)
+        .arg("--workspace")
+        .arg("/var/custom-ws")
+        .output()
+        .expect("execute install with config");
+
+    assert!(output.status.success());
+    let content = std::fs::read_to_string(&unit_path).expect("read unit file");
+    assert!(content.contains("ExecStart="));
+    assert!(content.contains(&format!("--config {}", config_path.display())));
+    assert!(content.contains("WorkingDirectory=/var/custom-ws"));
+    assert!(content.contains("Restart=always"));
+
+    let output_uninst = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("uninstall")
+        .output()
+        .expect("execute uninstall");
+
+    assert!(output_uninst.status.success());
+    assert!(!unit_path.exists());
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}

@@ -38,6 +38,8 @@ OPTIONS:
     --scopes <SCOPES>        Enabled scopes (files,code_execution,browser,computer_use)
     -w, --workspace <PATH>   Workspace root directory
     -c, --config <PATH>      Path to settings.json
+    --user                   Target user systemd unit (~/.config/systemd/user)
+    --system                 Target system systemd unit (/etc/systemd/system)
     --gateway-id <ID>        Custom gateway ID
     --tls-skip-verify        Accept self-signed or invalid TLS certs
     -h, --help               Print help information
@@ -352,11 +354,24 @@ pub fn parse_cli_args(args: &[String]) -> Result<ParsedCli, String> {
                     options.server = Some(get_val(&mut i)?);
                 }
                 "-u" | "--user" => {
-                    if action == Some(CliAction::Install)
-                        && inline_val.is_none()
-                        && (i + 1 >= args.len() || args[i + 1].starts_with('-'))
+                    let is_service_cmd = action == Some(CliAction::Install)
+                        || action == Some(CliAction::Uninstall)
+                        || args.iter().any(|a| a == "install" || a == "uninstall");
+                    if is_service_cmd
+                        && (inline_val.is_none()
+                            || inline_val.as_deref() == Some("true")
+                            || inline_val.as_deref() == Some("false"))
+                        && (inline_val.is_some()
+                            || i + 1 >= args.len()
+                            || args[i + 1].starts_with('-')
+                            || args[i + 1] == "install"
+                            || args[i + 1] == "uninstall")
                     {
-                        options.user_unit = Some(true);
+                        if let Some(ref v) = inline_val {
+                            options.user_unit = Some(v.parse().unwrap_or(true));
+                        } else {
+                            options.user_unit = Some(true);
+                        }
                     } else {
                         options.user = Some(get_val(&mut i)?);
                     }
@@ -737,14 +752,246 @@ pub async fn run_start<W: Write>(
     Ok(())
 }
 
-pub fn run_install<W: Write>(writer: &mut W) -> io::Result<()> {
-    writeln!(writer, "Installing aqvn-agent systemd service...")?;
-    writer.flush()?;
-    Ok(())
+pub fn resolve_is_user_unit(user_unit_opt: Option<bool>) -> bool {
+    if let Some(user_unit) = user_unit_opt {
+        return user_unit;
+    }
+    #[cfg(unix)]
+    {
+        if unsafe { libc::geteuid() } == 0 {
+            return false;
+        }
+    }
+    true
 }
 
-pub fn run_uninstall<W: Write>(writer: &mut W) -> io::Result<()> {
+pub fn resolve_systemd_unit_path(is_user_unit: bool) -> PathBuf {
+    if let Ok(override_path) = env::var("AQVN_SYSTEMD_UNIT_PATH") {
+        let trimmed = override_path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    if is_user_unit {
+        if let Ok(xdg) = env::var("XDG_CONFIG_HOME") {
+            let trimmed = xdg.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed)
+                    .join("systemd")
+                    .join("user")
+                    .join("aqvn-agent.service");
+            }
+        }
+        if let Ok(home) = env::var("HOME") {
+            let trimmed = home.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed)
+                    .join(".config")
+                    .join("systemd")
+                    .join("user")
+                    .join("aqvn-agent.service");
+            }
+        }
+        PathBuf::from("/etc/systemd/user/aqvn-agent.service")
+    } else {
+        PathBuf::from("/etc/systemd/system/aqvn-agent.service")
+    }
+}
+
+pub fn resolve_binary_path() -> PathBuf {
+    if let Ok(override_bin) = env::var("AQVN_AGENT_BIN_PATH") {
+        let trimmed = override_bin.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Ok(canon) = exe.canonicalize() {
+            return canon;
+        }
+        return exe;
+    }
+    PathBuf::from("/usr/local/bin/aqvn-agent")
+}
+
+pub fn resolve_working_directory(raw_path: &str) -> PathBuf {
+    let trimmed = raw_path.trim();
+    if trimmed.starts_with("~/") || trimmed == "~" {
+        if let Ok(home) = env::var("HOME") {
+            if trimmed == "~" {
+                return PathBuf::from(home);
+            } else {
+                return PathBuf::from(home).join(&trimmed[2..]);
+            }
+        }
+    }
+    let p = PathBuf::from(trimmed);
+    if p.is_absolute() {
+        p
+    } else if let Ok(cwd) = env::current_dir() {
+        cwd.join(p)
+    } else {
+        p
+    }
+}
+
+pub fn generate_systemd_unit(
+    binary_path: &Path,
+    working_dir: &Path,
+    config_path: Option<&Path>,
+    is_user_unit: bool,
+) -> String {
+    let exec_start = match config_path {
+        Some(cfg) => format!("{} start --config {}", binary_path.display(), cfg.display()),
+        None => format!("{} start", binary_path.display()),
+    };
+
+    let wanted_by = if is_user_unit {
+        "default.target"
+    } else {
+        "multi-user.target"
+    };
+
+    format!(
+        "[Unit]\n\
+Description=AQVN Standalone Headless Agent & Multi-Host Bridge\n\
+After=network.target\n\
+\n\
+[Service]\n\
+Type=simple\n\
+ExecStart={exec_start}\n\
+WorkingDirectory={}\n\
+Restart=always\n\
+RestartSec=5\n\
+KillMode=process\n\
+\n\
+[Install]\n\
+WantedBy={wanted_by}\n",
+        working_dir.display()
+    )
+}
+
+fn run_systemctl_cmd(is_user_unit: bool, args: &[&str]) -> io::Result<std::process::ExitStatus> {
+    let mut cmd = std::process::Command::new("systemctl");
+    if is_user_unit {
+        cmd.arg("--user");
+    }
+    cmd.args(args);
+    cmd.status()
+}
+
+fn execute_systemctl_action<W: Write>(
+    writer: &mut W,
+    is_user_unit: bool,
+    action: &str,
+    extra_args: &[&str],
+) {
+    let unit_flag = if is_user_unit { " --user" } else { "" };
+    let mut all_args = Vec::with_capacity(1 + extra_args.len());
+    all_args.push(action);
+    all_args.extend_from_slice(extra_args);
+
+    let cmd_str = format!("systemctl{unit_flag} {}", all_args.join(" "));
+    let _ = writeln!(writer, "Running: {cmd_str}");
+
+    match run_systemctl_cmd(is_user_unit, &all_args) {
+        Ok(status) => {
+            if status.success() {
+                let _ = writeln!(writer, "Command '{cmd_str}' succeeded.");
+            } else {
+                let _ = writeln!(
+                    writer,
+                    "Notice: command '{cmd_str}' exited with status: {}",
+                    status
+                );
+            }
+        }
+        Err(err) => {
+            let _ = writeln!(
+                writer,
+                "Notice: could not run '{cmd_str}': {err} (systemd may not be running in this environment)"
+            );
+        }
+    }
+}
+
+pub fn run_install<W: Write>(
+    writer: &mut W,
+    options: &CliOptions,
+    settings: &AgentSettings,
+) -> io::Result<PathBuf> {
+    writeln!(writer, "Installing aqvn-agent systemd service...")?;
+
+    let is_user_unit = resolve_is_user_unit(options.user_unit);
+    let unit_path = resolve_systemd_unit_path(is_user_unit);
+    let binary_path = resolve_binary_path();
+    let working_dir = resolve_working_directory(&settings.workspace_path);
+
+    let _ = std::fs::create_dir_all(&working_dir);
+
+    let unit_content = generate_systemd_unit(
+        &binary_path,
+        &working_dir,
+        options.config_path.as_deref(),
+        is_user_unit,
+    );
+
+    if let Some(parent) = unit_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&unit_path, &unit_content)?;
+
+    writeln!(
+        writer,
+        "Systemd unit file ({}) written to: {}",
+        if is_user_unit { "user" } else { "system" },
+        unit_path.display()
+    )?;
+
+    // Execute daemon-reload and enable
+    execute_systemctl_action(writer, is_user_unit, "daemon-reload", &[]);
+    execute_systemctl_action(writer, is_user_unit, "enable", &["aqvn-agent.service"]);
+
+    writeln!(
+        writer,
+        "aqvn-agent systemd service installed and enabled successfully."
+    )?;
+    writer.flush()?;
+    Ok(unit_path)
+}
+
+pub fn run_uninstall<W: Write>(writer: &mut W, options: &CliOptions) -> io::Result<()> {
     writeln!(writer, "Uninstalling aqvn-agent systemd service...")?;
+
+    let is_user_unit = resolve_is_user_unit(options.user_unit);
+    let unit_path = resolve_systemd_unit_path(is_user_unit);
+
+    // Stop and disable service
+    execute_systemctl_action(writer, is_user_unit, "stop", &["aqvn-agent.service"]);
+    execute_systemctl_action(writer, is_user_unit, "disable", &["aqvn-agent.service"]);
+
+    if unit_path.exists() {
+        std::fs::remove_file(&unit_path)?;
+        writeln!(writer, "Removed unit file: {}", unit_path.display())?;
+    } else {
+        writeln!(
+            writer,
+            "Unit file not found or already removed: {}",
+            unit_path.display()
+        )?;
+    }
+
+    // Reload daemon after removal
+    execute_systemctl_action(writer, is_user_unit, "daemon-reload", &[]);
+    execute_systemctl_action(
+        writer,
+        is_user_unit,
+        "reset-failed",
+        &["aqvn-agent.service"],
+    );
+
+    writeln!(writer, "aqvn-agent systemd service uninstalled cleanly.")?;
     writer.flush()?;
     Ok(())
 }
@@ -775,10 +1022,18 @@ pub async fn run_menu<R: BufRead, W: Write>(
                 let _ = run_configure(reader, writer, &mut settings, &settings_path);
             }
             "3" => {
-                let _ = run_install(writer);
+                let options = CliOptions::default();
+                if let Err(e) = run_install(writer, &options, &settings) {
+                    writeln!(writer, "Failed to install service: {e}\n")?;
+                    let _ = writer.flush();
+                }
             }
             "4" => {
-                let _ = run_uninstall(writer);
+                let options = CliOptions::default();
+                if let Err(e) = run_uninstall(writer, &options) {
+                    writeln!(writer, "Failed to uninstall service: {e}\n")?;
+                    let _ = writer.flush();
+                }
             }
             "5" => {
                 let _ = run_status(writer, &settings, &settings_path, true).await;
@@ -847,10 +1102,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         CliAction::Install => {
-            run_install(&mut io::stdout())?;
+            let mut settings = AgentSettings::load_from_file(&settings_path);
+            parsed.options.apply_to(&mut settings);
+            run_install(&mut io::stdout(), &parsed.options, &settings)?;
         }
         CliAction::Uninstall => {
-            run_uninstall(&mut io::stdout())?;
+            run_uninstall(&mut io::stdout(), &parsed.options)?;
         }
         CliAction::Status => {
             let mut settings = AgentSettings::load_from_file(&settings_path);
@@ -1225,5 +1482,160 @@ mod tests {
         assert_eq!(parsed.options.user.as_deref(), Some("bob"));
         assert_eq!(parsed.options.token.as_deref(), Some("inline_tok"));
         assert_eq!(parsed.options.tls_skip_verify, Some(true));
+    }
+
+    #[test]
+    fn test_generate_systemd_unit_val_agent_cli_004() {
+        let bin_path = Path::new("/usr/local/bin/aqvn-agent");
+        let ws_path = Path::new("/home/alice/Workspace");
+        let unit_content = generate_systemd_unit(bin_path, ws_path, None, true);
+
+        assert!(unit_content.contains("[Unit]"));
+        assert!(
+            unit_content.contains("Description=AQVN Standalone Headless Agent & Multi-Host Bridge")
+        );
+        assert!(unit_content.contains("After=network.target"));
+        assert!(unit_content.contains("[Service]"));
+        assert!(unit_content.contains("Type=simple"));
+        assert!(unit_content.contains("ExecStart=/usr/local/bin/aqvn-agent start"));
+        assert!(unit_content.contains("WorkingDirectory=/home/alice/Workspace"));
+        assert!(unit_content.contains("Restart=always"));
+        assert!(unit_content.contains("RestartSec=5"));
+        assert!(unit_content.contains("KillMode=process"));
+        assert!(unit_content.contains("[Install]"));
+        assert!(unit_content.contains("WantedBy=default.target"));
+    }
+
+    #[test]
+    fn test_generate_systemd_unit_system_and_config_val_agent_cli_004() {
+        let bin_path = Path::new("/opt/aqvn/bin/aqvn-agent");
+        let ws_path = Path::new("/srv/aqvn-data");
+        let config_path = Path::new("/etc/aqvn/agent-settings.json");
+        let unit_content = generate_systemd_unit(bin_path, ws_path, Some(config_path), false);
+
+        assert!(unit_content.contains(
+            "ExecStart=/opt/aqvn/bin/aqvn-agent start --config /etc/aqvn/agent-settings.json"
+        ));
+        assert!(unit_content.contains("WorkingDirectory=/srv/aqvn-data"));
+        assert!(unit_content.contains("WantedBy=multi-user.target"));
+        assert!(unit_content.contains("Restart=always"));
+    }
+
+    #[test]
+    fn test_resolve_working_directory_val_agent_cli_004() {
+        let raw_tilde = "~/MyWorkspace";
+        let resolved = resolve_working_directory(raw_tilde);
+        assert!(resolved.is_absolute());
+        if let Ok(home) = env::var("HOME") {
+            assert_eq!(resolved, PathBuf::from(home).join("MyWorkspace"));
+        }
+
+        let abs_path = "/tmp/fixed-workspace";
+        assert_eq!(resolve_working_directory(abs_path), PathBuf::from(abs_path));
+    }
+
+    #[test]
+    fn test_resolve_systemd_unit_path_val_agent_cli_004() {
+        let user_path = resolve_systemd_unit_path(true);
+        assert!(user_path.ends_with("systemd/user/aqvn-agent.service"));
+
+        let sys_path = resolve_systemd_unit_path(false);
+        assert_eq!(
+            sys_path,
+            PathBuf::from("/etc/systemd/system/aqvn-agent.service")
+        );
+    }
+
+    #[test]
+    fn test_parse_cli_args_install_uninstall_flags_val_agent_cli_004() {
+        let p1 = parse_cli_args(&["install".to_string()]).expect("install defaults");
+        assert_eq!(p1.action, CliAction::Install);
+        assert_eq!(p1.options.user_unit, None);
+
+        let p2 =
+            parse_cli_args(&["install".to_string(), "--user".to_string()]).expect("install --user");
+        assert_eq!(p2.action, CliAction::Install);
+        assert_eq!(p2.options.user_unit, Some(true));
+
+        let p3 = parse_cli_args(&["install".to_string(), "--system".to_string()])
+            .expect("install --system");
+        assert_eq!(p3.action, CliAction::Install);
+        assert_eq!(p3.options.user_unit, Some(false));
+
+        let p4 = parse_cli_args(&["uninstall".to_string()]).expect("uninstall defaults");
+        assert_eq!(p4.action, CliAction::Uninstall);
+        assert_eq!(p4.options.user_unit, None);
+
+        let p5 = parse_cli_args(&["uninstall".to_string(), "--user".to_string()])
+            .expect("uninstall --user");
+        assert_eq!(p5.action, CliAction::Uninstall);
+        assert_eq!(p5.options.user_unit, Some(true));
+
+        let p6 = parse_cli_args(&["uninstall".to_string(), "--system".to_string()])
+            .expect("uninstall --system");
+        assert_eq!(p6.action, CliAction::Uninstall);
+        assert_eq!(p6.options.user_unit, Some(false));
+
+        let p7 =
+            parse_cli_args(&["--user".to_string(), "install".to_string()]).expect("--user install");
+        assert_eq!(p7.action, CliAction::Install);
+        assert_eq!(p7.options.user_unit, Some(true));
+    }
+
+    #[test]
+    fn test_run_install_and_uninstall_lifecycle_val_agent_cli_004() {
+        let temp_dir =
+            env::temp_dir().join(format!("test_systemd_lifecycle_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let unit_path = temp_dir.join("aqvn-agent.service");
+        env::set_var("AQVN_SYSTEMD_UNIT_PATH", &unit_path);
+        env::set_var("AQVN_AGENT_BIN_PATH", "/usr/bin/aqvn-agent");
+
+        let mut output = Vec::new();
+        let options = CliOptions {
+            workspace: Some(temp_dir.to_string_lossy().to_string()),
+            user_unit: Some(true),
+            ..Default::default()
+        };
+        let settings = AgentSettings {
+            workspace_path: temp_dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        // 1. Install
+        let installed_path =
+            run_install(&mut output, &options, &settings).expect("install service");
+        assert_eq!(installed_path, unit_path);
+        assert!(unit_path.exists(), "unit file must exist after install");
+
+        let content = std::fs::read_to_string(&unit_path).expect("read unit file");
+        assert!(content.contains("Restart=always"));
+        assert!(content.contains("ExecStart=/usr/bin/aqvn-agent start"));
+        assert!(content.contains(&format!("WorkingDirectory={}", temp_dir.display())));
+        assert!(content.contains("WantedBy=default.target"));
+
+        let install_log = String::from_utf8_lossy(&output);
+        assert!(install_log.contains("Installing aqvn-agent systemd service..."));
+        assert!(
+            install_log.contains("aqvn-agent systemd service installed and enabled successfully.")
+        );
+
+        // 2. Uninstall
+        output.clear();
+        run_uninstall(&mut output, &options).expect("uninstall service");
+        assert!(
+            !unit_path.exists(),
+            "unit file must be deleted after uninstall"
+        );
+
+        let uninstall_log = String::from_utf8_lossy(&output);
+        assert!(uninstall_log.contains("Uninstalling aqvn-agent systemd service..."));
+        assert!(uninstall_log.contains("aqvn-agent systemd service uninstalled cleanly."));
+
+        env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
+        env::remove_var("AQVN_AGENT_BIN_PATH");
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

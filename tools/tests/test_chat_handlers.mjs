@@ -1319,6 +1319,115 @@ describe('ui/chat.js UI zoom and hard refresh', () => {
     assert.equal(harness.document.body.style.zoom, '1.5', 'init must apply the stored zoom');
   });
 
+  test('VAL-UI-ZOOM-001: Single-Point Zoom Normalization - chat.js defers to documentElement without mutating body when container bridge is active', () => {
+    const harness = createHarness();
+    let bridgeApplyCalls = [];
+    let bridgeZoom = 1.0;
+    harness.context.window.__AQVN_CONTAINER__ = {
+      applyZoom: (lvl) => {
+        bridgeApplyCalls.push(lvl);
+        bridgeZoom = typeof lvl === 'number' ? lvl : parseFloat(lvl);
+        harness.document.documentElement.style.zoom = String(bridgeZoom);
+        return bridgeZoom;
+      },
+      readZoom: () => bridgeZoom,
+      zoomIn: () => {
+        bridgeZoom = Math.min(2.0, Math.round((bridgeZoom + 0.1) * 100) / 100);
+        harness.document.documentElement.style.zoom = String(bridgeZoom);
+        return bridgeZoom;
+      },
+      zoomOut: () => {
+        bridgeZoom = Math.max(0.7, Math.round((bridgeZoom - 0.1) * 100) / 100);
+        harness.document.documentElement.style.zoom = String(bridgeZoom);
+        return bridgeZoom;
+      },
+      resetZoom: () => {
+        bridgeZoom = 1.0;
+        harness.document.documentElement.style.zoom = '1';
+        return 1.0;
+      }
+    };
+
+    harness.exports.init();
+
+    // 1. Initial state: body.style.zoom must NOT be applied; documentElement is used
+    assert.equal(harness.document.body.style.zoom, undefined, 'ui/chat.js must not apply document.body.style.zoom if container bridge is detected');
+    assert.equal(harness.document.documentElement.style.zoom, '1', 'documentElement.style.zoom initialized');
+
+    const key = (init) => Object.assign({ preventDefault: () => {} }, init);
+
+    // 2. Ctrl + scales view by exactly 10% step (1.0 -> 1.1) on documentElement, body untouched
+    harness.document.fire('keydown', key({ key: '=', ctrlKey: true }));
+    assert.equal(harness.document.documentElement.style.zoom, '1.1', 'Ctrl + must scale documentElement by exactly 10% step');
+    assert.equal(harness.document.body.style.zoom, undefined, 'body.style.zoom must not be mutated on zoom in');
+
+    // 3. Second Ctrl + scales view to 1.2, body untouched
+    harness.document.fire('keydown', key({ key: '+', ctrlKey: true }));
+    assert.equal(harness.document.documentElement.style.zoom, '1.2', 'second Ctrl + must scale documentElement to 1.2');
+    assert.equal(harness.document.body.style.zoom, undefined, 'body.style.zoom must not be mutated');
+
+    // 4. Ctrl - scales view down by 10% step (1.2 -> 1.1), body untouched
+    harness.document.fire('keydown', key({ key: '-', ctrlKey: true }));
+    assert.equal(harness.document.documentElement.style.zoom, '1.1', 'Ctrl - must scale documentElement down by 10% step');
+    assert.equal(harness.document.body.style.zoom, undefined, 'body.style.zoom must not be mutated');
+
+    // 5. Ctrl 0 resets zoom to 1.0 on documentElement, body untouched
+    harness.document.fire('keydown', key({ key: '0', ctrlKey: true }));
+    assert.equal(harness.document.documentElement.style.zoom, '1', 'Ctrl 0 must reset documentElement to 1.0');
+    assert.equal(harness.document.body.style.zoom, undefined, 'body.style.zoom must not be mutated');
+
+    // 6. Direct applyZoom call also defers to bridge and avoids mutating body
+    harness.exports.applyZoom(1.35);
+    assert.equal(harness.document.documentElement.style.zoom, '1.35', 'applyZoom updates documentElement via bridge');
+    assert.equal(harness.document.body.style.zoom, undefined, 'body.style.zoom must not be mutated by direct applyZoom');
+
+    // 7. Event already handled by container bridge (defaultPrevented or __aqvn_zoom_handled) is dropped to prevent double multiplication
+    const handledEvent = key({ key: '=', ctrlKey: true, defaultPrevented: true });
+    harness.document.fire('keydown', handledEvent);
+    assert.equal(harness.document.documentElement.style.zoom, '1.35', 'already-handled event must not increment zoom again');
+
+    const markedEvent = key({ key: '=', ctrlKey: true, __aqvn_zoom_handled: true });
+    harness.document.fire('keydown', markedEvent);
+    assert.equal(harness.document.documentElement.style.zoom, '1.35', 'marked event must not increment zoom again');
+  });
+
+  test('VAL-UI-ZOOM-001: stored aqvn_zoom with active container bridge applies to documentElement only', () => {
+    const harness = createHarness();
+    harness.store['aqvn_zoom'] = '1.4';
+    let bridgeZoom = 1.4;
+    harness.context.window.__AQVN_CONTAINER__ = {
+      applyZoom: (lvl) => {
+        bridgeZoom = typeof lvl === 'number' ? lvl : parseFloat(lvl);
+        harness.document.documentElement.style.zoom = String(bridgeZoom);
+        return bridgeZoom;
+      },
+      readZoom: () => bridgeZoom,
+      zoomIn: () => {
+        bridgeZoom = Math.min(2.0, Math.round((bridgeZoom + 0.1) * 100) / 100);
+        harness.document.documentElement.style.zoom = String(bridgeZoom);
+        return bridgeZoom;
+      },
+      zoomOut: () => {
+        bridgeZoom = Math.max(0.7, Math.round((bridgeZoom - 0.1) * 100) / 100);
+        harness.document.documentElement.style.zoom = String(bridgeZoom);
+        return bridgeZoom;
+      },
+      resetZoom: () => {
+        bridgeZoom = 1.0;
+        harness.document.documentElement.style.zoom = '1';
+        return 1.0;
+      }
+    };
+    harness.exports.init();
+    assert.equal(harness.document.documentElement.style.zoom, '1.4', 'init must apply stored zoom to documentElement');
+    assert.equal(harness.document.body.style.zoom, undefined, 'init must not set body.style.zoom when container bridge is present');
+
+    const key = (init) => Object.assign({ preventDefault: () => {} }, init);
+    harness.document.fire('keydown', key({ key: '-', ctrlKey: true }));
+    assert.equal(harness.document.documentElement.style.zoom, '1.3', 'Ctrl - decrements stored zoom by 10%');
+    assert.equal(harness.document.body.style.zoom, undefined, 'body.style.zoom remains undefined');
+  });
+
   test('VAL-ZOOM-002: #hard-refresh-btn resets RAM state, CSRF, socket and canvas iframe', async () => {
     const harness = createHarness();
     harness.exports.init();

@@ -816,6 +816,8 @@
 
       if (isZoomIn || isZoomOut || isZoomReset) {
         if (typeof e.preventDefault === 'function') e.preventDefault();
+        try { e.defaultPrevented = true; } catch (_) {}
+        try { e.__aqvn_zoom_handled = true; } catch (_) {}
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
         if (typeof e.stopPropagation === 'function') e.stopPropagation();
         var now = (e && typeof e.timeStamp === 'number' && e.timeStamp > 0) ? e.timeStamp : Date.now();

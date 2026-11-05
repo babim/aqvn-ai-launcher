@@ -2033,7 +2033,22 @@
   /* UI zoom and hard refresh                                           */
   /* ------------------------------------------------------------------ */
 
+  function hasContainerBridge() {
+    return typeof window !== 'undefined' && Boolean(
+      window.__AQVN_CONTAINER__ || window.__AQVN_BRIDGE__
+    );
+  }
+
+  function getContainerBridge() {
+    if (typeof window === 'undefined') return null;
+    return window.__AQVN_CONTAINER__ || window.__AQVN_BRIDGE__ || null;
+  }
+
   function clampZoom(value) {
+    if (value !== null && typeof value === 'object') {
+      if ('scale' in value) value = value.scale;
+      else if ('value' in value) value = value.value;
+    }
     var n = value === null || value === undefined || value === '' ? 1 : Number(value);
     if (!isFinite(n)) {
       n = 1;
@@ -2044,6 +2059,27 @@
 
   function applyZoom(level) {
     var zoom = clampZoom(level);
+    var bridge = getContainerBridge();
+    if (bridge) {
+      if (typeof bridge.applyZoom === 'function') {
+        bridge.applyZoom(zoom);
+      } else if (typeof document !== 'undefined' && document.documentElement && document.documentElement.style) {
+        document.documentElement.style.zoom = String(zoom);
+      }
+      if (typeof document !== 'undefined' && document.body && document.body.style) {
+        if (typeof document.body.style.removeProperty === 'function') {
+          document.body.style.removeProperty('zoom');
+        } else if (document.body.style.zoom !== undefined) {
+          delete document.body.style.zoom;
+        }
+      }
+      try {
+        window.localStorage.setItem(ZOOM_KEY, String(zoom));
+      } catch (err) {
+        /* storage is optional */
+      }
+      return zoom;
+    }
     document.body.style.zoom = String(zoom);
     try {
       window.localStorage.setItem(ZOOM_KEY, String(zoom));
@@ -2055,6 +2091,13 @@
 
   function readZoom() {
     try {
+      var bridge = getContainerBridge();
+      if (bridge && typeof bridge.readZoom === 'function') {
+        return bridge.readZoom();
+      }
+      if (bridge && typeof document !== 'undefined' && document.documentElement && document.documentElement.style && document.documentElement.style.zoom) {
+        return clampZoom(document.documentElement.style.zoom);
+      }
       return clampZoom(window.localStorage.getItem(ZOOM_KEY));
     } catch (err) {
       return 1;
@@ -2062,14 +2105,26 @@
   }
 
   function zoomIn() {
+    var bridge = getContainerBridge();
+    if (bridge && typeof bridge.zoomIn === 'function') {
+      return bridge.zoomIn();
+    }
     return applyZoom(readZoom() + ZOOM_STEP);
   }
 
   function zoomOut() {
+    var bridge = getContainerBridge();
+    if (bridge && typeof bridge.zoomOut === 'function') {
+      return bridge.zoomOut();
+    }
     return applyZoom(readZoom() - ZOOM_STEP);
   }
 
   function resetZoom() {
+    var bridge = getContainerBridge();
+    if (bridge && typeof bridge.resetZoom === 'function') {
+      return bridge.resetZoom();
+    }
     return applyZoom(1);
   }
 
@@ -2173,7 +2228,7 @@
   }
 
   function handleShortcut(event) {
-    if (event.defaultPrevented) return false;
+    if (event.defaultPrevented || event.__aqvn_zoom_handled) return false;
     var key = String(event.key || '').toLowerCase();
     if (key === 'f5' || (event.ctrlKey && event.shiftKey && key === 'r')) {
       hardRefresh();
@@ -2201,6 +2256,8 @@
         return false;
       }
       event.preventDefault();
+      try { event.defaultPrevented = true; } catch (_) {}
+      try { event.__aqvn_zoom_handled = true; } catch (_) {}
       return true;
     }
     if (key === 'escape') {

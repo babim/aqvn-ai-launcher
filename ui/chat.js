@@ -715,7 +715,33 @@
     try {
       var raw = window.localStorage.getItem(OUTBOX_KEY);
       var list = raw ? JSON.parse(raw) : [];
-      return Array.isArray(list) ? list : [];
+      list = Array.isArray(list) ? list : [];
+
+      // Recover orphaned inflight items from interrupted previous flushes
+      if (!outboxFlush) {
+        var inflightRaw = window.localStorage.getItem('aqvn_outbox_inflight');
+        if (inflightRaw) {
+          try {
+            var inflightList = JSON.parse(inflightRaw);
+            if (Array.isArray(inflightList) && inflightList.length > 0) {
+              window.localStorage.removeItem('aqvn_outbox_inflight');
+              var seen = {};
+              list.forEach(function(e) { if (e && e.message_id) seen[e.message_id] = true; });
+              inflightList.forEach(function(item) {
+                if (item && item.message_id && !seen[item.message_id]) {
+                  list.unshift(item);
+                  seen[item.message_id] = true;
+                }
+              });
+              writeOutbox(list);
+            }
+          } catch (e) {
+            window.localStorage.removeItem('aqvn_outbox_inflight');
+          }
+        }
+      }
+
+      return list;
     } catch (err) {
       return [];
     }
@@ -869,10 +895,18 @@
           }
           return next(index + 1);
         },
-        function () {
+        function (err) {
           try {
             window.localStorage.removeItem('aqvn_outbox_inflight');
           } catch (e) {}
+          var msg = (err && err.message) || String(err || '');
+          var isAuth = /unauthor|forbidden|401|403|invalid session|session expired/i.test(msg);
+          if (state.expired || isAuth) {
+            list.slice(index).forEach(function(item) {
+              markQueueFailed(item.message_id, 'session expired');
+            });
+            return sent;
+          }
           if (!requeueOutbox(list.slice(index))) {
             showChatError(
               'Queued message could not be saved again: browser storage is unavailable.'
@@ -1019,7 +1053,7 @@
             var isAuth = /unauthor|forbidden|401|403|invalid session|login_required/i.test(msg);
             if (state.everConnected && isAuth) {
               sessionExpired();
-            } else {
+            } else if (dom.loginView ? dom.loginView.hidden : true) {
               showChatError(msg);
             }
             var errorObj = err instanceof Error ? err : new Error(msg);
@@ -1064,7 +1098,7 @@
         return;
       }
       setConnection('offline');
-      if (!state.expired) {
+      if (!state.expired && (dom.loginView ? dom.loginView.hidden : true)) {
         showChatError('Connection problem: ' + message);
       }
     });
@@ -1316,9 +1350,9 @@
   function onPtyOutput(data) {
     if (!data) return;
     var chunk = typeof data === 'string' ? data : (data.output || data.chunk || data.data || '');
-    if (chunk) {
-      appendTerminalOutput(chunk);
-    }
+    if (!chunk) return;
+    var targetTabId = (typeof data === 'object' && (data.tab_id || data.tabId || data.session_id)) ? (data.tab_id || data.tabId || data.session_id) : null;
+    appendTerminalOutput(chunk, targetTabId);
   }
 
   function setTerminalCollapsed(collapsed) {
@@ -1422,17 +1456,21 @@
     return html;
   }
 
-  function appendTerminalOutput(text) {
-    if (!dom.terminalOutput || text == null) return;
-    var activeTab = state.terminalTabs.find(function(t) { return t.id === state.activeTerminalTabId; });
+  function appendTerminalOutput(text, targetTabId) {
+    if (text == null) return;
+    var targetId = targetTabId != null ? targetTabId : state.activeTerminalTabId;
+    var targetTab = state.terminalTabs.find(function(t) { return t.id === targetId || t.name === targetId; });
     var strText = String(text);
-    if (activeTab) {
-      activeTab.output += strText;
-      var lines = activeTab.output.split('\n');
+    if (targetTab) {
+      targetTab.output += strText;
+      var lines = targetTab.output.split('\n');
       if (lines.length > 2000) {
-        activeTab.output = lines.slice(-2000).join('\n');
+        targetTab.output = lines.slice(-2000).join('\n');
       }
     }
+    if (!dom.terminalOutput) return;
+    if (targetTab && targetTab.id !== state.activeTerminalTabId) return;
+
     var html = parseAnsiToHtml(strText);
     if (typeof dom.terminalOutput.insertAdjacentHTML === 'function') {
       dom.terminalOutput.insertAdjacentHTML('beforeend', html);
@@ -1441,6 +1479,15 @@
       dom.terminalOutput.textContent = (dom.terminalOutput.textContent || '') + cleanText;
       if (dom.terminalOutput.innerHTML !== undefined) {
         dom.terminalOutput.innerHTML = (dom.terminalOutput.innerHTML || '') + html;
+      }
+    }
+
+    if (dom.terminalOutput.childNodes && dom.terminalOutput.childNodes.length > 2000) {
+      var removeCount = dom.terminalOutput.childNodes.length - 2000;
+      for (var i = 0; i < removeCount; i++) {
+        if (dom.terminalOutput.firstChild) {
+          dom.terminalOutput.removeChild(dom.terminalOutput.firstChild);
+        }
       }
     }
     dom.terminalOutput.scrollTop = dom.terminalOutput.scrollHeight;

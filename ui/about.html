@@ -192,8 +192,8 @@
       </div>
 
       <div class="actions">
-        <a href="help.html" class="btn btn-secondary" target="_blank" rel="noopener">Shortcuts</a>
-        <a href="settings.html" class="btn btn-secondary" target="_blank" rel="noopener">Settings</a>
+        <button id="shortcuts-btn" class="btn btn-secondary" type="button">Shortcuts</button>
+        <button id="settings-btn" class="btn btn-secondary" type="button">Settings</button>
         <button id="close-btn" class="btn btn-primary" type="button">Close</button>
       </div>
     </div>
@@ -203,12 +203,32 @@
     </footer>
 
     <script>
-      document.getElementById('close-btn').addEventListener('click', function() {
+      function invokeIpc(cmd) {
         if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function') {
-          window.__TAURI_INTERNALS__.invoke('close_current_window');
-        } else {
-          window.close();
+          return window.__TAURI_INTERNALS__.invoke(cmd);
         }
+        if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+          return window.__TAURI__.core.invoke(cmd);
+        }
+        return Promise.reject(new Error('no tauri ipc'));
+      }
+
+      document.getElementById('settings-btn').addEventListener('click', function() {
+        invokeIpc('open_settings').catch(function() {
+          window.location.href = 'settings.html';
+        });
+      });
+
+      document.getElementById('shortcuts-btn').addEventListener('click', function() {
+        invokeIpc('open_help').catch(function() {
+          window.location.href = 'help.html';
+        });
+      });
+
+      document.getElementById('close-btn').addEventListener('click', function() {
+        invokeIpc('close_current_window').catch(function() {
+          window.close();
+        });
       });
     </script>
   </body>

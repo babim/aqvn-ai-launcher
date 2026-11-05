@@ -354,7 +354,10 @@ impl Upstream {
         let client = build_client(tls_ca_cert_path.as_ref(), tls_skip_verify)?;
         let cookie_path = cookie_file_path(target.origin());
         let jar = if cookie_path.exists() {
-            CookieJar::load_from_file(&cookie_path).unwrap_or_default()
+            let mut j = CookieJar::load_from_file(&cookie_path).unwrap_or_default();
+            // Clear ephemeral CSRF and runtime_id on boot to force fresh handshake with live server
+            j.clear_csrf();
+            j
         } else {
             CookieJar::new()
         };
@@ -418,8 +421,16 @@ impl Upstream {
     /// Returns Ok(Some((runtime_id, token))) if bootstrapped,
     /// or Ok(None) if upstream redirected (session/login required).
     pub async fn csrf(&self) -> Result<Option<(String, String)>, String> {
+        self.csrf_with_option(false).await
+    }
+
+    /// CSRF token and runtime id, with option to force fresh bootstrap.
+    pub async fn csrf_with_option(
+        &self,
+        force_refresh: bool,
+    ) -> Result<Option<(String, String)>, String> {
         let mut jar = self.jar.lock().await;
-        if jar.is_bootstrapped() {
+        if !force_refresh && jar.is_bootstrapped() {
             let runtime_id = jar.runtime_id().unwrap_or_default().to_string();
             let token = jar.csrf_token().unwrap_or_default().to_string();
             return Ok(Some((runtime_id, token)));

@@ -138,6 +138,13 @@ impl CookieJar {
         self.csrf_value = None;
     }
 
+    /// Clears ephemeral runtime id and CSRF value while preserving session cookies.
+    pub fn clear_csrf(&mut self) {
+        self.runtime_id = None;
+        self.csrf_value = None;
+        self.cookies.retain(|k, _| !k.starts_with(CSRF_PREFIX));
+    }
+
     /// Loads a persisted cookie jar from disk JSON.
     pub fn load_from_file(path: &Path) -> Option<Self> {
         let bytes = std::fs::read(path).ok()?;

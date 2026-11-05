@@ -422,8 +422,13 @@ async fn handle_proxy_csrf(
             state.port(),
         );
     }
+    let force_refresh = method == Method::POST
+        || headers
+            .get(header::CACHE_CONTROL)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|c| c.contains("no-store") || c.contains("no-cache"));
     let upstream = state.upstream().await;
-    let response = match upstream.csrf().await {
+    let response = match upstream.csrf_with_option(force_refresh).await {
         Ok(Some((runtime_id, token))) => {
             Json(json!({ "ok": true, "runtime_id": runtime_id, "token": token })).into_response()
         }

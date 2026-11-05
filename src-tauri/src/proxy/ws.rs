@@ -71,6 +71,9 @@ pub fn parse_watchdog_config(path_and_query: &str) -> (Duration, Duration, Strin
         path_and_query.to_string()
     };
 
+    let heartbeat = heartbeat.max(Duration::from_millis(1));
+    let timeout = timeout.max(Duration::from_millis(1));
+
     (heartbeat, timeout, clean_path)
 }
 
@@ -268,5 +271,23 @@ mod tests {
         };
         assert_eq!(frame.code, 1000);
         assert_eq!(frame.reason.as_str(), "done");
+    }
+
+    #[test]
+    fn zero_watchdog_overrides_are_clamped() {
+        let (heartbeat, timeout, clean_path) =
+            parse_watchdog_config("/ws?heartbeat_interval_ms=0&inactivity_timeout_ms=0");
+        assert!(heartbeat > Duration::ZERO);
+        assert!(timeout > Duration::ZERO);
+        assert_eq!(clean_path, "/ws");
+    }
+
+    #[test]
+    fn non_zero_watchdog_overrides_are_preserved() {
+        let (heartbeat, timeout, clean_path) =
+            parse_watchdog_config("/ws?heartbeat_interval_ms=500&inactivity_timeout_ms=2000");
+        assert_eq!(heartbeat, Duration::from_millis(500));
+        assert_eq!(timeout, Duration::from_millis(2000));
+        assert_eq!(clean_path, "/ws");
     }
 }

@@ -336,6 +336,11 @@ impl GatewayClient {
         (handle, abort_handle, join_handle)
     }
 
+    /// Creates a tokio interval for periodic keepalive pings.
+    pub fn ping_interval(&self) -> tokio::time::Interval {
+        tokio::time::interval(Duration::from_secs(self.config.ping_interval_secs.max(1)))
+    }
+
     async fn run_loop(
         &self,
         connected: Arc<AtomicBool>,
@@ -737,7 +742,7 @@ impl GatewayClient {
         }
 
         let mut ping_interval =
-            tokio::time::interval(Duration::from_secs(self.config.ping_interval_secs));
+            tokio::time::interval(Duration::from_secs(self.config.ping_interval_secs.max(1)));
         ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         ping_interval.tick().await;
 
@@ -1007,5 +1012,21 @@ pub async fn run_supervised_with_reconnect(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn zero_ping_interval_is_clamped() {
+        let config = GatewayConfig {
+            ping_interval_secs: 0,
+            ..Default::default()
+        };
+        let client = GatewayClient::new(config);
+        let mut interval = client.ping_interval();
+        interval.tick().await;
     }
 }

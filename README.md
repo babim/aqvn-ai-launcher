@@ -225,6 +225,57 @@ DISPLAY=:97 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./src-tauri/target/release/aqvn-wor
 
 ---
 
+## Headless Agent (aqvn-agent)
+
+`aqvn-agent` is a standalone headless CLI/daemon built from the same crate as the desktop client. It uses no GTK/WebKit, so it runs over SSH or on servers without `DISPLAY`.
+
+### Build
+
+```bash
+cargo build --release --manifest-path src-tauri/Cargo.toml --bin aqvn-agent
+# -> src-tauri/target/release/aqvn-agent
+```
+
+### Usage
+
+Run with no arguments for the interactive menu:
+
+```
+1. Start (Foreground Agent Loop)     4. Uninstall Service (systemd)
+2. Configure (Settings & Scopes)     5. Status (Connectivity & Diagnostics)
+3. Install Service (systemd)         0. Exit
+```
+
+Non-interactive:
+
+```bash
+./src-tauri/target/release/aqvn-agent start \
+  --server https://a0.matmagoc.com --token "$AQVN_TOKEN" \
+  --label build-node-01 --gateway-id build-node-01 \
+  --scopes files,code_execution --workspace ~/Workspace --ping-interval 25
+```
+
+Commands: `start`, `config`, `install`, `uninstall`, `status`. Flags: `-s/--server`, `-u/--user`, `-p/--pass`, `-t/--token`, `-l/--label`, `--scopes`, `-w/--workspace`, `--gateway-id`, `--ping-interval <secs>`, `--tls-skip-verify`, `-c/--config`. `--scopes` accepts `all`/`none` or a list of `files`, `code_execution`, `browser`, `computer_use` (all enabled by default).
+
+Defaults: server `https://a0.matmagoc.com`, label `aqvn-<HOSTNAME>`, workspace `~/Workspace`, ping interval 25s. Settings file: `$XDG_CONFIG_HOME/net.aqvn.agent/settings.json`, else `~/.config/net.aqvn.agent/settings.json`; CLI flags override it.
+
+### Service Lifecycle
+
+```bash
+aqvn-agent install                 # user unit: ~/.config/systemd/user/aqvn-agent.service
+sudo aqvn-agent install --system   # system unit: /etc/systemd/system/aqvn-agent.service
+aqvn-agent status
+aqvn-agent uninstall               # stop, disable, remove unit file
+```
+
+The user unit is the default unless running as root, where the system unit is used; `--system` forces it.
+
+### Multi-Host Pool
+
+Multiple agents register under distinct `--gateway-id`/`--label`, so Agent Zero targets each host by label while remote execution (`connector_exec_op`) and file operations (`connector_file_op`) stay jailed to `--workspace`.
+
+---
+
 ## Testing & Verification
 
 The project provides automated tests across unit, integration, and performance layers:

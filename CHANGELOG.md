@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Standalone Headless Agent (`aqvn-agent`)**: New `[[bin]]` target (`src-tauri/src/bin/agent.rs`) providing an interactive menu, CLI flags (`--server`, `--token`, `--label`, `--scopes`, `--workspace`, `--gateway-id`, `--ping-interval`, `--tls-skip-verify`, `--config`), and `install` / `uninstall` / `status` systemd service lifecycle commands.
+- **Multi-Host Pool Identity & Remote Operations**: Distinct `gateway_id` / `host_label` registration with user or `--system` systemd units, exposing `connector_exec_op` remote execution and `connector_file_op` file operations sandboxed to the configured workspace.
+
+### Fixed
+- **Single-Point UI Zoom Normalization**: Zoom is applied once on `documentElement` and any leftover `body` zoom is cleared, so `Ctrl`/`Cmd` `+`/`-` no longer compounds two zoom surfaces (`ui/chat.js`, `ui/container.js`).
+
 ## [0.1.9] - 2026-11-01
 
 ### Added

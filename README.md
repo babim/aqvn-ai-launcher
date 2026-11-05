@@ -272,7 +272,7 @@ The user unit is the default unless running as root, where the system unit is us
 
 ### Multi-Host Pool
 
-Multiple agents register under distinct `--gateway-id`/`--label`, so Agent Zero targets each host by label while remote execution (`connector_exec_op`) and file operations (`connector_file_op`) stay jailed to `--workspace`.
+Multiple agents register under distinct `--gateway-id`/`--label`, so the AQVN server targets each host by label while remote execution (`connector_exec_op`) and file operations (`connector_file_op`) stay jailed to `--workspace`.
 
 ---
 

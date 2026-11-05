@@ -41,6 +41,7 @@ OPTIONS:
     --user                   Target user systemd unit (~/.config/systemd/user)
     --system                 Target system systemd unit (/etc/systemd/system)
     --gateway-id <ID>        Custom gateway ID
+    --ping-interval <SECS>   Keepalive ping interval in seconds
     --tls-skip-verify        Accept self-signed or invalid TLS certs
     -h, --help               Print help information
     -V, --version            Print version information
@@ -76,6 +77,17 @@ fn default_workspace_path() -> String {
     DEFAULT_WORKSPACE_PATH.to_string()
 }
 
+fn default_ping_interval_secs() -> u64 {
+    if let Ok(v) = env::var("AQVN_PING_INTERVAL_SECS") {
+        if let Ok(secs) = v.trim().parse::<u64>() {
+            if secs > 0 {
+                return secs;
+            }
+        }
+    }
+    aqvn_workspace_lib::connector::client::DEFAULT_PING_INTERVAL_SECS
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -106,6 +118,8 @@ pub struct AgentSettings {
     pub scope_desktop: bool,
     #[serde(default)]
     pub allowed_paths: Vec<String>,
+    #[serde(default = "default_ping_interval_secs")]
+    pub ping_interval_secs: u64,
     #[serde(default)]
     pub tls_skip_verify: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -127,6 +141,7 @@ impl Default for AgentSettings {
             scope_browser: true,
             scope_desktop: true,
             allowed_paths: Vec::new(),
+            ping_interval_secs: default_ping_interval_secs(),
             tls_skip_verify: false,
             tls_ca_cert_path: None,
         }
@@ -161,13 +176,17 @@ impl AgentSettings {
             } else {
                 self.gateway_id.clone()
             },
-            host_label: self.host_label.clone(),
+            host_label: if self.host_label.trim().is_empty() {
+                default_host_label()
+            } else {
+                self.host_label.clone()
+            },
             session_cookie: self.token.clone().or_else(|| self.password.clone()),
             scope_files: self.scope_files,
             scope_exec: self.scope_exec,
             scope_browser: self.scope_browser,
             scope_desktop: self.scope_desktop,
-            ping_interval_secs: aqvn_workspace_lib::connector::client::DEFAULT_PING_INTERVAL_SECS,
+            ping_interval_secs: self.ping_interval_secs,
             reconnect_delay_ms: aqvn_workspace_lib::connector::client::DEFAULT_RECONNECT_DELAY_MS,
             workspace_path: self.workspace_path.clone(),
             allowed_paths: self.allowed_paths.clone(),
@@ -237,6 +256,7 @@ pub struct CliOptions {
     pub scopes: Option<String>,
     pub workspace: Option<String>,
     pub gateway_id: Option<String>,
+    pub ping_interval: Option<u64>,
     pub tls_skip_verify: Option<bool>,
     pub config_path: Option<PathBuf>,
     pub user_unit: Option<bool>,
@@ -252,6 +272,7 @@ impl CliOptions {
             && self.scopes.is_none()
             && self.workspace.is_none()
             && self.gateway_id.is_none()
+            && self.ping_interval.is_none()
             && self.tls_skip_verify.is_none()
             && self.config_path.is_none()
             && self.user_unit.is_none()
@@ -281,6 +302,9 @@ impl CliOptions {
         }
         if let Some(ref gw) = self.gateway_id {
             settings.gateway_id = gw.clone();
+        }
+        if let Some(interval) = self.ping_interval {
+            settings.ping_interval_secs = interval;
         }
         if let Some(skip) = self.tls_skip_verify {
             settings.tls_skip_verify = skip;
@@ -400,6 +424,13 @@ pub fn parse_cli_args(args: &[String]) -> Result<ParsedCli, String> {
                 }
                 "--gateway-id" => {
                     options.gateway_id = Some(get_val(&mut i)?);
+                }
+                "--ping-interval" => {
+                    let val = get_val(&mut i)?;
+                    let parsed_secs = val
+                        .parse::<u64>()
+                        .map_err(|e| format!("Invalid --ping-interval value: {e}"))?;
+                    options.ping_interval = Some(parsed_secs);
                 }
                 "--tls-skip-verify" => {
                     if let Some(ref v) = inline_val {
@@ -730,12 +761,23 @@ pub async fn run_start<W: Write>(
         let client = aqvn_workspace_lib::connector::GatewayClient::new(gateway_config);
         let (handle, join_handle) = client.start();
 
+        let handle_clone = handle.clone();
+        let handshake_logger = tokio::spawn(async move {
+            if let Ok(()) = handle_clone
+                .wait_for_handshake(Duration::from_secs(10))
+                .await
+            {
+                println!("Node successfully registered in Agent Zero client pool.");
+            }
+        });
+
         if let Some(stop_rx) = stop_signal {
             let _ = stop_rx.await;
         } else {
             let _ = tokio::signal::ctrl_c().await;
         }
 
+        handshake_logger.abort();
         writeln!(writer, "\nStopping aqvn-agent...")?;
         writer.flush()?;
         handle.stop();
@@ -1437,6 +1479,66 @@ mod tests {
     }
 
     #[test]
+    fn test_agent_host_pool_registration_settings_val_host_pool_001() {
+        let args = vec![
+            "start".to_string(),
+            "--server".to_string(),
+            "https://pool.agentzero.internal:55088".to_string(),
+            "--gateway-id".to_string(),
+            "deterministic-node-uuid-42".to_string(),
+            "--label".to_string(),
+            "Production-VPS-Singapore".to_string(),
+            "--scopes".to_string(),
+            "files,code_execution".to_string(),
+            "--ping-interval".to_string(),
+            "3".to_string(),
+        ];
+
+        let parsed = parse_cli_args(&args).expect("parse_cli_args succeeds");
+        assert_eq!(parsed.action, CliAction::Start);
+        assert_eq!(parsed.options.ping_interval, Some(3));
+        assert_eq!(
+            parsed.options.gateway_id.as_deref(),
+            Some("deterministic-node-uuid-42")
+        );
+        assert_eq!(
+            parsed.options.label.as_deref(),
+            Some("Production-VPS-Singapore")
+        );
+
+        let mut settings = AgentSettings::default();
+        parsed.options.apply_to(&mut settings);
+
+        assert_eq!(settings.gateway_id, "deterministic-node-uuid-42");
+        assert_eq!(settings.host_label, "Production-VPS-Singapore");
+        assert_eq!(settings.active_scopes(), vec!["files", "code_execution"]);
+        assert_eq!(settings.ping_interval_secs, 3);
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let gw_config = settings.to_gateway_config();
+            assert_eq!(gw_config.gateway_id, "deterministic-node-uuid-42");
+            assert_eq!(gw_config.host_label, "Production-VPS-Singapore");
+            assert_eq!(gw_config.active_scopes(), vec!["files", "code_execution"]);
+            assert_eq!(gw_config.ping_interval_secs, 3);
+            assert!(gw_config.scope_files);
+            assert!(gw_config.scope_exec);
+            assert!(!gw_config.scope_browser);
+            assert!(!gw_config.scope_desktop);
+
+            // Empty fallbacks
+            let empty_settings = AgentSettings {
+                gateway_id: "".to_string(),
+                host_label: "".to_string(),
+                ..Default::default()
+            };
+            let fallback_cfg = empty_settings.to_gateway_config();
+            assert_eq!(fallback_cfg.gateway_id, default_gateway_id());
+            assert_eq!(fallback_cfg.host_label, default_host_label());
+        }
+    }
+
+    #[test]
     fn test_parse_cli_args_invalid_arguments_val_agent_cli_003() {
         // Unknown option
         let res = parse_cli_args(&["start".to_string(), "--invalid-option".to_string()]);
@@ -1534,8 +1636,12 @@ mod tests {
         assert_eq!(resolve_working_directory(abs_path), PathBuf::from(abs_path));
     }
 
+    static TEST_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_resolve_systemd_unit_path_val_agent_cli_004() {
+        let _lock = TEST_ENV_MUTEX.lock().unwrap();
+        env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
         let user_path = resolve_systemd_unit_path(true);
         assert!(user_path.ends_with("systemd/user/aqvn-agent.service"));
 
@@ -1584,6 +1690,7 @@ mod tests {
 
     #[test]
     fn test_run_install_and_uninstall_lifecycle_val_agent_cli_004() {
+        let _lock = TEST_ENV_MUTEX.lock().unwrap();
         let temp_dir =
             env::temp_dir().join(format!("test_systemd_lifecycle_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);

@@ -430,6 +430,9 @@ pub fn parse_cli_args(args: &[String]) -> Result<ParsedCli, String> {
                     let parsed_secs = val
                         .parse::<u64>()
                         .map_err(|e| format!("Invalid --ping-interval value: {e}"))?;
+                    if parsed_secs == 0 {
+                        return Err("Invalid --ping-interval value: must be >= 1".to_string());
+                    }
                     options.ping_interval = Some(parsed_secs);
                 }
                 "--tls-skip-verify" => {
@@ -1624,6 +1627,27 @@ mod tests {
         assert_eq!(parsed.options.user.as_deref(), Some("bob"));
         assert_eq!(parsed.options.token.as_deref(), Some("inline_tok"));
         assert_eq!(parsed.options.tls_skip_verify, Some(true));
+    }
+
+    #[test]
+    fn test_parse_cli_args_rejects_zero_ping_interval() {
+        let space = vec![
+            "start".to_string(),
+            "--ping-interval".to_string(),
+            "0".to_string(),
+        ];
+        let err = parse_cli_args(&space).expect_err("zero ping interval must be rejected");
+        assert!(
+            err.contains("must be >= 1"),
+            "unexpected error message: {err}"
+        );
+
+        let equals = vec!["start".to_string(), "--ping-interval=0".to_string()];
+        let err = parse_cli_args(&equals).expect_err("zero inline ping interval must be rejected");
+        assert!(
+            err.contains("must be >= 1"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[test]

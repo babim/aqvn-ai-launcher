@@ -332,6 +332,10 @@ impl Handler for ClientHandler {
         _channel: Channel<Msg>,
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
+        const MAX_ACTIVE_CHANNELS: usize = 10;
+        if self.channels.len() >= MAX_ACTIVE_CHANNELS {
+            return Ok(false);
+        }
         Ok(true)
     }
 
@@ -570,7 +574,7 @@ fn server_config() -> Result<Arc<russh::server::Config>, String> {
         methods: russh::MethodSet::PASSWORD,
         keys: vec![host_key],
         auth_rejection_time: Duration::from_millis(100),
-        inactivity_timeout: None,
+        inactivity_timeout: Some(Duration::from_secs(600)),
         ..Default::default()
     }))
 }

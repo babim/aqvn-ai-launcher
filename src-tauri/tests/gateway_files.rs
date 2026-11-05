@@ -1296,6 +1296,7 @@ async fn test_unified_sandbox_allowed_paths() {
 
 #[tokio::test]
 async fn test_unified_sandbox_in_rfc_and_ssh() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
     use axum::body::Body;
     use axum::http::{header, Request, StatusCode};
     use base64::Engine;
@@ -1596,6 +1597,109 @@ async fn test_op_patch_sha256_verification_and_rollback() {
     let good_reply: Value = serde_json::from_str(&good_reply_str).expect("parse patch reply");
     assert_eq!(good_reply["success"], true);
     assert!(good_reply.get("file_sha256").is_some());
+
+    set_test_sandbox(None);
+    let _ = std::fs::remove_dir_all(&sandbox_dir);
+}
+
+#[tokio::test]
+async fn test_bounded_read_clamp() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (sandbox_dir, sandbox) = create_temp_sandbox();
+    set_test_sandbox(Some(sandbox.clone()));
+
+    let target_file = sandbox_dir.join("test_read.txt");
+    std::fs::write(&target_file, "1234567890").unwrap();
+
+    // Request huge length exceeding 8MB clamp
+    let read_op = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-read-huge",
+        "action": "read",
+        "path": "test_read.txt",
+        "length": 20 * 1024 * 1024
+    });
+    let read_reply_str = files::handle_file_op_with_sandbox(&read_op, &sandbox).await;
+    let read_reply: Value = serde_json::from_str(&read_reply_str).unwrap();
+    assert_eq!(read_reply["success"], true);
+    assert_eq!(read_reply["content"], "1234567890");
+
+    set_test_sandbox(None);
+    let _ = std::fs::remove_dir_all(&sandbox_dir);
+}
+
+#[tokio::test]
+async fn test_tree_update_debouncing_and_exclusions() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (sandbox_dir, sandbox) = create_temp_sandbox();
+    set_test_sandbox(Some(sandbox.clone()));
+    files::clear_tree_cache();
+
+    // Create regular dir and excluded dirs
+    let src_dir = sandbox_dir.join("src");
+    let nm_dir = sandbox_dir.join("node_modules");
+    let target_dir = sandbox_dir.join("target");
+    let dist_dir = sandbox_dir.join("dist");
+
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(&nm_dir).unwrap();
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::create_dir_all(&dist_dir).unwrap();
+
+    std::fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+    std::fs::write(nm_dir.join("package.json"), "{}").unwrap();
+    std::fs::write(target_dir.join("binary"), "bin").unwrap();
+    std::fs::write(dist_dir.join("bundle.js"), "js").unwrap();
+
+    let snapshot = files::generate_remote_tree_update(&sandbox, 3);
+    let entries = snapshot["entries"].as_array().expect("entries array");
+
+    let entry_names: Vec<String> = entries
+        .iter()
+        .filter_map(|e| e["name"].as_str().map(String::from))
+        .collect();
+
+    assert!(entry_names.contains(&"src".to_string()));
+    assert!(!entry_names.contains(&"node_modules".to_string()));
+    assert!(!entry_names.contains(&"target".to_string()));
+    assert!(!entry_names.contains(&"dist".to_string()));
+
+    // Verify debounce returns cached snapshot within 250ms
+    let snapshot2 = files::generate_remote_tree_update(&sandbox, 3);
+    assert_eq!(snapshot, snapshot2);
+
+    files::clear_tree_cache();
+    set_test_sandbox(None);
+    let _ = std::fs::remove_dir_all(&sandbox_dir);
+}
+
+#[tokio::test]
+async fn test_atomic_write_preserves_original_on_mismatch() {
+    let _lock = TEST_SANDBOX_LOCK.lock().await;
+    let (sandbox_dir, sandbox) = create_temp_sandbox();
+    set_test_sandbox(Some(sandbox.clone()));
+
+    let target_filename = "preserve_original.txt";
+    let on_disk = sandbox_dir.join(target_filename);
+    std::fs::write(&on_disk, "ORIGINAL_UNTOUCHED_CONTENT").unwrap();
+
+    let bad_write = json!({
+        "type": MSG_TYPE_FILE_OP,
+        "id": "req-bad-sha",
+        "action": "write",
+        "path": target_filename,
+        "content": "NEW_CONTENT_BUT_WRONG_SHA",
+        "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    });
+
+    let reply_str = files::handle_file_op_with_sandbox(&bad_write, &sandbox).await;
+    let reply: Value = serde_json::from_str(&reply_str).unwrap();
+    assert_eq!(reply["success"], false);
+    assert_eq!(reply["rollback"], true);
+
+    // Verify original content was completely preserved
+    let current_content = std::fs::read_to_string(&on_disk).unwrap();
+    assert_eq!(current_content, "ORIGINAL_UNTOUCHED_CONTENT");
 
     set_test_sandbox(None);
     let _ = std::fs::remove_dir_all(&sandbox_dir);

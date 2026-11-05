@@ -306,8 +306,11 @@ fn test_capabilities_and_build_manifest_permissions() {
     }
 }
 
+static ZOOM_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn test_dispatch_action_handles_native_set_zoom() {
+    let _lock = ZOOM_TEST_LOCK.lock().unwrap();
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let ctx_rs = std::fs::read_to_string(manifest_dir.join("src/app/context_menu.rs")).unwrap();
     assert!(
@@ -358,6 +361,7 @@ fn test_dispatch_action_handles_native_set_zoom() {
 
 #[test]
 fn test_end_to_end_zoom_scale_synchronization() {
+    let _lock = ZOOM_TEST_LOCK.lock().unwrap();
     // VAL-CROSS-001: End-to-end zoom scale synchronization
     reset_zoom_scale();
     assert_eq!(get_zoom_percent(), 100);
@@ -393,6 +397,7 @@ fn test_native_zoom_hotkeys_configured() {
 
 #[test]
 fn test_dispatch_action_absolute_scale_sync() {
+    let _lock = ZOOM_TEST_LOCK.lock().unwrap();
     // VAL-WIN-002: Webview builder native engine hotkeys disabled and absolute scale dispatch
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let lib_rs = std::fs::read_to_string(manifest_dir.join("src/lib.rs")).unwrap();

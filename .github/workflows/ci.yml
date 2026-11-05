@@ -15,6 +15,7 @@ jobs:
   lint:
     name: Clippy & Rustfmt
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,6 +39,7 @@ jobs:
   test:
     name: Test Suite (Rust & Node)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -59,4 +61,6 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Run Node.js tests
-        run: node --test tools/tests/test_chat_handlers.mjs
+        run: |
+          node tools/tests/test_vendor_assets.mjs
+          node --test tools/tests/test_chat_handlers.mjs

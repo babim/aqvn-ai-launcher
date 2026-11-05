@@ -913,6 +913,7 @@ async fn test_cdp_multi_tab_management() {
 
 #[tokio::test]
 async fn test_cdp_profile_pid_isolation() {
+    let _guard = TEST_LOCK.lock().await;
     let temp_dir = std::env::temp_dir();
     let current_pid = std::process::id();
     let dead_pid = 4_194_300; // PID beyond max on standard Linux/macOS

@@ -342,7 +342,9 @@ fn op_read(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sa
     };
 
     let offset = parse_file_offset(envelope).unwrap_or(0) as usize;
-    let length = parse_file_length(envelope).unwrap_or(total_size.saturating_sub(offset));
+    const MAX_READ_CHUNK_BYTES: usize = 8 * 1024 * 1024; // 8 MB per chunk
+    let requested_length = parse_file_length(envelope).unwrap_or(total_size.saturating_sub(offset));
+    let length = requested_length.min(MAX_READ_CHUNK_BYTES);
 
     let start = offset.min(total_size);
     let end = (start + length).min(total_size);
@@ -524,8 +526,65 @@ fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &S
             Err(e) => (Err(e), None),
         }
     } else {
-        match fs::write(&jailed, &bytes) {
-            Ok(()) => (Ok(()), Some(bytes.len())),
+        let parent_dir = jailed.parent().unwrap_or_else(|| Path::new("."));
+        let file_stem = jailed
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file");
+        static TMP_WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let seq = TMP_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp_path =
+            parent_dir.join(format!(".{}.tmp.{}.{}", file_stem, std::process::id(), seq));
+
+        match fs::write(&tmp_path, &bytes) {
+            Ok(()) => {
+                let maybe_expected = parse_expected_sha256(envelope);
+                if let Some(ref expected) = maybe_expected {
+                    let clean_expected = expected
+                        .trim()
+                        .strip_prefix("sha256:")
+                        .unwrap_or(expected.trim());
+                    if !clean_expected.is_empty() {
+                        let computed = compute_file_sha256(&tmp_path).unwrap_or_default();
+                        if !clean_expected.eq_ignore_ascii_case(&computed) {
+                            let _ = fs::remove_file(&tmp_path);
+                            let mut err_reply: Value = serde_json::from_str(&make_error_reply(
+                                id,
+                                op_id,
+                                "write",
+                                Some(raw_path),
+                                format!(
+                                    "SHA-256 checksum mismatch: expected {clean_expected}, calculated {computed}"
+                                ),
+                            ))
+                            .unwrap_or_default();
+                            err_reply["file_sha256"] = json!(&computed);
+                            err_reply["expected_sha256"] = json!(clean_expected);
+                            err_reply["rollback"] = json!(true);
+                            let rollback_data = json!({
+                                "rollback": true,
+                                "file_sha256": &computed,
+                                "expected_sha256": clean_expected,
+                            });
+                            err_reply["data"] = rollback_data.clone();
+                            err_reply["result"] = rollback_data;
+                            return err_reply.to_string();
+                        }
+                    }
+                }
+                let rename_res = fs::rename(&tmp_path, &jailed).or_else(|_| {
+                    fs::copy(&tmp_path, &jailed).map(|_| {
+                        let _ = fs::remove_file(&tmp_path);
+                    })
+                });
+                match rename_res {
+                    Ok(()) => (Ok(()), Some(bytes.len())),
+                    Err(e) => {
+                        let _ = fs::remove_file(&tmp_path);
+                        (Err(e), None)
+                    }
+                }
+            }
             Err(e) => (Err(e), None),
         }
     };
@@ -1231,13 +1290,35 @@ fn op_files_rename(id: &str, op_id: &str, envelope: &Value, sandbox: &Sandbox) -
 
 // ------------------------------------------------------------- remote tree update
 
+type TreeCacheEntry = (std::time::Instant, Vec<std::path::PathBuf>, usize, Value);
+static LAST_TREE_UPDATE: RwLock<Option<TreeCacheEntry>> = RwLock::new(None);
+
+/// Clears the cached remote tree snapshot.
+pub fn clear_tree_cache() {
+    if let Ok(mut lock) = LAST_TREE_UPDATE.write() {
+        *lock = None;
+    }
+}
+
 /// Generates a remote tree snapshot bounded to `max_depth` (default 3) for the given sandbox.
+/// Debounces rapid calls within 250ms for identical roots and max_depth.
 pub fn generate_remote_tree_update(sandbox: &Sandbox, max_depth: usize) -> Value {
+    let roots = sandbox.canonical_roots().unwrap_or_default();
+    if let Ok(lock) = LAST_TREE_UPDATE.read() {
+        if let Some((instant, ref cached_roots, cached_depth, ref cached_val)) = *lock {
+            if instant.elapsed() < std::time::Duration::from_millis(250)
+                && cached_depth == max_depth
+                && *cached_roots == roots
+            {
+                return cached_val.clone();
+            }
+        }
+    }
+
     let mut flat_entries = Vec::new();
     let mut file_count = 0usize;
     let mut dir_count = 0usize;
 
-    let roots = sandbox.canonical_roots().unwrap_or_default();
     let mut tree_nodes = Vec::new();
     for root in &roots {
         let mut root_nodes = build_tree_recursive(
@@ -1254,7 +1335,7 @@ pub fn generate_remote_tree_update(sandbox: &Sandbox, max_depth: usize) -> Value
 
     let total_count = flat_entries.len();
 
-    json!({
+    let res = json!({
         "type": MSG_TYPE_REMOTE_TREE_UPDATE,
         "op": MSG_TYPE_REMOTE_TREE_UPDATE,
         "workspace_path": "/a0",
@@ -1266,7 +1347,13 @@ pub fn generate_remote_tree_update(sandbox: &Sandbox, max_depth: usize) -> Value
         "total_count": total_count,
         "total_files": file_count,
         "total_dirs": dir_count,
-    })
+    });
+
+    if let Ok(mut lock) = LAST_TREE_UPDATE.write() {
+        *lock = Some((std::time::Instant::now(), roots, max_depth, res.clone()));
+    }
+
+    res
 }
 
 /// Alias for `generate_remote_tree_update`.
@@ -1297,7 +1384,7 @@ fn build_tree_recursive(
 
     for entry in sorted_entries {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
+        if name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist" {
             continue;
         }
 

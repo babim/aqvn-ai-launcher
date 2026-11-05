@@ -30,8 +30,18 @@ COMMANDS:
     status      Show connection status and diagnostics
 
 OPTIONS:
-    -h, --help       Print help information
-    -V, --version    Print version information
+    -s, --server <URL>       Agent Zero server URL
+    -u, --user <USER>        Username for authentication
+    -p, --pass <PASS>        Password for authentication
+    -t, --token <TOKEN>      Session token or API key
+    -l, --label <LABEL>      Human-readable host label
+    --scopes <SCOPES>        Enabled scopes (files,code_execution,browser,computer_use)
+    -w, --workspace <PATH>   Workspace root directory
+    -c, --config <PATH>      Path to settings.json
+    --gateway-id <ID>        Custom gateway ID
+    --tls-skip-verify        Accept self-signed or invalid TLS certs
+    -h, --help               Print help information
+    -V, --version            Print version information
 "#;
 
 pub fn format_version() -> String {
@@ -181,8 +191,8 @@ impl AgentSettings {
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| io::Error::other(e.to_string()))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| io::Error::other(e.to_string()))?;
         std::fs::write(p, json)?;
         Ok(())
     }
@@ -215,7 +225,68 @@ pub fn default_settings_path() -> PathBuf {
     env::temp_dir().join("net.aqvn.agent").join("settings.json")
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CliOptions {
+    pub server: Option<String>,
+    pub user: Option<String>,
+    pub pass: Option<String>,
+    pub token: Option<String>,
+    pub label: Option<String>,
+    pub scopes: Option<String>,
+    pub workspace: Option<String>,
+    pub gateway_id: Option<String>,
+    pub tls_skip_verify: Option<bool>,
+    pub config_path: Option<PathBuf>,
+    pub user_unit: Option<bool>,
+}
+
+impl CliOptions {
+    pub fn is_empty(&self) -> bool {
+        self.server.is_none()
+            && self.user.is_none()
+            && self.pass.is_none()
+            && self.token.is_none()
+            && self.label.is_none()
+            && self.scopes.is_none()
+            && self.workspace.is_none()
+            && self.gateway_id.is_none()
+            && self.tls_skip_verify.is_none()
+            && self.config_path.is_none()
+            && self.user_unit.is_none()
+    }
+
+    pub fn apply_to(&self, settings: &mut AgentSettings) {
+        if let Some(ref server) = self.server {
+            settings.server_url = server.clone();
+        }
+        if let Some(ref user) = self.user {
+            settings.username = Some(user.clone());
+        }
+        if let Some(ref pass) = self.pass {
+            settings.password = Some(pass.clone());
+        }
+        if let Some(ref token) = self.token {
+            settings.token = Some(token.clone());
+        }
+        if let Some(ref label) = self.label {
+            settings.host_label = label.clone();
+        }
+        if let Some(ref scopes) = self.scopes {
+            parse_scopes_into(scopes, settings);
+        }
+        if let Some(ref ws) = self.workspace {
+            settings.workspace_path = ws.clone();
+        }
+        if let Some(ref gw) = self.gateway_id {
+            settings.gateway_id = gw.clone();
+        }
+        if let Some(skip) = self.tls_skip_verify {
+            settings.tls_skip_verify = skip;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliAction {
     Help,
     Version,
@@ -227,20 +298,153 @@ pub enum CliAction {
     Menu,
 }
 
-pub fn parse_action(args: &[String]) -> CliAction {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedCli {
+    pub action: CliAction,
+    pub options: CliOptions,
+}
+
+pub fn parse_cli_args(args: &[String]) -> Result<ParsedCli, String> {
     if args.is_empty() {
-        return CliAction::Menu;
+        return Ok(ParsedCli {
+            action: CliAction::Menu,
+            options: CliOptions::default(),
+        });
     }
 
-    match args[0].as_str() {
-        "-h" | "--help" | "help" => CliAction::Help,
-        "-V" | "--version" | "version" => CliAction::Version,
-        "start" => CliAction::Start,
-        "config" => CliAction::Config,
-        "install" => CliAction::Install,
-        "uninstall" => CliAction::Uninstall,
-        "status" => CliAction::Status,
-        _ => CliAction::Help,
+    let mut action: Option<CliAction> = None;
+    let mut options = CliOptions::default();
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+
+        if arg == "-h" || arg == "--help" {
+            action = Some(CliAction::Help);
+            i += 1;
+            continue;
+        }
+        if arg == "-V" || arg == "--version" {
+            action = Some(CliAction::Version);
+            i += 1;
+            continue;
+        }
+
+        if arg.starts_with('-') {
+            let (key, inline_val) = match arg.split_once('=') {
+                Some((k, v)) => (k, Some(v.to_string())),
+                None => (arg.as_str(), None),
+            };
+
+            let get_val = |i: &mut usize| -> Result<String, String> {
+                if let Some(ref v) = inline_val {
+                    Ok(v.clone())
+                } else if *i + 1 < args.len() {
+                    *i += 1;
+                    Ok(args[*i].clone())
+                } else {
+                    Err(format!("Option '{key}' requires a value"))
+                }
+            };
+
+            match key {
+                "-s" | "--server" => {
+                    options.server = Some(get_val(&mut i)?);
+                }
+                "-u" | "--user" => {
+                    if action == Some(CliAction::Install)
+                        && inline_val.is_none()
+                        && (i + 1 >= args.len() || args[i + 1].starts_with('-'))
+                    {
+                        options.user_unit = Some(true);
+                    } else {
+                        options.user = Some(get_val(&mut i)?);
+                    }
+                }
+                "--system" => {
+                    options.user_unit = Some(false);
+                }
+                "-p" | "--pass" | "--password" => {
+                    options.pass = Some(get_val(&mut i)?);
+                }
+                "-t" | "--token" => {
+                    options.token = Some(get_val(&mut i)?);
+                }
+                "-l" | "--label" => {
+                    options.label = Some(get_val(&mut i)?);
+                }
+                "--scopes" => {
+                    options.scopes = Some(get_val(&mut i)?);
+                }
+                "-w" | "--workspace" => {
+                    options.workspace = Some(get_val(&mut i)?);
+                }
+                "-c" | "--config" => {
+                    let val = get_val(&mut i)?;
+                    options.config_path = Some(PathBuf::from(val));
+                }
+                "--gateway-id" => {
+                    options.gateway_id = Some(get_val(&mut i)?);
+                }
+                "--tls-skip-verify" => {
+                    if let Some(ref v) = inline_val {
+                        let parsed_bool = v.parse::<bool>().unwrap_or(true);
+                        options.tls_skip_verify = Some(parsed_bool);
+                    } else {
+                        options.tls_skip_verify = Some(true);
+                    }
+                }
+                other => {
+                    return Err(format!("Unknown option '{other}'"));
+                }
+            }
+        } else {
+            let cmd = match arg.as_str() {
+                "start" => CliAction::Start,
+                "config" => CliAction::Config,
+                "install" => CliAction::Install,
+                "uninstall" => CliAction::Uninstall,
+                "status" => CliAction::Status,
+                "help" => CliAction::Help,
+                "version" => CliAction::Version,
+                other => {
+                    return Err(format!("Unknown command or unexpected argument '{other}'"));
+                }
+            };
+
+            if let Some(existing) = action {
+                if existing != cmd {
+                    return Err(format!("Unexpected argument '{arg}'"));
+                }
+            } else {
+                action = Some(cmd);
+            }
+        }
+
+        i += 1;
+    }
+
+    let final_action = match action {
+        Some(a) => a,
+        None => {
+            if options.is_empty() {
+                CliAction::Menu
+            } else {
+                CliAction::Start
+            }
+        }
+    };
+
+    Ok(ParsedCli {
+        action: final_action,
+        options,
+    })
+}
+
+pub fn parse_action(args: &[String]) -> CliAction {
+    match parse_cli_args(args) {
+        Ok(parsed) => parsed.action,
+        Err(_) => CliAction::Help,
     }
 }
 
@@ -598,10 +802,21 @@ pub async fn run_menu<R: BufRead, W: Write>(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
-    let action = parse_action(&args);
-    let settings_path = default_settings_path();
+    let parsed = match parse_cli_args(&args) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("Error: {err}\n\n{}", format_help());
+            std::process::exit(1);
+        }
+    };
 
-    match action {
+    let settings_path = parsed
+        .options
+        .config_path
+        .clone()
+        .unwrap_or_else(default_settings_path);
+
+    match parsed.action {
         CliAction::Version => {
             print!("{}", format_version());
         }
@@ -609,17 +824,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             print!("{}", format_help());
         }
         CliAction::Start => {
-            let settings = AgentSettings::load_from_file(&settings_path);
+            let mut settings = AgentSettings::load_from_file(&settings_path);
+            parsed.options.apply_to(&mut settings);
             run_start(&mut io::stdout(), &settings, None).await?;
         }
         CliAction::Config => {
             let mut settings = AgentSettings::load_from_file(&settings_path);
-            run_configure(
-                &mut io::stdin().lock(),
-                &mut io::stdout(),
-                &mut settings,
-                &settings_path,
-            )?;
+            if parsed.options.is_empty() {
+                run_configure(
+                    &mut io::stdin().lock(),
+                    &mut io::stdout(),
+                    &mut settings,
+                    &settings_path,
+                )?;
+            } else {
+                parsed.options.apply_to(&mut settings);
+                settings.save_to_file(&settings_path)?;
+                println!(
+                    "Configuration updated and saved to {}",
+                    settings_path.display()
+                );
+            }
         }
         CliAction::Install => {
             run_install(&mut io::stdout())?;
@@ -628,11 +853,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_uninstall(&mut io::stdout())?;
         }
         CliAction::Status => {
-            let settings = AgentSettings::load_from_file(&settings_path);
+            let mut settings = AgentSettings::load_from_file(&settings_path);
+            parsed.options.apply_to(&mut settings);
             run_status(&mut io::stdout(), &settings, &settings_path, true).await?;
         }
         CliAction::Menu => {
-            run_menu(&mut io::stdin().lock(), &mut io::stdout(), None).await?;
+            run_menu(
+                &mut io::stdin().lock(),
+                &mut io::stdout(),
+                Some(&settings_path),
+            )
+            .await?;
         }
     }
 
@@ -842,5 +1073,157 @@ mod tests {
         assert!(text.contains("Starting aqvn-agent in foreground..."));
         assert!(text.contains("Stopping aqvn-agent..."));
         assert!(text.contains("Agent stopped."));
+    }
+
+    #[test]
+    fn test_parse_cli_args_all_flags_val_agent_cli_003() {
+        let args = vec![
+            "start".to_string(),
+            "--server".to_string(),
+            "https://my-a0.domain.test:55088".to_string(),
+            "--user".to_string(),
+            "agent_user".to_string(),
+            "--pass".to_string(),
+            "pass_secret_123".to_string(),
+            "--token".to_string(),
+            "tok_secret_456".to_string(),
+            "--label".to_string(),
+            "Agent-Node-99".to_string(),
+            "--scopes".to_string(),
+            "files,code_execution".to_string(),
+            "--workspace".to_string(),
+            "/srv/workspace".to_string(),
+            "--gateway-id".to_string(),
+            "gw-custom-123".to_string(),
+            "--tls-skip-verify".to_string(),
+        ];
+
+        let parsed = parse_cli_args(&args).expect("parse_cli_args succeeds");
+        assert_eq!(parsed.action, CliAction::Start);
+        assert_eq!(
+            parsed.options.server.as_deref(),
+            Some("https://my-a0.domain.test:55088")
+        );
+        assert_eq!(parsed.options.user.as_deref(), Some("agent_user"));
+        assert_eq!(parsed.options.pass.as_deref(), Some("pass_secret_123"));
+        assert_eq!(parsed.options.token.as_deref(), Some("tok_secret_456"));
+        assert_eq!(parsed.options.label.as_deref(), Some("Agent-Node-99"));
+        assert_eq!(
+            parsed.options.scopes.as_deref(),
+            Some("files,code_execution")
+        );
+        assert_eq!(parsed.options.workspace.as_deref(), Some("/srv/workspace"));
+        assert_eq!(parsed.options.gateway_id.as_deref(), Some("gw-custom-123"));
+        assert_eq!(parsed.options.tls_skip_verify, Some(true));
+
+        let mut settings = AgentSettings::default();
+        parsed.options.apply_to(&mut settings);
+
+        assert_eq!(settings.server_url, "https://my-a0.domain.test:55088");
+        assert_eq!(settings.username.as_deref(), Some("agent_user"));
+        assert_eq!(settings.password.as_deref(), Some("pass_secret_123"));
+        assert_eq!(settings.token.as_deref(), Some("tok_secret_456"));
+        assert_eq!(settings.host_label, "Agent-Node-99");
+        assert_eq!(settings.active_scopes(), vec!["files", "code_execution"]);
+        assert_eq!(settings.workspace_path, "/srv/workspace");
+        assert_eq!(settings.gateway_id, "gw-custom-123");
+        assert!(settings.tls_skip_verify);
+    }
+
+    #[test]
+    fn test_cli_flags_override_file_settings_val_agent_cli_003() {
+        let temp_dir = env::temp_dir().join("aqvn_test_cli_override");
+        let settings_path = temp_dir.join("settings.json");
+
+        let initial_settings = AgentSettings {
+            server_url: "https://old-server.test".to_string(),
+            host_label: "Old-Label".to_string(),
+            workspace_path: "/old/workspace".to_string(),
+            scope_files: false,
+            scope_exec: false,
+            scope_browser: false,
+            scope_desktop: false,
+            ..Default::default()
+        };
+        initial_settings
+            .save_to_file(&settings_path)
+            .expect("save initial");
+
+        let args = vec![
+            "start".to_string(),
+            "--config".to_string(),
+            settings_path.to_string_lossy().to_string(),
+            "--server".to_string(),
+            "https://new-override.test".to_string(),
+            "--label".to_string(),
+            "Overridden-Label".to_string(),
+            "--scopes".to_string(),
+            "files,browser".to_string(),
+        ];
+
+        let parsed = parse_cli_args(&args).expect("parse_cli_args succeeds");
+        assert_eq!(parsed.action, CliAction::Start);
+
+        let mut loaded = AgentSettings::load_from_file(&settings_path);
+        parsed.options.apply_to(&mut loaded);
+
+        // Overridden values:
+        assert_eq!(loaded.server_url, "https://new-override.test");
+        assert_eq!(loaded.host_label, "Overridden-Label");
+        assert_eq!(loaded.active_scopes(), vec!["files", "browser"]);
+
+        // Preserved unmodified values:
+        assert_eq!(loaded.workspace_path, "/old/workspace");
+        assert_eq!(loaded.gateway_id, initial_settings.gateway_id);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_parse_cli_args_invalid_arguments_val_agent_cli_003() {
+        // Unknown option
+        let res = parse_cli_args(&["start".to_string(), "--invalid-option".to_string()]);
+        assert!(res.is_err());
+        assert!(res
+            .unwrap_err()
+            .contains("Unknown option '--invalid-option'"));
+
+        // Missing value for option
+        let res_missing = parse_cli_args(&["start".to_string(), "--server".to_string()]);
+        assert!(res_missing.is_err());
+        assert!(res_missing
+            .unwrap_err()
+            .contains("Option '--server' requires a value"));
+
+        // Unknown command
+        let res_cmd = parse_cli_args(&["unknown-cmd".to_string()]);
+        assert!(res_cmd.is_err());
+        assert!(res_cmd
+            .unwrap_err()
+            .contains("Unknown command or unexpected argument 'unknown-cmd'"));
+    }
+
+    #[test]
+    fn test_parse_cli_args_inline_equals_syntax() {
+        let args = vec![
+            "start".to_string(),
+            "--server=https://inline.test".to_string(),
+            "--label=Inline-Node".to_string(),
+            "--workspace=/inline/ws".to_string(),
+            "--user=bob".to_string(),
+            "--token=inline_tok".to_string(),
+            "--tls-skip-verify=true".to_string(),
+        ];
+
+        let parsed = parse_cli_args(&args).expect("parse inline equals");
+        assert_eq!(
+            parsed.options.server.as_deref(),
+            Some("https://inline.test")
+        );
+        assert_eq!(parsed.options.label.as_deref(), Some("Inline-Node"));
+        assert_eq!(parsed.options.workspace.as_deref(), Some("/inline/ws"));
+        assert_eq!(parsed.options.user.as_deref(), Some("bob"));
+        assert_eq!(parsed.options.token.as_deref(), Some("inline_tok"));
+        assert_eq!(parsed.options.tls_skip_verify, Some(true));
     }
 }

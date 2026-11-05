@@ -8,6 +8,14 @@ edition = "2021"
 name = "aqvn_workspace_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "aqvn-workspace"
+path = "src/main.rs"
+
+[[bin]]
+name = "aqvn-agent"
+path = "src/bin/agent.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

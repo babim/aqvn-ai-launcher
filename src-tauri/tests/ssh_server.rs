@@ -8,8 +8,8 @@
 
 use aqvn_workspace_lib::config::{AppConfig, ConfigWatcher};
 use aqvn_workspace_lib::ssh;
-use async_trait::async_trait;
 use russh::client::{self, Msg};
+use russh::keys::PublicKeyOrCertificate;
 use russh::ChannelMsg;
 use std::io::Read;
 use std::sync::mpsc;
@@ -77,13 +77,12 @@ async fn port_is_closed(port: u16) -> bool {
 #[derive(Clone)]
 struct ClientHandler;
 
-#[async_trait]
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::key::PublicKey,
+        _server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -109,7 +108,8 @@ async fn open_shell(
         session
             .authenticate_password("root", PASSWORD)
             .await
-            .expect("auth request"),
+            .expect("auth request")
+            .success(),
         "password auth must succeed"
     );
     let channel = session.channel_open_session().await.expect("open session");
@@ -323,7 +323,7 @@ async fn wrong_password_is_rejected_and_server_stays_up() {
         .authenticate_password("root", "definitely-wrong")
         .await
         .expect("auth request");
-    assert!(!accepted, "wrong password must be rejected");
+    assert!(!accepted.success(), "wrong password must be rejected");
 
     // The server survives: a correct login still works.
     let mut good = connect(server.port).await;

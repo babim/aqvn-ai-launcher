@@ -148,13 +148,12 @@ async fn test_rfc_rate_limiting_per_ip_isolation() {
 #[derive(Clone)]
 struct MockClientHandler;
 
-#[async_trait::async_trait]
 impl client::Handler for MockClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::key::PublicKey,
+        _server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -214,7 +213,10 @@ async fn test_ssh_lockout_after_5_failed_password_attempts() {
             .authenticate_password("root", format!("wrong-password-{attempt}"))
             .await
             .expect("auth");
-        assert!(!accepted, "Failed attempt #{attempt} must be rejected");
+        assert!(
+            !accepted.success(),
+            "Failed attempt #{attempt} must be rejected"
+        );
     }
 
     // 6th attempt with CORRECT password: MUST be rejected due to lockout!
@@ -231,7 +233,7 @@ async fn test_ssh_lockout_after_5_failed_password_attempts() {
         .await
         .expect("auth");
     assert!(
-        !accepted,
+        !accepted.success(),
         "Authentication with valid password MUST be rejected after 5 consecutive failed attempts (lockout active)"
     );
 
@@ -268,7 +270,7 @@ async fn test_ssh_consecutive_counter_resets_on_success() {
             .authenticate_password("root", format!("wrong-pass-{attempt}"))
             .await
             .expect("auth");
-        assert!(!accepted);
+        assert!(!accepted.success());
     }
 
     // Successful attempt resets the consecutive counter
@@ -284,7 +286,7 @@ async fn test_ssh_consecutive_counter_resets_on_success() {
         .authenticate_password("root", SSH_PASSWORD)
         .await
         .expect("auth");
-    assert!(accepted, "Valid password should authenticate");
+    assert!(accepted.success(), "Valid password should authenticate");
 
     // 3 more failed attempts (total 6 failures, but consecutive is only 3)
     for attempt in 1..=3 {
@@ -300,7 +302,7 @@ async fn test_ssh_consecutive_counter_resets_on_success() {
             .authenticate_password("root", format!("wrong-pass-second-{attempt}"))
             .await
             .expect("auth");
-        assert!(!accepted);
+        assert!(!accepted.success());
     }
 
     // Next login with correct password should STILL succeed because consecutive count was reset!
@@ -317,7 +319,7 @@ async fn test_ssh_consecutive_counter_resets_on_success() {
         .await
         .expect("auth");
     assert!(
-        accepted2,
+        accepted2.success(),
         "Authentication should succeed because consecutive counter was reset by earlier success"
     );
 

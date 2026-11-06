@@ -8,9 +8,11 @@ use crate::config::{AppConfig, ConfigWatcher};
 use crate::ssh::guard;
 use crate::ssh::session_cwd;
 use crate::ssh::shell::{self, ShellSession, SHELL_PROGRAM};
-use async_trait::async_trait;
-use russh::server::{Auth, Handler, Msg, Server, Session};
-use russh::{Channel, ChannelId, CryptoVec};
+use russh::keys::ssh_key::private::Ed25519Keypair;
+use russh::keys::PrivateKey;
+use russh::server::{Auth, ChannelOpenHandle, Handler, Msg, Server, Session};
+use russh::{ChannelId, ChannelOpenFailure};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -262,7 +264,7 @@ fn commit_line(state: &mut ChannelState, session: &mut Session, channel: Channel
     match guard::check(&command) {
         Some(reason) => {
             state.shell.write(b"\x15".to_vec()); // Ctrl-U: discard the tty line
-            session.data(channel, CryptoVec::from(refusal_text(reason)));
+            let _ = session.data(channel, refusal_text(reason));
         }
         None => state.shell.write(b"\r".to_vec()),
     }
@@ -291,7 +293,7 @@ fn route_output(
 
     tokio::spawn(async move {
         while let Some(bytes) = rx.recv().await {
-            if handle.data(channel, CryptoVec::from(bytes)).await.is_err() {
+            if handle.data(channel, bytes).await.is_err() {
                 return;
             }
         }
@@ -305,15 +307,12 @@ fn sanitize(line: &str) -> String {
     line.chars().filter(|c| !c.is_control()).collect()
 }
 
-#[async_trait]
 impl Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
         if self.lockout.is_locked(self.peer_ip) {
-            return Ok(Auth::Reject {
-                proceed_with_methods: None,
-            });
+            return Ok(Auth::reject());
         }
 
         if self.password_matches(password) {
@@ -322,21 +321,22 @@ impl Handler for ClientHandler {
         }
 
         self.lockout.record_failure(self.peer_ip);
-        Ok(Auth::Reject {
-            proceed_with_methods: None,
-        })
+        Ok(Auth::reject())
     }
 
     async fn channel_open_session(
         &mut self,
-        _channel: Channel<Msg>,
+        _channel: russh::Channel<Msg>,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         const MAX_ACTIVE_CHANNELS: usize = 10;
         if self.channels.len() >= MAX_ACTIVE_CHANNELS {
-            return Ok(false);
+            reply.reject(ChannelOpenFailure::ResourceShortage).await;
+            return Ok(());
         }
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     async fn pty_request(
@@ -360,7 +360,7 @@ impl Handler for ClientHandler {
         } else {
             self.pending_geometry.insert(channel, geometry);
         }
-        session.channel_success(channel);
+        let _ = session.channel_success(channel);
         Ok(())
     }
 
@@ -374,9 +374,11 @@ impl Handler for ClientHandler {
             .remove(&channel)
             .unwrap_or((DEFAULT_COLS, DEFAULT_ROWS));
         match self.start_shell(channel, cols, rows, session) {
-            Ok(()) => session.channel_success(channel),
+            Ok(()) => {
+                let _ = session.channel_success(channel);
+            }
             Err(err) => {
-                session.channel_failure(channel);
+                let _ = session.channel_failure(channel);
                 return Err(err);
             }
         }
@@ -391,10 +393,10 @@ impl Handler for ClientHandler {
     ) -> Result<(), Self::Error> {
         let command = sanitize(&String::from_utf8_lossy(data));
         if let Some(reason) = guard::check(&command) {
-            session.data(channel, CryptoVec::from(refusal_text(reason)));
-            session.exit_status_request(channel, 1);
-            session.eof(channel);
-            session.close(channel);
+            let _ = session.data(channel, refusal_text(reason));
+            let _ = session.exit_status_request(channel, 1);
+            let _ = session.eof(channel);
+            let _ = session.close(channel);
             return Ok(());
         }
 
@@ -408,7 +410,7 @@ impl Handler for ClientHandler {
                 .shell
                 .write(format!("{command}\r\nexit\r\n").into_bytes());
         }
-        session.channel_success(channel);
+        let _ = session.channel_success(channel);
         Ok(())
     }
 
@@ -564,14 +566,17 @@ pub async fn bind_if_enabled(config: &AppConfig) -> Result<Option<TcpListener>, 
 }
 
 fn server_config() -> Result<Arc<russh::server::Config>, String> {
-    let host_key = russh::keys::key::KeyPair::generate_ed25519()
-        .ok_or_else(|| "failed to generate SSH host key".to_string())?;
+    // Fresh Ed25519 host key per bind (unchanged behaviour). The seed comes from
+    // the existing process CSPRNG rather than adding a second RNG dependency.
+    let mut seed = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut seed);
+    let host_key = PrivateKey::from(Ed25519Keypair::from_seed(&seed));
     Ok(Arc::new(russh::server::Config {
-        server_id: russh::SshId::Standard(format!(
+        server_id: russh::SshId::Standard(Cow::Owned(format!(
             "SSH-2.0-aqvn-workspace_{}",
             env!("CARGO_PKG_VERSION")
-        )),
-        methods: russh::MethodSet::PASSWORD,
+        ))),
+        methods: russh::MethodSet::from(&[russh::MethodKind::Password][..]),
         keys: vec![host_key],
         auth_rejection_time: Duration::from_millis(100),
         inactivity_timeout: Some(Duration::from_secs(600)),

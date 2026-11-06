@@ -515,7 +515,10 @@ async fn misc_rfc_files_surface() {
     assert!(zip_path.ends_with(".zip"), "zip path: {zip_path}");
     let archive = zip::ZipArchive::new(std::fs::File::open(zip_path).expect("open zip"))
         .expect("valid zip archive");
-    let zip_names: Vec<String> = archive.file_names().map(str::to_string).collect();
+    let zip_names: Vec<String> = archive
+        .file_names()
+        .map(|name| name.expect("zip entry name").into_owned())
+        .collect();
     assert!(
         zip_names.iter().any(|name| name.starts_with("c/")),
         "zip entries: {zip_names:?}"

@@ -64,6 +64,10 @@ jobs:
     name: Build Windows Installers (nsis, msi) & Portable
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      # aws-lc-sys builds its assembly with a prebuilt NASM binary, so no
+      # manual NASM/chocolatey install is required on the Windows runner.
+      AWS_LC_SYS_PREBUILT_NASM: '1'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

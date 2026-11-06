@@ -64,3 +64,20 @@ jobs:
         run: |
           node tools/tests/test_vendor_assets.mjs
           node --test tools/tests/test_chat_handlers.mjs
+
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit dependencies (0 vulnerabilities)
+        run: cargo audit --file src-tauri/Cargo.lock

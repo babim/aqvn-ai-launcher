@@ -892,18 +892,27 @@ async fn workdir_mutation_api_shapes() {
 
 // ------------------------------------- exchange + make_dir (VAL-RFC-023..024)
 
+/// RSA-2048 test fixture (PKCS#8 DER, base64). Public half is derived from it,
+/// so the handler is exercised with a real peer SubjectPublicKeyInfo PEM.
+const ROOT_PASSWORD_KEY_FIXTURE: &str = "\
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDC7bYEOrhFiaJVo8FvvVMExHIvzoUKTvE/MaO4ZiK50GolmuN48CxnYRUpFElIKx9Jnqd98nYObZwooTv++9LU7iZqZtx4Y4w266HizPksozmhz7qJ6taPstaX8A/KjCJASKF/Lus3EU0zZ54S2++h2iDiNc457FQBhvlrl7UeWAgCAnJoWD67RF1HaGe5QBfsAL9B9rCQwYfdImDxk6IG1HywesEXpH88lx14XGujG8He8eyMT4U+MvcShO9SG+42d/zt+K0bkgY79rGgkClQDjQyOFRkJbB6Mfpx/z4jUaFAp3801tp3N4w6E/7bqIbfJM5API0n8rRLzW6+d0YxAgMBAAECggEAGEqVPyuuIQRI1ZFFns4iFVsBu9FppOI3kB94fpdDxpIhWDRYGo8biXqAr5DWnQa6rGr4Bmr7qUqhhjKpjloFaQGQifvth5coNwPgNapDdvuUSATiAyPfvyKTOXXyEdSqxAYJEhdfuooOa9SCz2jXEP1k0avQ2kkIIvSWCoFqUbCAwQmJD9BHhc/Xuyzb+/4hlmpsQb5bxAnLRPkspV/g4SmofHFrcTAOVol5NIGdbKvL63o+G5CgTtmr6iml4Nk9LgLYbx2mVQmll2UM7GOsYMsVvPIemK51XuMSI4KSGTtscS2qXuSsS5/A4I/Wsep+vAAcFE0fR5JoVWtOOKggEQKBgQD3IlOGNx39FgM2yT4aApRJcRv6d4kvqLPSKw/OmgBTCySfzlGK0/kTzUMH7ftMnFOqlGW3NCgXLrVLtjbZqVRMdlQli0Bju8d653u5n5zaqa/h6bKMcXMRtNhI1CHX2xDS0aXvnrdUpahB8h4pCBzyhlHzvXrMBjtiAP6Cq8K+rQKBgQDJ6+4s0OxKCxXIRGh0/osIO6NEPKnT9cPxmrzKXvThLZKIx6VAFnwiSW/9Z690x3zfzQDTxXb1NUNXrEAKW/qxamCjUlrUxzOAS4bWu3A6GpVpEhRjBXDS81oZuo4jfaZYXfNgHJA0V4eQPBbVjUss0/xSRQfrTRu5fNDgefJqFQKBgDU2F+PbNELNHY4LUKrLCWCy0QJiAJDZczZ6fSHP+Ofoi085XkdVEtlXpeosLKK3OjCNWUVUHpm3PeP6bN763aLFC6M103xl7zKgavxxyJUwWiV7ay1gNBWI6dTskAjpKzspVuA8PV8leBAS8LmG/KyfjT+8+Za6dMjKTAKYtwrVAoGAZLG9IqhFTV9dy3MhzEYruz1SW/MMleEXh+Kshxb3c1uwmXlGFUGhQc/xgyMzwj7BLTIkWXc9rWaUYKJLhV79E4CDFK87EKUOL8p6QZdTjgY3wB/9/qt16hzlL7Nysow0ahjgB2v3FcMYnXr5wCEn/gDw8W3vVw4q50MxPuBRXUkCgYEAt5E9AGuLK5NOvGq/OdRKQ6MCO37weXQRJ6x/An7kKnXc9rE9xlqpGpt0D+FP68S13orisALExp/InyTiRaZ45j1AsdeGSlIkfLItujTi8mIME8ajdycLK5lKdkb9CJ2YH8djIuo9T/KCHlRJ2Q5deahxt887SXxO2XxCXm00l00=";
+
 #[tokio::test]
 async fn provide_root_password_round_trips() {
-    use rsa::pkcs8::EncodePublicKey;
-    use rsa::{Oaep, RsaPrivateKey, RsaPublicKey};
+    use aws_lc_rs::encoding::AsDer;
+    use aws_lc_rs::rsa::{OaepPrivateDecryptingKey, PrivateDecryptingKey, OAEP_SHA256_MGF1SHA256};
 
     let sandbox = TempSandbox::new(&[]);
     let app = app_for(sandbox.path());
-    let mut rng = rand::thread_rng();
-    let private = RsaPrivateKey::new(&mut rng, 2048).expect("generate key");
-    let public_pem = RsaPublicKey::from(&private)
-        .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
-        .expect("public pem");
+    let private_der = base64::engine::general_purpose::STANDARD
+        .decode(ROOT_PASSWORD_KEY_FIXTURE)
+        .expect("fixture key base64");
+    let private = PrivateDecryptingKey::from_pkcs8(&private_der).expect("fixture key");
+    let public_der = private.public_key().as_der().expect("public SPKI DER");
+    let public_pem = format!(
+        "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
+        base64::engine::general_purpose::STANDARD.encode(&*public_der)
+    );
     let hex_pem = public_pem
         .as_bytes()
         .iter()
@@ -925,8 +934,15 @@ async fn provide_root_password_round_trips() {
         .step_by(2)
         .map(|i| u8::from_str_radix(&ciphertext_hex[i..i + 2], 16).expect("hex"))
         .collect();
-    let plaintext = private
-        .decrypt(Oaep::new::<sha2::Sha256>(), &ciphertext)
+    let decryptor = OaepPrivateDecryptingKey::new(private).expect("OAEP private key");
+    let mut plaintext_buffer = vec![0u8; decryptor.min_output_size()];
+    let plaintext = decryptor
+        .decrypt(
+            &OAEP_SHA256_MGF1SHA256,
+            &ciphertext,
+            &mut plaintext_buffer,
+            None,
+        )
         .expect("OAEP decrypt");
     assert_eq!(plaintext, SSH_PASSWORD.as_bytes());
 

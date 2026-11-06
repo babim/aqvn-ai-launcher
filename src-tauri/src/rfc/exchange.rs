@@ -6,11 +6,9 @@
 //! terminal client decrypts.
 
 use crate::rfc::dispatch::{DispatchContext, DispatchError, RfcCall};
-use crate::rfc::util::string_arg;
-use rsa::pkcs8::DecodePublicKey;
-use rsa::{Oaep, RsaPublicKey};
+use crate::rfc::util::{decode_base64, string_arg};
+use aws_lc_rs::rsa::{OaepPublicEncryptingKey, PublicEncryptingKey, OAEP_SHA256_MGF1SHA256};
 use serde_json::Value;
-use sha2::Sha256;
 
 pub(crate) fn provide_root_password(
     context: &DispatchContext,
@@ -22,18 +20,41 @@ pub(crate) fn provide_root_password(
     let pem = String::from_utf8(pem).map_err(|_| {
         DispatchError::Handler("public key must be a hex-encoded PEM string".to_string())
     })?;
-    let public_key = RsaPublicKey::from_public_key_pem(&pem)
+    let der = decode_pem_subject_public_key_info(&pem)?;
+    let public_key = PublicEncryptingKey::from_der(&der)
+        .map_err(|err| DispatchError::Handler(format!("invalid RSA public key: {err}")))?;
+    let public_key = OaepPublicEncryptingKey::new(public_key)
         .map_err(|err| DispatchError::Handler(format!("invalid RSA public key: {err}")))?;
 
-    let mut rng = rand::thread_rng();
+    let mut buffer = vec![0u8; public_key.ciphertext_size()];
     let ciphertext = public_key
         .encrypt(
-            &mut rng,
-            Oaep::new::<Sha256>(),
+            &OAEP_SHA256_MGF1SHA256,
             context.ssh_password.as_bytes(),
+            &mut buffer,
+            None,
         )
         .map_err(|err| DispatchError::Handler(format!("RSA-OAEP encryption failed: {err}")))?;
-    Ok(Value::String(encode_hex(&ciphertext)))
+    Ok(Value::String(encode_hex(ciphertext)))
+}
+
+/// Strips the `PUBLIC KEY` armor and base64-decodes the SubjectPublicKeyInfo body.
+fn decode_pem_subject_public_key_info(pem: &str) -> Result<Vec<u8>, DispatchError> {
+    const BEGIN: &str = "-----BEGIN PUBLIC KEY-----";
+    const END: &str = "-----END PUBLIC KEY-----";
+    let invalid = || {
+        DispatchError::Handler("public key must be a PEM-encoded SubjectPublicKeyInfo".to_string())
+    };
+    let body_start = pem.find(BEGIN).ok_or_else(invalid)? + BEGIN.len();
+    let body_end = pem[body_start..].find(END).ok_or_else(invalid)? + body_start;
+    let body: String = pem[body_start..body_end]
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    if body.is_empty() {
+        return Err(invalid());
+    }
+    decode_base64(&body)
 }
 
 fn decode_hex(input: &str) -> Result<Vec<u8>, DispatchError> {

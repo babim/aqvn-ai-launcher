@@ -1,0 +1,11 @@
+{
+  "name": "ai-launcher-ui-lint",
+  "private": true,
+  "description": "Lint toolchain for the AQVN workspace UI documents",
+  "scripts": {
+    "lint:html": "html-validate ui/index.html ui/settings.html ui/help.html ui/about.html"
+  },
+  "devDependencies": {
+    "html-validate": "11.18.0"
+  }
+}

@@ -65,6 +65,27 @@ jobs:
           node tools/tests/test_vendor_assets.mjs
           node --test tools/tests/test_chat_handlers.mjs
 
+  html:
+    name: HTML Validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # html-validate 11 requires Node >= 24.8.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate UI documents (html-validate)
+        run: npm run lint:html
+
   audit:
     name: Dependency Audit
     runs-on: ubuntu-24.04

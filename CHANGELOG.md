@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Standalone Headless Agent (`aqvn-agent`)**: New `[[bin]]` target (`src-tauri/src/bin/agent.rs`) providing an interactive menu, CLI flags (`--server`, `--token`, `--label`, `--scopes`, `--workspace`, `--gateway-id`, `--ping-interval`, `--tls-skip-verify`, `--config`), and `install` / `uninstall` / `status` systemd service lifecycle commands.
 - **Multi-Host Pool Identity & Remote Operations**: Distinct `gateway_id` / `host_label` registration with user or `--system` systemd units, exposing `connector_exec_op` remote execution and `connector_file_op` file operations sandboxed to the configured workspace.
 
+### Changed
+- **Dependency Security Upgrade**: `zip` 2.6.1 → 9.4.1 (`deflate-flate2-zlib-rs`), `russh` 0.45.0 → 0.65.1 with the `aws-lc-rs` backend, and the `rsa` crate removed. The RFC root-password exchange now uses `aws-lc-rs` RSA-OAEP-SHA256 with the identical wire format (PEM SPKI in, hex ciphertext out). `cargo audit` reports 0 vulnerabilities (6 non-vulnerability warnings remain for unmaintained/yanked transitive crates).
+- **HTML5 Normalization**: all 92 `html-validate` errors cleared across `ui/index.html`, `ui/settings.html`, `ui/help.html` and `ui/about.html` with no rule disabled — uppercase doctype, omitted void-element slashes, inline styles moved to CSS classes, explicit input types, unique landmark labels, and native `section`/`ul`/`li` elements with the listbox role applied by the renderer. Element IDs consumed by the UI scripts are unchanged.
+- **CI Quality Gates**: new `audit` job runs `cargo audit` on the lockfile; new `html` job runs the pinned `html-validate` 11.18.0 toolchain (Node 24) via `npm ci` and `npm run lint:html`. Windows release builds set `AWS_LC_SYS_PREBUILT_NASM=1` so `aws-lc-sys` assembles without a manual NASM install.
+
+### Security
+- Cleared 8 advisories: `zip` (RUSTSEC-2026-0367/0368/0369/0429, including one critical), `russh` (RUSTSEC-2026-0154), `russh-cryptovec` (RUSTSEC-2026-0153), `crypto-bigint` (RUSTSEC-2026-0387), and `rsa` (RUSTSEC-2023-0071, no patched version) by removing the crate entirely.
+
 ### Fixed
 - **Single-Point UI Zoom Normalization**: Zoom is applied once on `documentElement` and any leftover `body` zoom is cleared, so `Ctrl`/`Cmd` `+`/`-` no longer compounds two zoom surfaces (`ui/chat.js`, `ui/container.js`).
 

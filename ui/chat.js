@@ -1908,6 +1908,9 @@
 
   function renderCommandPaletteResults(query) {
     if (!dom.commandPaletteResults) return;
+    // The results list is a custom filterable widget; a native <select> cannot host
+    // it, so the listbox role is established here rather than in the static markup.
+    dom.commandPaletteResults.setAttribute('role', 'listbox');
     dom.commandPaletteResults.innerHTML = '';
     var q = (query || '').toLowerCase().trim();
     var filtered = COMMAND_PALETTE_ACTIONS.filter(function(a) {
@@ -1918,7 +1921,7 @@
     }
 
     filtered.forEach(function(item, idx) {
-      var el = document.createElement('div');
+      var el = document.createElement('li');
       var isActive = idx === state.paletteActiveIndex;
       el.className = 'palette-item' + (isActive ? ' active' : '');
       el.setAttribute('role', 'option');
@@ -2841,7 +2844,7 @@
     if (!dom.workspaceFileList) return;
     dom.workspaceFileList.innerHTML = '';
     if (!state.workspaceFiles || state.workspaceFiles.length === 0) {
-      var emptyEl = document.createElement('div');
+      var emptyEl = document.createElement('li');
       emptyEl.className = 'workspace-empty-msg';
       emptyEl.textContent = 'No files found in workspace';
       dom.workspaceFileList.appendChild(emptyEl);
@@ -2849,7 +2852,7 @@
     }
 
     state.workspaceFiles.forEach(function (file) {
-      var item = document.createElement('div');
+      var item = document.createElement('li');
       item.className = 'workspace-file-item ' + (file.is_dir ? 'is-dir' : 'is-file');
       var filePath = file.path || file.name;
       item.dataset.path = filePath;

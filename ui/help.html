@@ -1,8 +1,8 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AQVN Workspace — Help &amp; Shortcuts</title>
     <script>
       document.title = "AQVN Workspace — Help & Shortcuts";
@@ -48,6 +48,14 @@
         background: #132c46;
         border-color: #22d3ee;
         outline: none;
+      }
+      .nav-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .col-shortcut {
+        width: 240px;
       }
       main {
         max-width: 820px;
@@ -238,8 +246,8 @@
     <main>
       <div class="top-nav">
         <a class="nav-btn" href="settings.html" id="nav-to-settings">&larr; <span data-i18n="nav_settings">Open Settings</span></a>
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <button type="button" class="nav-btn" id="lang-toggle-btn" style="cursor: pointer;">
+        <div class="nav-actions">
+          <button type="button" class="nav-btn" id="lang-toggle-btn">
             🌐 <span id="current-lang-text">Tiếng Việt</span>
           </button>
           <button type="button" class="nav-btn" id="close-btn" onclick="closeHelpWindow()"><span data-i18n="close_btn">Close</span> &times;</button>
@@ -257,7 +265,7 @@
         <table class="shortcut-table" aria-label="Bảng phím tắt ứng dụng">
           <thead>
             <tr>
-              <th style="width: 240px;" data-i18n="col_shortcut">Phím tắt (Shortcut)</th>
+              <th class="col-shortcut" data-i18n="col_shortcut">Phím tắt (Shortcut)</th>
               <th data-i18n="col_action">Thao tác &amp; Mô tả (Action &amp; Description)</th>
             </tr>
           </thead>

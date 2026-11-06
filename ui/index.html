@@ -1,8 +1,8 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AQVN Workspace</title>
     <script>
       // Rust mirrors this into the native window title (no JS IPC needed).
@@ -84,7 +84,7 @@
         } catch (e) {}
       })();
     </script>
-    <link rel="stylesheet" href="chat.css" />
+    <link rel="stylesheet" href="chat.css">
     <script src="vendor/socket.io.min.js"></script>
     <script src="bridge.js"></script>
     <script defer src="vendor/marked.min.js"></script>
@@ -215,7 +215,7 @@
               spellcheck="false"
               placeholder="https://a0.matmagoc.com"
               required
-            />
+            >
             <select id="server-profile-select" aria-label="Saved server profiles">
               <option value="">Profiles&hellip;</option>
             </select>
@@ -226,10 +226,11 @@
           <input
             id="login-username"
             name="username"
+            type="text"
             autocomplete="username"
             spellcheck="false"
             required
-          />
+          >
           <label for="login-password">Password</label>
           <input
             id="login-password"
@@ -237,7 +238,7 @@
             type="password"
             autocomplete="current-password"
             required
-          />
+          >
           <p id="login-error" class="error" role="alert"></p>
           <button id="login-submit" type="submit">Sign in</button>
         </form>
@@ -247,9 +248,10 @@
           <input
             id="proxy-url"
             name="proxy-url"
+            type="text"
             placeholder="(same origin)"
             spellcheck="false"
-          />
+          >
           <p class="hint">
             Filled in by the desktop app at launch. Leave empty when the page and
             the bridge share an origin.
@@ -303,18 +305,17 @@
             <nav id="workspace-breadcrumbs" class="workspace-breadcrumbs" aria-label="Folder breadcrumbs">
               <button type="button" class="breadcrumb-item active" data-path="">~/Workspace</button>
             </nav>
-            <div
+            <section
               id="workspace-upload-dropzone"
               class="workspace-dropzone"
               tabindex="0"
-              role="region"
               aria-label="Drag and drop files to upload"
             >
               <span class="dropzone-icon">&#128193;</span>
               <span class="dropzone-text">Drop files here or click to upload</span>
-              <input id="workspace-file-input" type="file" multiple hidden />
-            </div>
-            <div id="workspace-file-list" class="workspace-file-list" role="list" aria-label="Workspace files"></div>
+              <input id="workspace-file-input" type="file" multiple hidden>
+            </section>
+            <ul id="workspace-file-list" class="workspace-file-list" aria-label="Workspace files"></ul>
           </div>
         </aside>
 
@@ -371,7 +372,7 @@
                 placeholder="Find in conversation... (Enter/Shift+Enter to navigate)"
                 aria-label="Search conversation"
                 spellcheck="false"
-              />
+              >
               <span id="search-count" class="search-count" aria-live="polite">0 of 0</span>
               <button id="search-prev-btn" type="button" class="search-nav-btn" title="Previous match (Shift+Enter)" aria-label="Previous match">&uarr;</button>
               <button id="search-next-btn" type="button" class="search-nav-btn" title="Next match (Enter)" aria-label="Next match">&darr;</button>
@@ -418,7 +419,13 @@
                 <button id="terminal-close-btn" type="button" class="terminal-action-btn" title="Close terminal (Alt+T)">&times;</button>
               </div>
             </div>
-            <div id="terminal-output" class="terminal-output" role="region" aria-live="polite" tabindex="0"></div>
+            <section
+              id="terminal-output"
+              class="terminal-output"
+              aria-label="Terminal output"
+              aria-live="polite"
+              tabindex="0"
+            ></section>
             <form id="terminal-form" class="terminal-form">
               <span class="terminal-prompt">$</span>
               <input
@@ -428,7 +435,7 @@
                 placeholder="Type shell command..."
                 autocomplete="off"
                 spellcheck="false"
-              />
+              >
               <button id="terminal-send-btn" type="submit" class="terminal-send-btn">Run</button>
             </form>
           </section>
@@ -560,7 +567,7 @@
     </div>
 
     <!-- Agent Activity Feed & Audit Trail Drawer (VAL-AGENT-001, VAL-AGENT-004) -->
-    <div id="agent-activity-drawer" class="agent-activity-drawer" role="region" aria-label="Agent Activity Feed" hidden>
+    <section id="agent-activity-drawer" class="agent-activity-drawer" aria-label="Agent Activity Feed" hidden>
       <div class="activity-drawer-header">
         <div class="activity-drawer-title">
           <span>&#9889; Agent Activity Feed</span>
@@ -575,7 +582,7 @@
       <div id="activity-feed-list" class="activity-feed-list">
         <div class="activity-empty-msg">No agent actions recorded yet.</div>
       </div>
-    </div>
+    </section>
 
     <!-- Human-in-the-Loop Action Approval Modal (VAL-AGENT-002) -->
     <div id="agent-approval-modal" class="agent-approval-modal" role="dialog" aria-modal="true" aria-labelledby="approval-title" hidden>
@@ -615,9 +622,9 @@
         <h2 id="palette-title" class="sr-only">Command Palette</h2>
         <div class="palette-input-wrap">
           <span class="palette-search-icon">&#128269;</span>
-          <input id="command-palette-input" type="search" placeholder="Type a command or search... (Esc to close)" autocomplete="off" spellcheck="false" />
+          <input id="command-palette-input" type="search" placeholder="Type a command or search... (Esc to close)" autocomplete="off" spellcheck="false">
         </div>
-        <div id="command-palette-results" class="command-palette-results" role="listbox"></div>
+        <ul id="command-palette-results" class="command-palette-results" aria-label="Commands"></ul>
       </div>
     </div>
 

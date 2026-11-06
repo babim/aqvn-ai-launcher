@@ -1,8 +1,8 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AQVN Workspace — Settings</title>
     <script>
       // Distinct title proves the Rust sync fires per navigation, not once.
@@ -321,12 +321,117 @@
         border: 1px solid #ef444455;
         color: #f87171;
       }
+
+      /* Layout helpers replacing former inline styles */
+      .mt-0 { margin-top: 0; }
+      .mt-6 { margin-top: 6px; }
+      .mt-12 { margin-top: 12px; }
+      .mt-14 { margin-top: 14px; }
+      .mt-16 { margin-top: 16px; }
+      .mt-18 { margin-top: 18px; }
+      .mb-8 { margin-bottom: 8px; }
+      .mb-12 { margin-bottom: 12px; }
+      .flex-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .flex-row-sm {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .flex-row-tight {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .flex-column {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .lang-nav {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        z-index: 10;
+        display: flex;
+        gap: 8px;
+      }
+      .lang-btn {
+        position: static;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .select-control {
+        padding: 10px 14px;
+        border: 1px solid #1e2f45;
+        border-radius: 8px;
+        background: #070d16;
+        color: #e6edf7;
+        font: inherit;
+        font-size: 0.9rem;
+        cursor: pointer;
+        min-width: 160px;
+      }
+      .select-control-grow {
+        flex: 1;
+        padding: 10px 14px;
+        border: 1px solid #1e2f45;
+        border-radius: 8px;
+        background: #070d16;
+        color: #e6edf7;
+        font: inherit;
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+      .range-control {
+        width: 100%;
+        cursor: pointer;
+      }
+      .action-btn {
+        padding: 10px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        white-space: nowrap;
+        font: inherit;
+        font-size: 0.9rem;
+      }
+      .action-btn-accent {
+        border: 1px solid #22d3ee55;
+        background: #0b1220;
+        color: #22d3ee;
+      }
+      .action-btn-danger {
+        border: 1px solid #ef444455;
+        background: #0b1220;
+        color: #f87171;
+      }
+      .scope-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        font-weight: normal;
+      }
+      .input-grow {
+        flex: 1;
+      }
+      .nav-inline {
+        position: static;
+        display: inline-block;
+        padding: 6px 14px;
+        font-size: 0.85rem;
+      }
     </style>
   </head>
   <body>
     <a class="nav" id="back-to-chat" href="index.html" data-i18n="back_to_chat">Back to chat</a>
-    <div style="position: fixed; top: 16px; right: 16px; z-index: 10; display: flex; gap: 8px;">
-      <button type="button" class="nav" id="lang-toggle-btn" style="position: static; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+    <div class="lang-nav">
+      <button type="button" class="nav lang-btn" id="lang-toggle-btn">
         🌐 <span id="current-lang-text">Tiếng Việt</span>
       </button>
     </div>
@@ -340,44 +445,44 @@
 
           <div class="form-group">
             <label for="app-language" data-i18n="language_label">Language / Ngôn ngữ</label>
-            <div style="display: flex; gap: 12px; align-items: center; margin-top: 6px;">
+            <div class="flex-row mt-6">
               <select
+                class="select-control"
                 id="app-language"
                 name="app_language"
-                style="padding: 10px 14px; border: 1px solid #1e2f45; border-radius: 8px; background: #070d16; color: #e6edf7; font: inherit; font-size: 0.9rem; cursor: pointer; min-width: 160px;"
               >
                 <option value="vi">Tiếng Việt</option>
                 <option value="en">English</option>
               </select>
-              <div class="help-text" style="margin-top: 0;" data-i18n="language_help">
+              <div class="help-text mt-0" data-i18n="language_help">
                 Select interface language / Chọn ngôn ngữ hiển thị giao diện.
               </div>
             </div>
           </div>
 
-          <div class="form-group" style="margin-top: 18px;">
+          <div class="form-group mt-18">
             <label for="app-theme" data-i18n="theme_label">Color Theme / Giao diện màu sắc</label>
-            <div style="display: flex; gap: 12px; align-items: center; margin-top: 6px;">
+            <div class="flex-row mt-6">
               <select
+                class="select-control"
                 id="app-theme"
                 name="app_theme"
-                style="padding: 10px 14px; border: 1px solid #1e2f45; border-radius: 8px; background: #070d16; color: #e6edf7; font: inherit; font-size: 0.9rem; cursor: pointer; min-width: 160px;"
               >
                 <option value="aqvn-dark">AQVN Dark (Default)</option>
                 <option value="oled-black">OLED Black</option>
                 <option value="cyberpunk-terminal">Cyberpunk Terminal</option>
                 <option value="clean-studio-light">Clean Studio Light</option>
               </select>
-              <div class="help-text" style="margin-top: 0;" data-i18n="theme_help">
+              <div class="help-text mt-0" data-i18n="theme_help">
                 Select color palette / Chọn bảng màu chủ đạo cho giao diện.
               </div>
             </div>
           </div>
 
-          <div class="form-group" style="margin-top: 18px;">
+          <div class="form-group mt-18">
             <div class="toggle-container">
               <label class="toggle-switch">
-                <input type="checkbox" id="close-to-tray" name="close_to_tray" checked />
+                <input type="checkbox" id="close-to-tray" name="close_to_tray" checked>
                 <span class="slider"></span>
               </label>
               <label for="close-to-tray" class="toggle-label" data-i18n="close_to_tray_label">Close to Tray / Chạy ngầm</label>
@@ -387,10 +492,10 @@
             </div>
           </div>
 
-          <div class="form-group" style="margin-top: 18px;">
+          <div class="form-group mt-18">
             <div class="toggle-container">
               <label class="toggle-switch">
-                <input type="checkbox" id="show-menu-bar" name="show_menu_bar" />
+                <input type="checkbox" id="show-menu-bar" name="show_menu_bar">
                 <span class="slider"></span>
               </label>
               <label for="show-menu-bar" class="toggle-label" data-i18n="show_menu_bar_label">Show Menu Bar / Thanh menu</label>
@@ -400,10 +505,10 @@
             </div>
           </div>
 
-          <div class="form-group" style="margin-top: 18px;">
+          <div class="form-group mt-18">
             <div class="toggle-container">
               <label class="toggle-switch">
-                <input type="checkbox" id="task-chime-enabled" name="task_chime_enabled" checked />
+                <input type="checkbox" id="task-chime-enabled" name="task_chime_enabled" checked>
                 <span class="slider"></span>
               </label>
               <label for="task-chime-enabled" class="toggle-label" data-i18n="task_chime_enabled_label">Task Completion Sound / Âm báo hoàn thành</label>
@@ -413,10 +518,10 @@
             </div>
           </div>
 
-          <div class="form-group" style="margin-top: 18px;">
+          <div class="form-group mt-18">
             <div class="toggle-container">
               <label class="toggle-switch">
-                <input type="checkbox" id="task-notification-enabled" name="task_notification_enabled" checked />
+                <input type="checkbox" id="task-notification-enabled" name="task_notification_enabled" checked>
                 <span class="slider"></span>
               </label>
               <label for="task-notification-enabled" class="toggle-label" data-i18n="task_notification_enabled_label">Desktop Notifications / Thông báo màn hình</label>
@@ -426,7 +531,7 @@
             </div>
           </div>
 
-          <div class="form-group" style="margin-top: 14px;">
+          <div class="form-group mt-14">
             <label for="task-chime-volume"><span data-i18n="task_chime_volume_label">Chime Volume / Âm lượng chuông</span> (<span id="task-chime-volume-display">50%</span>)</label>
             <input
               type="range"
@@ -436,20 +541,20 @@
               max="1"
               step="0.05"
               value="0.5"
-              style="width: 100%; cursor: pointer;"
-            />
+              class="range-control"
+            >
             <div class="help-text" data-i18n="task_chime_volume_help">
               Adjust volume for completion chime (0% to 100%).
             </div>
           </div>
 
-          <div class="form-group" style="margin-top: 14px;">
+          <div class="form-group mt-14">
             <label for="task-chime-tone" data-i18n="task_chime_tone_label">Chime Tone / Giai điệu chuông</label>
-            <div style="display: flex; gap: 10px; align-items: center;">
+            <div class="flex-row-tight">
               <select
+                class="select-control-grow"
                 id="task-chime-tone"
                 name="task_chime_tone"
-                style="flex: 1; padding: 10px 14px; border: 1px solid #1e2f45; border-radius: 8px; background: #070d16; color: #e6edf7; font: inherit; font-size: 0.9rem; cursor: pointer;"
               >
                 <option value="classic" data-i18n="tone_classic">Classic (Dual Tone)</option>
                 <option value="bell" data-i18n="tone_bell">Bell</option>
@@ -459,8 +564,7 @@
               <button
                 type="button"
                 id="preview-chime-btn"
-                class="secondary-btn"
-                style="padding: 10px 16px; border: 1px solid #22d3ee55; border-radius: 8px; background: #0b1220; color: #22d3ee; cursor: pointer; white-space: nowrap; font: inherit; font-size: 0.9rem;"
+                class="action-btn action-btn-accent"
                 data-i18n="preview_chime_btn"
               >
                 Play Preview / Nghe thử
@@ -471,19 +575,18 @@
             </div>
           </div>
 
-          <div class="form-group" style="margin-top: 18px;" id="cache-group">
+          <div class="form-group mt-18" id="cache-group">
             <label data-i18n="cache_title">Disk Asset Cache / Bộ nhớ đệm tài sản (256MB)</label>
-            <div style="display: flex; gap: 12px; align-items: center; margin-top: 6px;">
+            <div class="flex-row mt-6">
               <button
                 type="button"
                 id="clear-disk-cache-btn"
-                class="secondary-btn"
-                style="padding: 10px 16px; border: 1px solid #ef444455; border-radius: 8px; background: #0b1220; color: #f87171; cursor: pointer; white-space: nowrap; font: inherit; font-size: 0.9rem;"
+                class="action-btn action-btn-danger"
                 data-i18n="clear_disk_cache_btn"
               >
                 Clear Disk Cache / Xóa bộ nhớ đệm
               </button>
-              <span id="cache-clear-status" class="help-text" style="margin-top: 0;"></span>
+              <span id="cache-clear-status" class="help-text mt-0"></span>
             </div>
             <div class="help-text" data-i18n="cache_help">
               Enforces 256MB LRU quota. Clear cached static assets from disk to force clean re-fetch.
@@ -492,12 +595,12 @@
         </section>
 
         <section class="card" id="security-policy-section">
-          <h2>Security & Approval Policy</h2>
+          <h2>Security &amp; Approval Policy</h2>
           <div class="form-group">
             <label for="security-policy">Policy Preset</label>
             <select id="security-policy" name="security_policy">
               <option value="permissive">Permissive (Autonomous execution - no confirmation)</option>
-              <option value="supervised" selected>Supervised (Recommended - prompt on shell & file deletion)</option>
+              <option value="supervised" selected>Supervised (Recommended - prompt on shell &amp; file deletion)</option>
               <option value="strict">Strict (High Security - prompt on all writes and commands)</option>
             </select>
             <div class="help-text">Controls when the AI agent must prompt for human approval before executing actions.</div>
@@ -514,13 +617,13 @@
               name="server_url"
               placeholder="https://a0.matmagoc.com"
               required
-            />
+            >
             <div class="help-text" data-i18n="server_url_help">Upstream workspace server endpoint.</div>
           </div>
 
           <div class="form-group">
             <label data-i18n="saved_profiles_label">Saved Server Profiles</label>
-            <div class="help-text" style="margin-bottom: 8px;" data-i18n="saved_profiles_help">
+            <div class="help-text mb-8" data-i18n="saved_profiles_help">
               Saved workspace instance endpoints. Click "Select" to make a profile active.
             </div>
             <ul class="path-list" id="server-profiles-list" aria-label="Saved Server Profiles"></ul>
@@ -530,7 +633,7 @@
                 id="new-profile-input"
                 name="new_profile_input"
                 placeholder="e.g. https://custom-instance.example.com"
-              />
+              >
               <button type="button" id="add-profile-btn" data-i18n="add_profile_btn">Add Profile</button>
             </div>
           </div>
@@ -541,7 +644,7 @@
           <div class="form-group">
             <div class="toggle-container">
               <label class="toggle-switch">
-                <input type="checkbox" id="connector-enabled" name="connector_enabled" checked />
+                <input type="checkbox" id="connector-enabled" name="connector_enabled" checked>
                 <span class="slider"></span>
               </label>
               <label for="connector-enabled" class="toggle-label" data-i18n="connector_toggle">Enable Outbound Gateway</label>
@@ -552,38 +655,38 @@
           </div>
 
           <div class="form-group" id="gateway-scopes-group">
-            <label style="margin-bottom: 8px;" data-i18n="security_scopes_label">Security Scopes</label>
-            <div class="help-text" style="margin-bottom: 12px;" data-i18n="security_scopes_help">
+            <label class="mb-8" data-i18n="security_scopes_label">Security Scopes</label>
+            <div class="help-text mb-12" data-i18n="security_scopes_help">
               Granular permission scopes declared in connector_hello handshake.
             </div>
-            <div style="display: flex; flex-direction: column; gap: 10px;">
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
-                <input type="checkbox" id="scope-files" name="scope_files" checked />
+            <div class="flex-column">
+              <label class="scope-option">
+                <input type="checkbox" id="scope-files" name="scope_files" checked>
                 <span><strong data-i18n="scope_files_title">Remote Files</strong> (<code>files</code>)<span data-i18n="scope_files_desc"> — read, write, and patch files in allowed workspace paths</span></span>
               </label>
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
-                <input type="checkbox" id="scope-exec" name="scope_exec" checked />
+              <label class="scope-option">
+                <input type="checkbox" id="scope-exec" name="scope_exec" checked>
                 <span><strong data-i18n="scope_exec_title">Code Execution</strong> (<code>code_execution</code>)<span data-i18n="scope_exec_desc"> — run shell commands inside local PTY sessions</span></span>
               </label>
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
-                <input type="checkbox" id="scope-browser" name="scope_browser" checked />
+              <label class="scope-option">
+                <input type="checkbox" id="scope-browser" name="scope_browser" checked>
                 <span><strong data-i18n="scope_browser_title">Host Browser</strong> (<code>browser</code>)<span data-i18n="scope_browser_desc"> — automate local Chrome/Edge via CDP</span></span>
               </label>
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
-                <input type="checkbox" id="scope-desktop" name="scope_desktop" checked />
+              <label class="scope-option">
+                <input type="checkbox" id="scope-desktop" name="scope_desktop" checked>
                 <span><strong data-i18n="scope_desktop_title">Computer Use</strong> (<code>computer_use</code>)<span data-i18n="scope_desktop_desc"> — screen capture and mouse/keyboard injection</span></span>
               </label>
             </div>
           </div>
 
-          <div class="form-group" style="margin-top: 16px;">
+          <div class="form-group mt-16">
             <label for="workspace-path" data-i18n="workspace_path_label">Workspace Directory (workspace_path)</label>
             <input
               type="text"
               id="workspace-path"
               name="workspace_path"
               placeholder="~/Workspace"
-            />
+            >
             <div class="help-text" data-i18n="workspace_path_help">
               Root directory sandboxed for remote file operations and file tree snapshots (defaults to ~/Workspace).
             </div>
@@ -595,7 +698,7 @@
           <div class="form-group">
             <div class="toggle-container">
               <label class="toggle-switch">
-                <input type="checkbox" id="rfc-enabled" name="rfc_enabled" />
+                <input type="checkbox" id="rfc-enabled" name="rfc_enabled">
                 <span class="slider"></span>
               </label>
               <label for="rfc-enabled" class="toggle-label" data-i18n="rfc_toggle">Allow agent control</label>
@@ -616,7 +719,7 @@
                 name="rfc_password"
                 placeholder="Shared secret for RFC HMAC auth"
                 autocomplete="new-password"
-              />
+              >
             </div>
             <div class="form-group">
               <label for="ssh-password" data-i18n="ssh_password_label">SSH Password</label>
@@ -626,7 +729,7 @@
                 name="ssh_password"
                 placeholder="Root password for SSH terminal bridge"
                 autocomplete="new-password"
-              />
+              >
             </div>
           </div>
 
@@ -641,7 +744,7 @@
                 max="65535"
                 value="55080"
                 required
-              />
+              >
             </div>
             <div class="form-group">
               <label for="ssh-port" data-i18n="ssh_port_label">SSH Port</label>
@@ -653,13 +756,13 @@
                 max="65535"
                 value="55022"
                 required
-              />
+              >
             </div>
           </div>
 
           <div class="form-group">
             <label data-i18n="allowed_paths_label">Allowed Paths</label>
-            <div class="help-text" style="margin-bottom: 8px;" data-i18n="allowed_paths_help">
+            <div class="help-text mb-8" data-i18n="allowed_paths_help">
               Directories accessible to the agent.
             </div>
             <ul class="path-list" id="allowed-paths-list" aria-label="Allowed Paths"></ul>
@@ -669,7 +772,7 @@
                 id="allowed-path-input"
                 name="allowed_paths_input"
                 placeholder="e.g. ~/Workspace or /path/to/dir"
-              />
+              >
               <button type="button" id="add-allowed-path" data-i18n="add_path_btn">Add Path</button>
             </div>
           </div>
@@ -679,16 +782,16 @@
           <h2 data-i18n="shortcuts_title">Keyboard Shortcuts</h2>
           <div class="form-group">
             <label for="global-hotkey" data-i18n="global_hotkey_label">Global Summon Shortcut</label>
-            <div style="display: flex; gap: 8px;">
-              <input id="global-hotkey" name="global_hotkey" placeholder="Alt+Space" spellcheck="false" style="flex: 1;" />
+            <div class="flex-row-sm">
+              <input class="input-grow" type="text" id="global-hotkey" name="global_hotkey" placeholder="Alt+Space" spellcheck="false">
               <button type="button" id="reset-hotkey-btn" data-i18n="reset_hotkey_btn">Reset Default</button>
             </div>
             <div class="help-text" data-i18n="global_hotkey_help">
               Global hotkey to show/hide the window from anywhere (e.g., Alt+Space, Ctrl+Alt+A, Super+Space). On Linux X11 này dùng XGrabKey; trên Wayland dùng biểu tượng khay hệ thống.
             </div>
           </div>
-          <div style="margin-top: 12px;">
-            <a href="help.html" class="nav" style="position: static; display: inline-block; padding: 6px 14px; font-size: 0.85rem;" data-i18n="view_help_link">View All Shortcuts &amp; Help (F1) &rarr;</a>
+          <div class="mt-12">
+            <a href="help.html" class="nav nav-inline" data-i18n="view_help_link">View All Shortcuts &amp; Help (F1) &rarr;</a>
           </div>
         </section>
 

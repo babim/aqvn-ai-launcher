@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Single-Point UI Zoom Normalization**: Zoom is applied once on `documentElement` and any leftover `body` zoom is cleared, so `Ctrl`/`Cmd` `+`/`-` no longer compounds two zoom surfaces (`ui/chat.js`, `ui/container.js`).
+- **RFC Hex Decoder Clippy 1.99 Lint**: Switched slice decoding in `src-tauri/src/rfc/auth.rs` from `chunks_exact(2)` to `as_chunks::<2>()` to satisfy rustc 1.99 lint rules.
 
 ## [0.1.9] - 2026-11-01
 

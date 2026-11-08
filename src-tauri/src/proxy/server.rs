@@ -916,7 +916,7 @@ fn request_origin(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
-fn reject_bad_origin(origin: Option<&str>, proxy_port: u16) -> Option<Response> {
+pub fn reject_bad_origin(origin: Option<&str>, proxy_port: u16) -> Option<Response> {
     match origin {
         Some(origin) if !allowed_origin(origin, proxy_port) => Some(text_response(
             StatusCode::FORBIDDEN,
@@ -929,18 +929,23 @@ fn reject_bad_origin(origin: Option<&str>, proxy_port: u16) -> Option<Response> 
 /// The webview origins and local validation servers may talk to the proxy.
 /// Everything else is rejected so arbitrary web pages cannot drive it.
 pub fn allowed_origin(origin: &str, proxy_port: u16) -> bool {
-    if origin == "tauri://localhost" {
+    if origin == "tauri://localhost" || origin == "tauri://localhost/" {
         return true;
     }
     let Ok(url) = url::Url::parse(origin) else {
         return false;
     };
+    if url.scheme() == "tauri" && url.host_str() == Some("localhost") {
+        return true;
+    }
     if url.scheme() != "http" && url.scheme() != "https" {
         return false;
     }
     match url.host_str() {
         Some("tauri.localhost") => true,
-        Some("localhost") | Some("127.0.0.1") => proxy_port > 0 && url.port() == Some(proxy_port),
+        Some("localhost") | Some("127.0.0.1") | Some("[::1]") => {
+            proxy_port > 0 && url.port() == Some(proxy_port)
+        }
         _ => false,
     }
 }
@@ -1016,10 +1021,89 @@ mod tests {
             "http://tauri.localhost",
             "https://tauri.localhost",
             "http://localhost:55088",
+            "https://localhost:55088",
             "http://127.0.0.1:55088",
+            "https://127.0.0.1:55088",
         ] {
             assert!(allowed_origin(origin, 55088), "{origin} must be allowed");
         }
+    }
+
+    #[test]
+    fn test_webview2_origins() {
+        let port = 55088;
+        // Edge WebView2 origin permutations across HTTP and HTTPS schemes
+        let valid_origins = [
+            "tauri://localhost",
+            "tauri://localhost/",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "http://tauri.localhost:55088",
+            "https://tauri.localhost:55088",
+            "http://127.0.0.1:55088",
+            "https://127.0.0.1:55088",
+            "http://localhost:55088",
+            "https://localhost:55088",
+            "http://[::1]:55088",
+            "https://[::1]:55088",
+        ];
+
+        for origin in valid_origins {
+            assert!(
+                allowed_origin(origin, port),
+                "WebView2 origin {origin} must be allowed"
+            );
+            assert!(
+                reject_bad_origin(Some(origin), port).is_none(),
+                "reject_bad_origin must allow {origin}"
+            );
+        }
+
+        // None origin is allowed (same-origin / internal requests)
+        assert!(reject_bad_origin(None, port).is_none());
+
+        // Unauthorized external origins and port mismatches must be rejected
+        let invalid_origins = [
+            "https://evil.example",
+            "http://evil.example:55088",
+            "http://localhost.evil.example:55088",
+            "http://tauri.localhost.evil.example",
+            "http://evil-tauri.localhost",
+            "http://localhost:3000",
+            "https://localhost:3000",
+            "http://127.0.0.1:8080",
+            "https://127.0.0.1:8080",
+            "http://localhost",
+            "https://localhost",
+            "http://127.0.0.1",
+            "https://127.0.0.1",
+            "ws://localhost:55088",
+            "file:///path",
+            "null",
+            "not a url",
+            "",
+        ];
+
+        for origin in invalid_origins {
+            assert!(
+                !allowed_origin(origin, port),
+                "Origin {origin} must be rejected"
+            );
+            let rejection = reject_bad_origin(Some(origin), port);
+            assert!(
+                rejection.is_some(),
+                "reject_bad_origin must reject {origin}"
+            );
+            assert_eq!(
+                rejection.unwrap().status(),
+                StatusCode::FORBIDDEN,
+                "rejection must yield 403 Forbidden for {origin}"
+            );
+        }
+
+        // Port 0 must reject loopback origins requiring a valid port
+        assert!(!allowed_origin("http://127.0.0.1:55088", 0));
+        assert!(!allowed_origin("http://localhost:55088", 0));
     }
 
     #[test]

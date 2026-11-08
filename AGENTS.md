@@ -9,11 +9,11 @@ Verified environment facts and guardrails for this repository.
 - The gate hook is always-on and not bypassable: `AQVN_HOOK_MODE=relax` does not disable it, and no allowlist or environment variable override exists.
 - Docs (`*.md`), `docs/`, and tests under `tests/` are exempt.
 
-## Serena Rust LSP Workaround
+## Serena Rust LSP Configuration
 
-- Serena Rust LSP is unavailable on this host (`serena___find_symbol` fails with no language server available).
-- For reading Rust source files, use `desktop-commander read_file`.
-- For literal text searching, use `rg` (ripgrep).
+- Rust LSP (`rust-analyzer 1.97.1` at `~/.cargo/bin/rust-analyzer`) is configured in `.serena/project.yml` (`language_servers: [rust]`).
+- If an existing Serena MCP daemon process was started prior to configuration update, restart the session/MCP server to reload `rust-analyzer`.
+- For reading Rust source files directly, use `desktop-commander read_file` or builtin `Read`.
 
 ## Test Timings
 

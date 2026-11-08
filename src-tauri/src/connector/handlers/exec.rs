@@ -39,6 +39,12 @@ fn clamp_dim(val: u16, default: u16) -> u16 {
     }
 }
 
+/// Default bounded capacity for the PTY stdout channel reader.
+/// Each buffer item is a chunk of up to 4096 bytes read from the PTY master.
+/// A bounded capacity of 64 chunks bounds buffered stdout to at most ~256 KB per PTY session.
+pub const DEFAULT_PTY_BUFFER_CAPACITY: usize = 64;
+pub const PTY_OUTPUT_CHANNEL_CAPACITY: usize = DEFAULT_PTY_BUFFER_CAPACITY;
+
 /// A stateful PTY shell session.
 #[cfg(not(target_os = "android"))]
 pub struct PtySession {
@@ -46,7 +52,8 @@ pub struct PtySession {
     killer: Box<dyn ChildKiller + Send + Sync>,
     child: Box<dyn Child + Send + Sync>,
     writer: Arc<StdMutex<Box<dyn Write + Send>>>,
-    output_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    output_rx: mpsc::Receiver<Vec<u8>>,
+    channel_capacity: usize,
     cwd: PathBuf,
     last_accessed: Instant,
     killed: bool,
@@ -55,6 +62,16 @@ pub struct PtySession {
 #[cfg(not(target_os = "android"))]
 impl PtySession {
     pub async fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<Self, String> {
+        Self::spawn_with_capacity(cwd, cols, rows, DEFAULT_PTY_BUFFER_CAPACITY).await
+    }
+
+    pub async fn spawn_with_capacity(
+        cwd: &Path,
+        cols: u16,
+        rows: u16,
+        capacity: usize,
+    ) -> Result<Self, String> {
+        let channel_capacity = capacity.max(1);
         let _ = std::fs::create_dir_all(cwd);
 
         let pty_system = native_pty_system();
@@ -89,7 +106,7 @@ impl PtySession {
             .take_writer()
             .map_err(|err| format!("failed to write pty: {err}"))?;
 
-        let (output_tx, mut output_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (output_tx, mut output_rx) = mpsc::channel::<Vec<u8>>(channel_capacity);
         std::thread::spawn(move || {
             let mut r = reader;
             let mut buf = [0u8; 4096];
@@ -97,7 +114,7 @@ impl PtySession {
                 match r.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if output_tx.send(buf[..n].to_vec()).is_err() {
+                        if output_tx.blocking_send(buf[..n].to_vec()).is_err() {
                             break;
                         }
                     }
@@ -168,10 +185,16 @@ impl PtySession {
             child,
             writer,
             output_rx,
+            channel_capacity,
             cwd: cwd.to_path_buf(),
             last_accessed: Instant::now(),
             killed: false,
         })
+    }
+
+    /// Returns the bounded channel capacity configured for this PTY session.
+    pub fn channel_capacity(&self) -> usize {
+        self.channel_capacity
     }
 
     /// Checks if child process has completed or died.
@@ -417,6 +440,13 @@ impl PtySession {
 
     pub fn cwd(&self) -> &Path {
         &self.cwd
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+impl Drop for PtySession {
+    fn drop(&mut self) {
+        self.kill();
     }
 }
 
@@ -1576,5 +1606,116 @@ mod tests {
         assert_eq!(val["cwd"], "/tmp/workspace");
         assert_eq!(val["alive"], true);
         assert_eq!(val["last_accessed_secs_ago"], 42);
+    }
+
+    #[test]
+    fn test_pty_buffer_capacity_constants_val_debt_002() {
+        assert_eq!(DEFAULT_PTY_BUFFER_CAPACITY, 64);
+        assert_eq!(PTY_OUTPUT_CHANNEL_CAPACITY, DEFAULT_PTY_BUFFER_CAPACITY);
+    }
+
+    #[tokio::test]
+    async fn test_pty_stdout_bounded_channel_throttles_producer_val_debt_002() {
+        let capacity = 3;
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(capacity);
+
+        let sent_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let sent_counter_clone = Arc::clone(&sent_counter);
+
+        // Spawn producer thread simulating PTY reader thread calling blocking_send
+        let producer = std::thread::spawn(move || {
+            for _ in 0..10 {
+                let chunk = vec![b'a'; 1024];
+                if tx.blocking_send(chunk).is_err() {
+                    break;
+                }
+                sent_counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+
+        // Allow producer thread to run and fill the bounded channel buffer
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // With capacity 3, producer must be throttled and cannot send all 10 chunks unbounded
+        let sent_while_blocked = sent_counter.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            sent_while_blocked <= capacity + 1,
+            "Producer must be throttled when downstream bounded queue is saturated; sent: {sent_while_blocked}, capacity: {capacity}"
+        );
+
+        // Drain the saturated buffer
+        let mut received = 0;
+        while let Ok(chunk) = rx.try_recv() {
+            assert_eq!(chunk.len(), 1024);
+            received += 1;
+        }
+        assert!(received > 0);
+
+        // Receive remainder as producer unblocks
+        while received < 10 {
+            if let Some(chunk) = rx.recv().await {
+                assert_eq!(chunk.len(), 1024);
+                received += 1;
+            } else {
+                break;
+            }
+        }
+
+        producer.join().expect("producer joins cleanly");
+        assert_eq!(sent_counter.load(std::sync::atomic::Ordering::SeqCst), 10);
+        assert_eq!(received, 10);
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[tokio::test]
+    async fn test_pty_session_bounded_backpressure_execution_val_debt_002() {
+        let temp_dir = std::env::temp_dir();
+        let capacity = 4;
+        let mut session = PtySession::spawn_with_capacity(&temp_dir, 80, 24, capacity)
+            .await
+            .expect("spawn pty session with bounded capacity");
+
+        assert_eq!(session.channel_capacity(), capacity);
+
+        // Downstream bounded channel with backpressure
+        let (chunk_tx, mut chunk_rx) = mpsc::channel::<String>(2);
+        let drain_task = tokio::spawn(async move {
+            let mut chunks = Vec::new();
+            while let Some(chunk) = chunk_rx.recv().await {
+                // Simulate downstream consumer processing delay
+                tokio::time::sleep(Duration::from_millis(2)).await;
+                chunks.push(chunk);
+            }
+            chunks
+        });
+
+        let cmd = if cfg!(windows) {
+            "1..100 | ForEach-Object { Write-Output \"line_$_\" }"
+        } else {
+            "for i in $(seq 1 100); do echo \"line_$i\"; done"
+        };
+
+        let (output, exit_code) = session
+            .execute_with_options(
+                cmd,
+                15000,
+                Some(&chunk_tx),
+                "test-backpressure-req",
+                "test-backpressure-op",
+                "test-backpressure-session",
+                false,
+            )
+            .await
+            .expect("execute with bounded backpressure");
+
+        drop(chunk_tx);
+        let streamed = drain_task.await.expect("drain task completes");
+
+        assert_eq!(exit_code, 0);
+        assert!(output.contains("line_1"), "output must contain line_1");
+        assert!(output.contains("line_100"), "output must contain line_100");
+        assert!(!streamed.is_empty(), "streamed chunks must not be empty");
+
+        session.kill();
     }
 }

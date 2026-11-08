@@ -1876,8 +1876,7 @@ mod tests {
     #[test]
     fn test_query_service_status_installed_and_not_installed_val_pkg_003() {
         let _lock = TEST_ENV_MUTEX.lock().unwrap();
-        let temp_dir =
-            env::temp_dir().join(format!("test_status_query_{}", std::process::id()));
+        let temp_dir = env::temp_dir().join(format!("test_status_query_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -2064,17 +2063,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_status_renders_service_unit_diagnostic_val_pkg_003() {
-        let _lock = TEST_ENV_MUTEX.lock().unwrap();
         let temp_dir =
             env::temp_dir().join(format!("test_status_service_diag_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let unit_path = temp_dir.join("aqvn-agent.service");
-        env::set_var("AQVN_SYSTEMD_UNIT_PATH", &unit_path);
-
         let settings_path = temp_dir.join("settings.json");
         let settings = AgentSettings::default();
+
+        let lock = TEST_ENV_MUTEX.lock().unwrap();
+        env::set_var("AQVN_SYSTEMD_UNIT_PATH", &unit_path);
+        drop(lock);
 
         // When not installed
         let mut output = Vec::new();
@@ -2095,21 +2095,26 @@ mod tests {
         assert!(text_post.contains("Service Unit:"));
         assert!(text_post.contains("user, Installed"));
 
+        let lock = TEST_ENV_MUTEX.lock().unwrap();
         env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
+        drop(lock);
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
     fn test_parse_cli_args_status_service_flags_val_pkg_003() {
-        let p1 = parse_cli_args(&["status".to_string(), "--user".to_string()]).expect("status --user");
+        let p1 =
+            parse_cli_args(&["status".to_string(), "--user".to_string()]).expect("status --user");
         assert_eq!(p1.action, CliAction::Status);
         assert_eq!(p1.options.user_unit, Some(true));
 
-        let p2 = parse_cli_args(&["status".to_string(), "--system".to_string()]).expect("status --system");
+        let p2 = parse_cli_args(&["status".to_string(), "--system".to_string()])
+            .expect("status --system");
         assert_eq!(p2.action, CliAction::Status);
         assert_eq!(p2.options.user_unit, Some(false));
 
-        let p3 = parse_cli_args(&["--user".to_string(), "status".to_string()]).expect("--user status");
+        let p3 =
+            parse_cli_args(&["--user".to_string(), "status".to_string()]).expect("--user status");
         assert_eq!(p3.action, CliAction::Status);
         assert_eq!(p3.options.user_unit, Some(true));
     }

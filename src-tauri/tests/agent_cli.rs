@@ -693,10 +693,8 @@ fn test_agent_cli_install_with_custom_config_val_agent_cli_004() {
 #[test]
 fn test_agent_cli_install_uninstall_idempotency_val_pkg_003() {
     let bin = agent_bin();
-    let temp_dir = std::env::temp_dir().join(format!(
-        "test_agent_cli_idempotency_{}",
-        std::process::id()
-    ));
+    let temp_dir =
+        std::env::temp_dir().join(format!("test_agent_cli_idempotency_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
     let unit_path = temp_dir.join("aqvn-agent.service");

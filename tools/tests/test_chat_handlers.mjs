@@ -5248,6 +5248,23 @@ describe('VAL-WIN-003: UI Connection Status Indicator and Non-blocking Retry', (
   });
 });
 
+describe('VAL-DEBT-001: OpenSpec Change 206 Task Reconciliation & Archive', () => {
+  test('VAL-DEBT-001: change206-fix-clippy-as-chunks is archived and all tasks marked complete', () => {
+    const archiveDir = new URL('../../openspec/changes/archive/2026-11-07-change206-fix-clippy-as-chunks', import.meta.url);
+    assert.ok(fs.existsSync(archiveDir), 'openspec/changes/archive/2026-11-07-change206-fix-clippy-as-chunks/ must exist');
+
+    const tasksMdPath = new URL('../../openspec/changes/archive/2026-11-07-change206-fix-clippy-as-chunks/tasks.md', import.meta.url);
+    assert.ok(fs.existsSync(tasksMdPath), 'tasks.md must exist in archived directory');
+
+    const content = fs.readFileSync(tasksMdPath, 'utf8');
+    assert.doesNotMatch(content, /^- \[ \] /m, 'tasks.md in change206 must have all tasks checked off ([x])');
+
+    const activeChange206 = new URL('../../openspec/changes/change206-fix-clippy-as-chunks', import.meta.url);
+    assert.ok(!fs.existsSync(activeChange206), 'change206-fix-clippy-as-chunks must not remain under openspec/changes/');
+  });
+});
+
+
 
 
 

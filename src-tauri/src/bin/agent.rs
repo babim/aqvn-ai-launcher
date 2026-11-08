@@ -380,7 +380,10 @@ pub fn parse_cli_args(args: &[String]) -> Result<ParsedCli, String> {
                 "-u" | "--user" => {
                     let is_service_cmd = action == Some(CliAction::Install)
                         || action == Some(CliAction::Uninstall)
-                        || args.iter().any(|a| a == "install" || a == "uninstall");
+                        || action == Some(CliAction::Status)
+                        || args
+                            .iter()
+                            .any(|a| a == "install" || a == "uninstall" || a == "status");
                     if is_service_cmd
                         && (inline_val.is_none()
                             || inline_val.as_deref() == Some("true")
@@ -389,7 +392,8 @@ pub fn parse_cli_args(args: &[String]) -> Result<ParsedCli, String> {
                             || i + 1 >= args.len()
                             || args[i + 1].starts_with('-')
                             || args[i + 1] == "install"
-                            || args[i + 1] == "uninstall")
+                            || args[i + 1] == "uninstall"
+                            || args[i + 1] == "status")
                     {
                         if let Some(ref v) = inline_val {
                             options.user_unit = Some(v.parse().unwrap_or(true));
@@ -667,6 +671,16 @@ pub async fn run_status<W: Write>(
     settings_path: &Path,
     test_conn: bool,
 ) -> io::Result<()> {
+    run_status_ex(writer, settings, settings_path, None, test_conn).await
+}
+
+pub async fn run_status_ex<W: Write>(
+    writer: &mut W,
+    settings: &AgentSettings,
+    settings_path: &Path,
+    user_unit_opt: Option<bool>,
+    test_conn: bool,
+) -> io::Result<()> {
     writeln!(
         writer,
         "\n======================================================"
@@ -703,6 +717,22 @@ pub async fn run_status<W: Write>(
             "Found"
         } else {
             "Not found"
+        }
+    )?;
+    let service_status = query_service_status(user_unit_opt);
+    writeln!(
+        writer,
+        "Service Unit:   {} ({}, {})",
+        service_status.unit_path.display(),
+        if service_status.is_user_unit {
+            "user"
+        } else {
+            "system"
+        },
+        if service_status.installed {
+            "Installed"
+        } else {
+            "Not installed"
         }
     )?;
 
@@ -841,6 +871,24 @@ pub fn resolve_systemd_unit_path(is_user_unit: bool) -> PathBuf {
         PathBuf::from("/etc/systemd/user/aqvn-agent.service")
     } else {
         PathBuf::from("/etc/systemd/system/aqvn-agent.service")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceStatus {
+    pub is_user_unit: bool,
+    pub unit_path: PathBuf,
+    pub installed: bool,
+}
+
+pub fn query_service_status(user_unit_opt: Option<bool>) -> ServiceStatus {
+    let is_user_unit = resolve_is_user_unit(user_unit_opt);
+    let unit_path = resolve_systemd_unit_path(is_user_unit);
+    let installed = unit_path.exists();
+    ServiceStatus {
+        is_user_unit,
+        unit_path,
+        installed,
     }
 }
 
@@ -984,6 +1032,14 @@ pub fn run_install<W: Write>(
 
     if let Some(parent) = unit_path.parent() {
         std::fs::create_dir_all(parent)?;
+    }
+    let is_update = unit_path.exists();
+    if is_update {
+        writeln!(
+            writer,
+            "Updating existing systemd service unit at: {}",
+            unit_path.display()
+        )?;
     }
     std::fs::write(&unit_path, &unit_content)?;
 
@@ -1157,7 +1213,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::Status => {
             let mut settings = AgentSettings::load_from_file(&settings_path);
             parsed.options.apply_to(&mut settings);
-            run_status(&mut io::stdout(), &settings, &settings_path, true).await?;
+            run_status_ex(
+                &mut io::stdout(),
+                &settings,
+                &settings_path,
+                parsed.options.user_unit,
+                true,
+            )
+            .await?;
         }
         CliAction::Menu => {
             run_menu(
@@ -1808,5 +1871,246 @@ mod tests {
         env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
         env::remove_var("AQVN_AGENT_BIN_PATH");
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_query_service_status_installed_and_not_installed_val_pkg_003() {
+        let _lock = TEST_ENV_MUTEX.lock().unwrap();
+        let temp_dir =
+            env::temp_dir().join(format!("test_status_query_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let unit_path = temp_dir.join("aqvn-agent.service");
+        env::set_var("AQVN_SYSTEMD_UNIT_PATH", &unit_path);
+
+        // Not installed yet
+        let status_pre = query_service_status(Some(true));
+        assert!(status_pre.is_user_unit);
+        assert_eq!(status_pre.unit_path, unit_path);
+        assert!(!status_pre.installed);
+
+        // Simulate installation by creating the unit file
+        std::fs::write(&unit_path, "[Unit]\nDescription=Test\n").expect("write dummy unit");
+        let status_post = query_service_status(Some(true));
+        assert!(status_post.installed);
+
+        env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_run_install_idempotent_update_val_pkg_003() {
+        let _lock = TEST_ENV_MUTEX.lock().unwrap();
+        let temp_dir =
+            env::temp_dir().join(format!("test_idempotent_install_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let unit_path = temp_dir.join("aqvn-agent.service");
+        env::set_var("AQVN_SYSTEMD_UNIT_PATH", &unit_path);
+        env::set_var("AQVN_AGENT_BIN_PATH", "/usr/bin/aqvn-agent");
+
+        let mut output = Vec::new();
+        let options = CliOptions {
+            workspace: Some(temp_dir.to_string_lossy().to_string()),
+            user_unit: Some(true),
+            ..Default::default()
+        };
+        let settings = AgentSettings {
+            workspace_path: "/workspace/v1".to_string(),
+            ..Default::default()
+        };
+
+        // 1. Initial install
+        let installed_path =
+            run_install(&mut output, &options, &settings).expect("first install succeeds");
+        assert_eq!(installed_path, unit_path);
+        assert!(unit_path.exists());
+        let content_v1 = std::fs::read_to_string(&unit_path).unwrap();
+        assert!(content_v1.contains("WorkingDirectory=/workspace/v1"));
+
+        // Verify status reflects installed
+        let s_installed = query_service_status(Some(true));
+        assert!(s_installed.installed);
+
+        // 2. Re-install / update with new configuration (idempotent)
+        output.clear();
+        let settings_v2 = AgentSettings {
+            workspace_path: "/workspace/v2_updated".to_string(),
+            ..Default::default()
+        };
+        let reinstalled_path =
+            run_install(&mut output, &options, &settings_v2).expect("second install succeeds");
+        assert_eq!(reinstalled_path, unit_path);
+        let log_v2 = String::from_utf8_lossy(&output);
+        assert!(log_v2.contains("Updating existing systemd service unit at:"));
+        assert!(log_v2.contains("installed and enabled successfully."));
+
+        let content_v2 = std::fs::read_to_string(&unit_path).unwrap();
+        assert!(content_v2.contains("WorkingDirectory=/workspace/v2_updated"));
+
+        // Clean up
+        output.clear();
+        run_uninstall(&mut output, &options).expect("uninstall succeeds");
+        assert!(!unit_path.exists());
+
+        env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
+        env::remove_var("AQVN_AGENT_BIN_PATH");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_run_uninstall_idempotency_val_pkg_003() {
+        let _lock = TEST_ENV_MUTEX.lock().unwrap();
+        let temp_dir =
+            env::temp_dir().join(format!("test_idempotent_uninstall_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let unit_path = temp_dir.join("aqvn-agent.service");
+        env::set_var("AQVN_SYSTEMD_UNIT_PATH", &unit_path);
+        env::set_var("AQVN_AGENT_BIN_PATH", "/usr/bin/aqvn-agent");
+
+        let mut output = Vec::new();
+        let options = CliOptions {
+            user_unit: Some(true),
+            ..Default::default()
+        };
+        let settings = AgentSettings::default();
+
+        // Install first
+        run_install(&mut output, &options, &settings).expect("install service");
+        assert!(unit_path.exists());
+
+        // 1. First uninstall removes unit file
+        output.clear();
+        run_uninstall(&mut output, &options).expect("first uninstall succeeds");
+        assert!(!unit_path.exists());
+        let log_uninst1 = String::from_utf8_lossy(&output);
+        assert!(log_uninst1.contains("Removed unit file:"));
+        assert!(log_uninst1.contains("uninstalled cleanly."));
+
+        // 2. Second uninstall on non-existent unit file handles absence idempotently
+        output.clear();
+        run_uninstall(&mut output, &options).expect("second uninstall succeeds idempotently");
+        let log_uninst2 = String::from_utf8_lossy(&output);
+        assert!(log_uninst2.contains("Unit file not found or already removed:"));
+        assert!(log_uninst2.contains("uninstalled cleanly."));
+
+        let s_uninstalled = query_service_status(Some(true));
+        assert!(!s_uninstalled.installed);
+
+        env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
+        env::remove_var("AQVN_AGENT_BIN_PATH");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_run_install_system_unit_idempotent_lifecycle_val_pkg_003() {
+        let _lock = TEST_ENV_MUTEX.lock().unwrap();
+        let temp_dir =
+            env::temp_dir().join(format!("test_sys_unit_lifecycle_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let unit_path = temp_dir.join("aqvn-agent-sys.service");
+        env::set_var("AQVN_SYSTEMD_UNIT_PATH", &unit_path);
+        env::set_var("AQVN_AGENT_BIN_PATH", "/usr/bin/aqvn-agent");
+
+        let mut output = Vec::new();
+        let options = CliOptions {
+            user_unit: Some(false),
+            ..Default::default()
+        };
+        let settings = AgentSettings {
+            workspace_path: "/var/aqvn-system-ws".to_string(),
+            ..Default::default()
+        };
+
+        // 1. Install system unit
+        let installed = run_install(&mut output, &options, &settings).expect("install system unit");
+        assert_eq!(installed, unit_path);
+        assert!(unit_path.exists());
+        let content = std::fs::read_to_string(&unit_path).unwrap();
+        assert!(content.contains("WantedBy=multi-user.target"));
+        assert!(content.contains("WorkingDirectory=/var/aqvn-system-ws"));
+
+        let status = query_service_status(Some(false));
+        assert!(!status.is_user_unit);
+        assert!(status.installed);
+
+        // 2. Re-install system unit idempotently
+        output.clear();
+        run_install(&mut output, &options, &settings).expect("reinstall system unit");
+        let log_re = String::from_utf8_lossy(&output);
+        assert!(log_re.contains("Updating existing systemd service unit at:"));
+
+        // 3. Uninstall system unit
+        output.clear();
+        run_uninstall(&mut output, &options).expect("uninstall system unit");
+        assert!(!unit_path.exists());
+
+        // 4. Uninstall system unit second time (idempotent)
+        output.clear();
+        run_uninstall(&mut output, &options).expect("second uninstall system unit");
+        let status_after = query_service_status(Some(false));
+        assert!(!status_after.installed);
+
+        env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
+        env::remove_var("AQVN_AGENT_BIN_PATH");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_status_renders_service_unit_diagnostic_val_pkg_003() {
+        let _lock = TEST_ENV_MUTEX.lock().unwrap();
+        let temp_dir =
+            env::temp_dir().join(format!("test_status_service_diag_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let unit_path = temp_dir.join("aqvn-agent.service");
+        env::set_var("AQVN_SYSTEMD_UNIT_PATH", &unit_path);
+
+        let settings_path = temp_dir.join("settings.json");
+        let settings = AgentSettings::default();
+
+        // When not installed
+        let mut output = Vec::new();
+        run_status_ex(&mut output, &settings, &settings_path, Some(true), false)
+            .await
+            .expect("status succeeds");
+        let text_pre = String::from_utf8_lossy(&output);
+        assert!(text_pre.contains("Service Unit:"));
+        assert!(text_pre.contains("user, Not installed"));
+
+        // When installed
+        std::fs::write(&unit_path, "[Unit]\nDescription=Test\n").unwrap();
+        output.clear();
+        run_status_ex(&mut output, &settings, &settings_path, Some(true), false)
+            .await
+            .expect("status succeeds");
+        let text_post = String::from_utf8_lossy(&output);
+        assert!(text_post.contains("Service Unit:"));
+        assert!(text_post.contains("user, Installed"));
+
+        env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_parse_cli_args_status_service_flags_val_pkg_003() {
+        let p1 = parse_cli_args(&["status".to_string(), "--user".to_string()]).expect("status --user");
+        assert_eq!(p1.action, CliAction::Status);
+        assert_eq!(p1.options.user_unit, Some(true));
+
+        let p2 = parse_cli_args(&["status".to_string(), "--system".to_string()]).expect("status --system");
+        assert_eq!(p2.action, CliAction::Status);
+        assert_eq!(p2.options.user_unit, Some(false));
+
+        let p3 = parse_cli_args(&["--user".to_string(), "status".to_string()]).expect("--user status");
+        assert_eq!(p3.action, CliAction::Status);
+        assert_eq!(p3.options.user_unit, Some(true));
     }
 }

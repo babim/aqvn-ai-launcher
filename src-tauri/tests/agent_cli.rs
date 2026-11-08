@@ -689,3 +689,96 @@ fn test_agent_cli_install_with_custom_config_val_agent_cli_004() {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn test_agent_cli_install_uninstall_idempotency_val_pkg_003() {
+    let bin = agent_bin();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_agent_cli_idempotency_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let unit_path = temp_dir.join("aqvn-agent.service");
+
+    // 1. Initial install
+    let output1 = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("install")
+        .arg("--user")
+        .arg("--workspace")
+        .arg("/tmp/agent-ws-v1")
+        .output()
+        .expect("initial install");
+
+    assert!(output1.status.success());
+    assert!(unit_path.exists());
+    let content1 = std::fs::read_to_string(&unit_path).unwrap();
+    assert!(content1.contains("WorkingDirectory=/tmp/agent-ws-v1"));
+
+    // 2. Query status: service unit is reported as installed
+    let out_status1 = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("status")
+        .arg("--user")
+        .output()
+        .expect("status query");
+    assert!(out_status1.status.success());
+    let status_stdout1 = String::from_utf8_lossy(&out_status1.stdout);
+    assert!(status_stdout1.contains("Service Unit:"));
+    assert!(status_stdout1.contains("user, Installed"));
+
+    // 3. Reinstall / update idempotently with new workspace
+    let output2 = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("install")
+        .arg("--user")
+        .arg("--workspace")
+        .arg("/tmp/agent-ws-v2-updated")
+        .output()
+        .expect("reinstall");
+
+    assert!(output2.status.success());
+    let stdout2 = String::from_utf8_lossy(&output2.stdout);
+    assert!(stdout2.contains("Updating existing systemd service unit at:"));
+    assert!(stdout2.contains("aqvn-agent systemd service installed and enabled successfully."));
+
+    let content2 = std::fs::read_to_string(&unit_path).unwrap();
+    assert!(content2.contains("WorkingDirectory=/tmp/agent-ws-v2-updated"));
+
+    // 4. Uninstall removes unit file
+    let out_uninst1 = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("uninstall")
+        .arg("--user")
+        .output()
+        .expect("uninstall");
+    assert!(out_uninst1.status.success());
+    assert!(!unit_path.exists());
+
+    // 5. Query status: service unit is reported as not installed
+    let out_status2 = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("status")
+        .arg("--user")
+        .output()
+        .expect("status query after uninstall");
+    assert!(out_status2.status.success());
+    let status_stdout2 = String::from_utf8_lossy(&out_status2.stdout);
+    assert!(status_stdout2.contains("Service Unit:"));
+    assert!(status_stdout2.contains("user, Not installed"));
+
+    // 6. Second uninstall runs idempotently without error
+    let out_uninst2 = Command::new(&bin)
+        .env("AQVN_SYSTEMD_UNIT_PATH", &unit_path)
+        .arg("uninstall")
+        .arg("--user")
+        .output()
+        .expect("second uninstall");
+    assert!(out_uninst2.status.success());
+    let stdout_uninst2 = String::from_utf8_lossy(&out_uninst2.stdout);
+    assert!(stdout_uninst2.contains("Unit file not found or already removed:"));
+    assert!(stdout_uninst2.contains("aqvn-agent systemd service uninstalled cleanly."));
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}

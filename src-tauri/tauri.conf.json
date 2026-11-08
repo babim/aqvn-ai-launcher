@@ -36,7 +36,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm"],
+    "targets": [
+      "deb",
+      "rpm",
+      "nsis",
+      "msi"
+    ],
     "category": "DeveloperTool",
     "shortDescription": "AQVN Native Workspace Client and RFC Host Bridge",
     "longDescription": "AQVN Native Workspace Client and RFC Host Bridge provides a lightweight desktop workspace client with embedded local reverse proxy and RFC host bridge.",
@@ -49,6 +54,25 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "allowDowngrades": true,
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "both",
+        "languages": [
+          "English"
+        ],
+        "displayLanguageSelector": false
+      },
+      "wix": {
+        "language": "en-US"
+      }
+    },
     "linux": {
       "deb": {
         "depends": [

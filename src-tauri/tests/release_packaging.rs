@@ -349,3 +349,98 @@ fn val_pkg_001_linux_bundle_metadata_and_artifact_configuration() {
         "bundle.icon must reference icon.png"
     );
 }
+
+#[test]
+fn val_pkg_002_windows_nsis_and_msi_bundle_configuration_and_size_guard() {
+    let tauri_conf_raw = fs::read_to_string(manifest_dir().join("tauri.conf.json"))
+        .expect("must read src-tauri/tauri.conf.json");
+    let tauri_conf: serde_json::Value =
+        serde_json::from_str(&tauri_conf_raw).expect("tauri.conf.json must be valid JSON");
+
+    // 1. Bundle targets include nsis and msi
+    let targets = tauri_conf["bundle"]["targets"]
+        .as_array()
+        .expect("bundle.targets array");
+    let target_strings: Vec<&str> = targets.iter().filter_map(|t| t.as_str()).collect();
+    assert!(
+        target_strings.contains(&"nsis"),
+        "bundle.targets must contain nsis"
+    );
+    assert!(
+        target_strings.contains(&"msi"),
+        "bundle.targets must contain msi"
+    );
+
+    // 2. Windows specific bundle configuration
+    let windows = &tauri_conf["bundle"]["windows"];
+    assert!(windows.is_object(), "bundle.windows must be configured");
+
+    let nsis = &windows["nsis"];
+    assert!(nsis.is_object(), "bundle.windows.nsis must be configured");
+    let nsis_icon = nsis["installerIcon"].as_str().unwrap_or("");
+    assert!(
+        nsis_icon.contains("icon.ico"),
+        "nsis.installerIcon must reference icon.ico, got: {nsis_icon}"
+    );
+
+    let install_mode = nsis["installMode"].as_str().unwrap_or("");
+    assert!(
+        install_mode == "both" || install_mode == "currentUser" || install_mode == "perMachine",
+        "nsis.installMode must be valid, got: {install_mode}"
+    );
+
+    let wix = &windows["wix"];
+    assert!(wix.is_object(), "bundle.windows.wix must be configured");
+    assert!(
+        wix["language"].as_str().is_some() || wix["language"].as_array().is_some(),
+        "bundle.windows.wix.language must be configured"
+    );
+
+    // 3. icon.ico exists on disk and in bundle icon set
+    let icon_list = tauri_conf["bundle"]["icon"]
+        .as_array()
+        .expect("bundle.icon array");
+    let icon_strings: Vec<&str> = icon_list.iter().filter_map(|i| i.as_str()).collect();
+    assert!(
+        icon_strings.iter().any(|s| s.contains("icon.ico")),
+        "bundle.icon must reference icon.ico"
+    );
+
+    let ico_path = manifest_dir().join("icons/icon.ico");
+    assert!(
+        ico_path.exists(),
+        "icons/icon.ico must exist at {}",
+        ico_path.display()
+    );
+    let ico_bytes = fs::read(&ico_path).expect("must read icon.ico");
+    assert!(!ico_bytes.is_empty(), "icon.ico must not be empty");
+    assert!(
+        ico_bytes.starts_with(&[0, 0, 1, 0]),
+        "icon.ico must start with ICO header bytes [0x00, 0x00, 0x01, 0x00]"
+    );
+
+    // 4. Size limit enforcement (< 10MB per VAL-CI-003):
+    // WebView2 install mode must use downloadBootstrapper (offlineInstaller embeds ~127MB)
+    let webview_mode = &windows["webviewInstallMode"];
+    let mode_type = webview_mode["type"].as_str().unwrap_or("");
+    assert_eq!(
+        mode_type, "downloadBootstrapper",
+        "webviewInstallMode must be downloadBootstrapper to satisfy < 10MB binary size limit"
+    );
+
+    // 5. CI release workflow verifies NSIS size gate (< 10MB)
+    let release_yml_path = repo_root().join(".github/workflows/release.yml");
+    let release_yml = fs::read_to_string(&release_yml_path).expect("must read release.yml");
+    assert!(
+        release_yml.contains("Check NSIS installer size gate (< 10MB)"),
+        "release.yml must include NSIS size gate check step"
+    );
+    assert!(
+        release_yml.contains("MAX_SIZE=10485760"),
+        "release.yml must enforce MAX_SIZE=10485760 (10MB limit)"
+    );
+    assert!(
+        release_yml.contains("--bundles nsis,msi"),
+        "release.yml windows job must build nsis,msi bundles"
+    );
+}

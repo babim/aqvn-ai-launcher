@@ -956,9 +956,10 @@
     });
   }
 
-  /* Three-state LED: green online, amber polling fallback, red offline. */
+  /* Four-state LED: green online, amber reconnecting/polling fallback, red offline. */
   var CONNECTION_STATES = {
     online: { icon: '\u{1F7E2}', label: 'Online' },
+    reconnecting: { icon: '\u{1F7E1}', label: 'Reconnecting' },
     polling: { icon: '\u{1F7E1}', label: 'Polling' },
     offline: { icon: '\u{1F534}', label: 'Offline' }
   };
@@ -971,8 +972,33 @@
       dom.connection.dataset.state = key;
       dom.connection.setAttribute('aria-label', 'Connection: ' + info.label);
     }
+    if (dom.retryBtn) {
+      dom.retryBtn.hidden = (key === 'online');
+    }
     if (typeof window !== 'undefined' && window.__AQVN_CONTAINER__ && typeof window.__AQVN_CONTAINER__.setConnectionStatus === 'function') {
       window.__AQVN_CONTAINER__.setConnectionStatus(key === 'online' ? 'connected' : key);
+    }
+  }
+
+  function manualReconnect() {
+    setConnection('reconnecting');
+    if (typeof window !== 'undefined' && window.__AQVN_CONTAINER__ && typeof window.__AQVN_CONTAINER__.reconnectNow === 'function') {
+      window.__AQVN_CONTAINER__.reconnectNow();
+      return;
+    }
+    if (state.socket && typeof state.socket.connect === 'function') {
+      state.socket.connect();
+    } else {
+      connectSocket();
+    }
+    flushOutbox();
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      try {
+        var evt = typeof CustomEvent === 'function'
+          ? new CustomEvent('aqvn:reconnect', { detail: { timestamp: Date.now() } })
+          : { type: 'aqvn:reconnect' };
+        window.dispatchEvent(evt);
+      } catch (e) {}
     }
   }
 
@@ -1038,8 +1064,8 @@
     var socket = io(state.base + '/ws', {
       autoConnect: false,
       reconnection: true,
-      reconnectionDelay: 700,
-      reconnectionDelayMax: 4000,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
       randomizationFactor: 0.3,
       timeout: 20000,
       transports: ['websocket', 'polling'],
@@ -1053,8 +1079,8 @@
             var isAuth = /unauthor|forbidden|401|403|invalid session|login_required/i.test(msg);
             if (state.everConnected && isAuth) {
               sessionExpired();
-            } else if (dom.loginView ? dom.loginView.hidden : true) {
-              showChatError(msg);
+            } else {
+              setConnection('reconnecting');
             }
             var errorObj = err instanceof Error ? err : new Error(msg);
             if (!errorObj.error) {
@@ -1076,7 +1102,7 @@
 
     socket.on('disconnect', function (reason) {
       state.online = false;
-      setConnection('offline');
+      setConnection(reason === 'io client disconnect' ? 'offline' : 'reconnecting');
       applyProgress(false, '');
       /* socket.io does not auto-retry a server-initiated disconnect; recover
        * without a page reload (real servers emit one on restart). */
@@ -1097,11 +1123,35 @@
         sessionExpired();
         return;
       }
-      setConnection('offline');
-      if (!state.expired && (dom.loginView ? dom.loginView.hidden : true)) {
-        showChatError('Connection problem: ' + message);
-      }
+      setConnection('reconnecting');
+      // Intrusive blocking modal alert replaced with non-blocking status indicator
     });
+
+    socket.on('reconnect_attempt', function () {
+      setConnection('reconnecting');
+    });
+
+    socket.on('reconnecting', function () {
+      setConnection('reconnecting');
+    });
+
+    socket.on('reconnect_failed', function () {
+      state.online = false;
+      setConnection('offline');
+    });
+
+    if (socket.io && typeof socket.io.on === 'function') {
+      socket.io.on('reconnect_attempt', function () {
+        setConnection('reconnecting');
+      });
+      socket.io.on('reconnect_error', function () {
+        setConnection('reconnecting');
+      });
+      socket.io.on('reconnect_failed', function () {
+        state.online = false;
+        setConnection('offline');
+      });
+    }
 
     socket.on('state_push', onStatePush);
     socket.on('server_restart', onServerRestart);
@@ -4061,12 +4111,17 @@
     dom.messages = byId('messages');
     dom.status = byId('status-line');
     dom.chatError = byId('chat-error');
+    if (dom.chatError) {
+      dom.chatError.hidden = true;
+      setText(dom.chatError, '');
+    }
     dom.input = byId('message-input');
     dom.composer = byId('composer');
     dom.send = byId('send-btn');
     dom.stop = byId('stop-btn');
     dom.newChat = byId('new-chat-btn');
     dom.connection = byId('connection-pill') || byId('connection');
+    dom.retryBtn = byId('connection-retry-btn');
     dom.searchToggleBtn = byId('search-toggle-btn');
     dom.searchDrawer = byId('search-drawer');
     dom.searchInput = byId('search-input');
@@ -4139,6 +4194,12 @@
     dom.composer.addEventListener('submit', sendMessage);
     dom.stop.addEventListener('click', stopResponse);
     dom.newChat.addEventListener('click', newChat);
+    if (dom.retryBtn) {
+      dom.retryBtn.addEventListener('click', function (e) {
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        manualReconnect();
+      });
+    }
 
     dom.input.addEventListener('keydown', function (event) {
       if (event.key === 'Enter' && !event.shiftKey) {
@@ -4158,9 +4219,12 @@
 
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('aqvn:reconnect', function () {
-        disconnectSocket();
-        stopPolling();
-        connectSocket();
+        setConnection('reconnecting');
+        if (state.socket && typeof state.socket.connect === 'function') {
+          state.socket.connect();
+        } else {
+          connectSocket();
+        }
         flushOutbox();
       });
     }

@@ -188,7 +188,8 @@ __harness__.exports = (function () {
     'upsertLog', 'mergeLogs', 'placeRow', 'clearLogs', 'exportMarkdown', 'exportJson', 'copyTranscript',
     'openExportMenu', 'closeExportMenu', 'toggleExportMenu',
     'switchSidebarTab', 'loadWorkspaceFiles', 'renderWorkspaceFiles', 'uploadWorkspaceFiles', 'uploadSingleFile', 'isBinaryFile', 'formatFileSize', 'formatFileTimestamp',
-    'toggleTerminal', 'setTerminalCollapsed', 'appendTerminalOutput', 'clearTerminalOutput', 'sendTerminalCommand'
+    'toggleTerminal', 'setTerminalCollapsed', 'appendTerminalOutput', 'clearTerminalOutput', 'sendTerminalCommand',
+    'manualReconnect'
   ];
   var out = {};
   names.forEach(function (name) {
@@ -348,7 +349,7 @@ __harness__.exports = (function () {
     'search-prev-btn', 'search-next-btn', 'search-close-btn', 'search-filters',
     'filter-all-btn', 'filter-code-btn', 'filter-tool-btn', 'filter-thought-btn',
     'filter-error-btn', 'messages', 'export-toggle-btn', 'export-menu',
-    'export-md-btn', 'export-json-btn', 'copy-transcript-btn',
+    'export-md-btn', 'export-json-btn', 'copy-transcript-btn', 'connection-retry-btn',
     'tab-sessions-btn', 'tab-workspace-btn', 'sessions-view', 'workspace-view',
     'workspace-file-list', 'workspace-upload-dropzone', 'workspace-refresh-btn',
     'terminal-drawer', 'toggle-terminal-btn', 'terminal-output', 'terminal-input',
@@ -356,6 +357,10 @@ __harness__.exports = (function () {
   ].forEach((id) => {
     dom[id] = getEl(id);
   });
+  dom.retryBtn = getEl('connection-retry-btn');
+  dom.retryBtn.hidden = true;
+  dom.chatError = getEl('chat-error');
+  dom.chatError.hidden = true;
   dom.terminalDrawer = getEl('terminal-drawer');
   dom.terminalDrawer.hidden = true;
   dom.toggleTerminalBtn = getEl('toggle-terminal-btn');
@@ -5099,6 +5104,147 @@ describe('Phase 2 Hardening: Outbox, Terminal memory, a11y & preview sanitizatio
     assert.match(chatJs, /e\.key === 'Escape'/, 'Escape handler present');
     assert.match(chatJs, /closeFilePreview\(\)/, 'Escape closes preview modal');
     assert.match(chatJs, /closeDiffViewer\(\)/, 'Escape closes diff viewer');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-WIN-003: UI Connection Status Indicator & User-Friendly Recovery*/
+/* ------------------------------------------------------------------ */
+
+describe('VAL-WIN-003: UI Connection Status Indicator and Non-blocking Retry', () => {
+  test('VAL-WIN-003: connect_error updates connection status to reconnecting without throwing modal error alerts', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { connectSocket, dom } = harness.exports;
+    const pill = harness.getEl('connection-pill');
+
+    connectSocket();
+    assert.ok(harness.listeners.connect_error, 'connect_error listener must be registered');
+
+    // Simulate connection error on startup / disconnect
+    harness.listeners.connect_error(new Error('WebSocket connection to ws:// failed'));
+
+    // Status pill must update to reconnecting
+    assert.equal(pill.dataset.state, 'reconnecting', 'pill dataset state must be reconnecting on connect_error');
+    assert.match(pill.textContent, /Reconnecting/, 'pill label must show Reconnecting');
+
+    // Intrusive error alert banner must NOT be shown
+    assert.equal(dom.chatError.hidden, true, 'chatError alert must remain hidden on connect_error');
+    assert.equal(dom.chatError.textContent, '', 'chatError text must be empty');
+
+    // Retry button must become visible for user recovery
+    assert.equal(dom.retryBtn.hidden, false, 'retry button must be visible during reconnecting state');
+  });
+
+  test('VAL-WIN-003: reconnect_failed transitions status to offline and keeps retry button visible', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { connectSocket, dom } = harness.exports;
+    const pill = harness.getEl('connection-pill');
+
+    connectSocket();
+    assert.ok(harness.listeners.reconnect_failed, 'reconnect_failed listener must be registered');
+
+    // Trigger reconnect_failed event
+    harness.listeners.reconnect_failed();
+
+    assert.equal(pill.dataset.state, 'offline', 'status must transition to offline when reconnect fails');
+    assert.match(pill.textContent, /Offline/, 'status label must show Offline');
+    assert.equal(dom.retryBtn.hidden, false, 'retry button must remain visible when offline');
+    assert.equal(dom.chatError.hidden, true, 'chatError modal alert must not be shown on reconnect_failed');
+  });
+
+  test('VAL-WIN-003: manual reconnect button triggers immediate reconnection attempt', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { connectSocket, dom, state } = harness.exports;
+    const pill = harness.getEl('connection-pill');
+
+    connectSocket();
+    harness.listeners.connect_error(new Error('Connection dropped'));
+    assert.equal(pill.dataset.state, 'reconnecting');
+
+    let connectCalled = false;
+    state.socket.connect = () => {
+      connectCalled = true;
+    };
+
+    // Simulate clicking retry button
+    dom.retryBtn.dispatch('click', { preventDefault: () => {} });
+
+    assert.equal(connectCalled, true, 'clicking retry button must trigger immediate socket connect attempt');
+    assert.equal(pill.dataset.state, 'reconnecting', 'status must remain in reconnecting state');
+  });
+
+  test('VAL-WIN-003: successful connect transitions status to online and hides retry button', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { connectSocket, dom } = harness.exports;
+    const pill = harness.getEl('connection-pill');
+
+    connectSocket();
+    // Initially reconnecting with retry button visible
+    harness.listeners.connect_error(new Error('Initial failure'));
+    assert.equal(dom.retryBtn.hidden, false);
+
+    // Socket successfully connects
+    harness.listeners.connect();
+
+    assert.equal(pill.dataset.state, 'online', 'pill state must be online');
+    assert.match(pill.textContent, /Online/, 'pill label must show Online');
+    assert.equal(dom.retryBtn.hidden, true, 'retry button must be hidden when connected online');
+    assert.equal(dom.chatError.hidden, true, 'chatError must be hidden when connected online');
+  });
+
+  test('VAL-WIN-003: ui/container.js synchronizes #connection-retry-btn across state transitions and click triggers reconnectNow', async () => {
+    const harness = createContainerHarness();
+    const { bridge, elements, document, createElement, calls } = harness;
+
+    const retryBtn = createElement('connection-retry-btn');
+    retryBtn.hidden = true;
+    elements['connection-retry-btn'] = retryBtn;
+
+    const badge = createElement('connection-status-badge');
+    elements['connection-status-badge'] = badge;
+
+    bridge.installDiagnostics(document);
+
+    // Offline -> retryBtn visible
+    bridge.setConnectionStatus('offline');
+    assert.equal(retryBtn.hidden, false, 'retry button must be visible when offline');
+
+    // Reconnecting -> retryBtn visible
+    bridge.setConnectionStatus('reconnecting');
+    assert.equal(retryBtn.hidden, false, 'retry button must be visible when reconnecting');
+
+    // Connected -> retryBtn hidden
+    bridge.setConnectionStatus('connected');
+    assert.equal(retryBtn.hidden, true, 'retry button must be hidden when connected');
+
+    // Click retry button triggers reconnectNow action
+    bridge.setConnectionStatus('offline');
+    assert.equal(retryBtn.hidden, false);
+
+    let reconnectEventFired = false;
+    harness.context.window.addEventListener('aqvn:reconnect', () => {
+      reconnectEventFired = true;
+    });
+
+    retryBtn.dispatch('click', { preventDefault: () => {} });
+    assert.equal(bridge.getConnectionStatus(), 'reconnecting', 'status must transition to reconnecting on retry click');
+    assert.equal(reconnectEventFired, true, 'aqvn:reconnect event must be dispatched on retry click');
+
+    const reconnectCalls = calls.filter((c) => c.command === 'reconnect_network');
+    assert.equal(reconnectCalls.length, 1, 'reconnect_network IPC command must be dispatched');
+  });
+
+  test('VAL-WIN-003: index.html defines #connection-retry-btn and chat.css styles non-blocking pill and retry button', () => {
+    const html = readIndexHtml();
+    assert.match(html, /id="connection-retry-btn"/, 'ui/index.html must expose #connection-retry-btn');
+
+    const css = readChatCss();
+    assert.match(css, /\.connection-retry-btn/, 'ui/chat.css must define .connection-retry-btn');
+    assert.match(css, /\.conn\[data-state="reconnecting"\]/, 'ui/chat.css must style .conn[data-state="reconnecting"]');
   });
 });
 

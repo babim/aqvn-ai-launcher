@@ -1155,6 +1155,12 @@
         pill.textContent = info.icon + ' ' + info.label;
       }
 
+      var retryBtn = (document.getElementById && document.getElementById('connection-retry-btn')) ||
+                     (document.querySelector && document.querySelector('.connection-retry-btn'));
+      if (retryBtn) {
+        retryBtn.hidden = (canonical === 'connected');
+      }
+
       var statusEl = document.getElementById && document.getElementById('diagnostics-connection-status');
       if (statusEl) {
         statusEl.textContent = info.label;
@@ -1391,6 +1397,16 @@
         : null;
       if (reconnectBtn && typeof reconnectBtn.addEventListener === 'function') {
         reconnectBtn.addEventListener('click', function (e) {
+          if (e && typeof e.preventDefault === 'function') e.preventDefault();
+          reconnectNow();
+        });
+      }
+
+      var retryBtn = root.getElementById
+        ? (root.getElementById('connection-retry-btn') || root.getElementById('retry-btn'))
+        : null;
+      if (retryBtn && typeof retryBtn.addEventListener === 'function') {
+        retryBtn.addEventListener('click', function (e) {
           if (e && typeof e.preventDefault === 'function') e.preventDefault();
           reconnectNow();
         });

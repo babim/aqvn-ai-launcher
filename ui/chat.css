@@ -127,6 +127,10 @@ body {
   color: var(--ok);
 }
 
+.conn[data-state="reconnecting"] {
+  color: #fbbf24;
+}
+
 .conn[data-state="polling"] {
   color: #fbbf24;
 }
@@ -168,6 +172,30 @@ body {
 .connection-status-badge[data-state="offline"] {
   color: var(--muted);
   border-color: rgba(255, 255, 255, 0.1);
+}
+
+.connection-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 9999px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  color: #fbbf24;
+  transition: all 0.15s ease;
+}
+
+.connection-retry-btn:hover {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: rgba(251, 191, 36, 0.6);
+}
+
+.connection-retry-btn[hidden] {
+  display: none !important;
 }
 
 /* ------------------------------------------------------------------ */

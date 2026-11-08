@@ -244,3 +244,108 @@ fn val_agent_rel_001_headless_linux_release_binary() {
         "aqvn-agent --version must print agent identifier, got: {stdout}"
     );
 }
+
+#[test]
+fn val_pkg_001_linux_bundle_metadata_and_artifact_configuration() {
+    let tauri_conf_raw = fs::read_to_string(manifest_dir().join("tauri.conf.json"))
+        .expect("must read src-tauri/tauri.conf.json");
+    let tauri_conf: serde_json::Value =
+        serde_json::from_str(&tauri_conf_raw).expect("tauri.conf.json must be valid JSON");
+
+    // 1. App identifier and whitelabel product title
+    let identifier = tauri_conf["identifier"]
+        .as_str()
+        .expect("identifier string");
+    assert_eq!(
+        identifier, "net.aqvn.workspace",
+        "app identifier must be net.aqvn.workspace"
+    );
+
+    let product_name = tauri_conf["productName"]
+        .as_str()
+        .expect("productName string");
+    assert_eq!(
+        product_name, "AQVN Workspace",
+        "productName must be AQVN Workspace"
+    );
+
+    // 2. Bundle targets include deb and rpm
+    let targets = tauri_conf["bundle"]["targets"]
+        .as_array()
+        .expect("bundle.targets array");
+    let target_strings: Vec<&str> = targets.iter().filter_map(|t| t.as_str()).collect();
+    assert!(
+        target_strings.contains(&"deb"),
+        "bundle.targets must contain deb"
+    );
+    assert!(
+        target_strings.contains(&"rpm"),
+        "bundle.targets must contain rpm"
+    );
+
+    // 3. Category and desktop integration metadata
+    let category = tauri_conf["bundle"]["category"]
+        .as_str()
+        .expect("bundle.category");
+    assert!(
+        category == "DeveloperTool" || category == "Utility",
+        "bundle.category must be a valid desktop category"
+    );
+
+    let short_desc = tauri_conf["bundle"]["shortDescription"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        !short_desc.is_empty(),
+        "bundle.shortDescription must be specified"
+    );
+
+    // 4. Linux specific configuration for deb and rpm
+    let linux = &tauri_conf["bundle"]["linux"];
+    assert!(linux.is_object(), "bundle.linux must be configured");
+    assert!(
+        linux["deb"].is_object(),
+        "bundle.linux.deb must be configured"
+    );
+    assert!(
+        linux["rpm"].is_object(),
+        "bundle.linux.rpm must be configured"
+    );
+
+    // 5. Standard icon resolutions exist on disk
+    let icons_dir = manifest_dir().join("icons");
+    let required_icons = ["32x32.png", "128x128.png", "256x256.png", "icon.png"];
+    for icon_name in required_icons {
+        let icon_path = icons_dir.join(icon_name);
+        assert!(
+            icon_path.exists(),
+            "Required bundle icon {} must exist at {}",
+            icon_name,
+            icon_path.display()
+        );
+        let metadata = fs::metadata(&icon_path).expect("icon metadata");
+        assert!(metadata.len() > 0, "Icon {} must not be empty", icon_name);
+    }
+
+    // 6. Config icons list references required icons
+    let icon_list = tauri_conf["bundle"]["icon"]
+        .as_array()
+        .expect("bundle.icon array");
+    let icon_strings: Vec<&str> = icon_list.iter().filter_map(|i| i.as_str()).collect();
+    assert!(
+        icon_strings.iter().any(|s| s.contains("32x32")),
+        "bundle.icon must reference 32x32"
+    );
+    assert!(
+        icon_strings.iter().any(|s| s.contains("128x128")),
+        "bundle.icon must reference 128x128"
+    );
+    assert!(
+        icon_strings.iter().any(|s| s.contains("256x256")),
+        "bundle.icon must reference 256x256"
+    );
+    assert!(
+        icon_strings.iter().any(|s| s.contains("icon.png")),
+        "bundle.icon must reference icon.png"
+    );
+}

@@ -37,12 +37,36 @@
   "bundle": {
     "active": true,
     "targets": ["deb", "rpm"],
+    "category": "DeveloperTool",
+    "shortDescription": "AQVN Native Workspace Client and RFC Host Bridge",
+    "longDescription": "AQVN Native Workspace Client and RFC Host Bridge provides a lightweight desktop workspace client with embedded local reverse proxy and RFC host bridge.",
+    "copyright": "Copyright © 2026 AQ Viet Nam Information Technology JSC",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/256x256.png",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1",
+          "libssl3"
+        ],
+        "section": "utils",
+        "priority": "optional"
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "libayatana-appindicator3-1",
+          "openssl"
+        ],
+        "release": "1"
+      }
+    }
   }
 }

@@ -2142,10 +2142,10 @@ async fn test_proxy_clear_disk_cache_endpoint() {
     assert_eq!(body["cleared"], true);
 }
 
-// --------------------------------- WebSocket handshake timeout & Close 1011 (VAL-FIX-WS-001)
+// --------------------------------- WebSocket handshake timeout & Close 1001 (VAL-WIN-002)
 
 #[tokio::test]
-async fn test_upstream_ws_failure_sends_close_frame_1011() {
+async fn test_upstream_ws_failure_sends_close_frame_1001() {
     let (stub, stub_guard) = start_stub().await;
     let proxy = start_proxy(&stub_guard.base).await;
     login(&proxy.base).await;
@@ -2159,7 +2159,7 @@ async fn test_upstream_ws_failure_sends_close_frame_1011() {
         .expect("proxy handshake connects");
     assert_eq!(response.status().as_u16(), 101);
 
-    // Proxy must send WebSocket Close frame with code 1011
+    // Proxy must send WebSocket Close frame with code 1001 (Going Away)
     let msg = socket
         .next()
         .await
@@ -2167,14 +2167,14 @@ async fn test_upstream_ws_failure_sends_close_frame_1011() {
         .expect("valid message");
     match msg {
         tokio_tungstenite::tungstenite::Message::Close(Some(frame)) => {
-            assert_eq!(frame.code, 1011.into(), "must send close code 1011");
+            assert_eq!(frame.code, 1001.into(), "must send close code 1001");
         }
-        other => panic!("expected Close frame with code 1011, got: {:?}", other),
+        other => panic!("expected Close frame with code 1001, got: {:?}", other),
     }
 }
 
 #[tokio::test]
-async fn test_upstream_ws_timeout_sends_close_frame_1011() {
+async fn test_upstream_ws_timeout_sends_close_frame_1001() {
     let (stub, stub_guard) = start_stub().await;
     let proxy = start_proxy(&stub_guard.base).await;
     login(&proxy.base).await;
@@ -2201,11 +2201,11 @@ async fn test_upstream_ws_timeout_sends_close_frame_1011() {
         tokio_tungstenite::tungstenite::Message::Close(Some(frame)) => {
             assert_eq!(
                 frame.code,
-                1011.into(),
-                "must send close code 1011 on timeout"
+                1001.into(),
+                "must send close code 1001 on timeout"
             );
         }
-        other => panic!("expected Close frame with code 1011, got: {:?}", other),
+        other => panic!("expected Close frame with code 1001, got: {:?}", other),
     }
 }
 

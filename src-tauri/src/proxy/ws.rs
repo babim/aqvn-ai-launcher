@@ -77,6 +77,29 @@ pub fn parse_watchdog_config(path_and_query: &str) -> (Duration, Duration, Strin
     (heartbeat, timeout, clean_path)
 }
 
+/// Translates an upstream WebSocket connection failure into a graceful downstream close frame.
+///
+/// Uses close code `1001` (Going Away) rather than `1011` (Server Error) to signal
+/// that the upstream service is temporarily unreachable or the handshake failed,
+/// encouraging graceful client reconnection backoff instead of terminating the session hard.
+pub fn upstream_handshake_error_close_frame(err: &str) -> ClientCloseFrame {
+    // RFC 6455 limits Close frame payload to 125 bytes; status code takes 2 bytes, leaving max 123 bytes for reason.
+    let reason = if err.len() > 123 {
+        let mut end = 120;
+        while end > 0 && !err.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &err[..end])
+    } else {
+        err.to_string()
+    };
+
+    ClientCloseFrame {
+        code: 1001,
+        reason: reason.into(),
+    }
+}
+
 /// Runs until either leg closes or watchdog timeout expires, then closes the other side.
 pub async fn bridge(socket: WebSocket, upstream: Arc<Upstream>, path_and_query: String) {
     let (heartbeat, timeout, clean_path) = parse_watchdog_config(&path_and_query);
@@ -94,11 +117,10 @@ pub async fn bridge_with_watchdog(
     let server = match upstream.connect_ws(&path_and_query).await {
         Ok(stream) => stream,
         Err(err) => {
-            eprintln!("Bridge proxy: {err}");
-            let close_frame = ClientCloseFrame {
-                code: 1011,
-                reason: err.into(),
-            };
+            eprintln!(
+                "Bridge proxy: upstream websocket handshake failed: {err}; closing client leg with 1001 (Going Away)"
+            );
+            let close_frame = upstream_handshake_error_close_frame(&err);
             let mut socket = socket;
             let _ = socket.send(ClientMessage::Close(Some(close_frame))).await;
             return;
@@ -289,5 +311,38 @@ mod tests {
         assert_eq!(heartbeat, Duration::from_millis(500));
         assert_eq!(timeout, Duration::from_millis(2000));
         assert_eq!(clean_path, "/ws");
+    }
+
+    #[test]
+    fn test_handshake_failure_status_translation_to_1001() {
+        let err = "upstream websocket connect failed: connection refused";
+        let frame = upstream_handshake_error_close_frame(err);
+        assert_eq!(
+            frame.code, 1001,
+            "upstream handshake failure must emit 1001 (Going Away)"
+        );
+        assert_eq!(frame.reason.as_str(), err);
+
+        let http_err = "upstream websocket handshake returned HTTP 502";
+        let frame_http = upstream_handshake_error_close_frame(http_err);
+        assert_eq!(frame_http.code, 1001);
+        assert_eq!(frame_http.reason.as_str(), http_err);
+
+        // Long error message safely truncated to fit within RFC 6455 125-byte limit (123 reason bytes)
+        let long_err = "x".repeat(200);
+        let frame_long = upstream_handshake_error_close_frame(&long_err);
+        assert_eq!(frame_long.code, 1001);
+        assert!(frame_long.reason.len() <= 123);
+        assert!(frame_long.reason.ends_with("..."));
+    }
+
+    #[test]
+    fn test_handshake_error_close_frame_round_trip() {
+        let frame = upstream_handshake_error_close_frame("upstream unreachable");
+        let server_frame = to_server_close(frame);
+        assert_eq!(server_frame.code, 1001.into());
+        let back_to_client = to_client_close(server_frame);
+        assert_eq!(back_to_client.code, 1001);
+        assert_eq!(back_to_client.reason.as_str(), "upstream unreachable");
     }
 }

@@ -129,7 +129,13 @@ AQVN Workspace combines three unified components into a single native binary:
 - **Debounced Remote Tree Updates**: Trailing edge debounce (250ms) filters rapid mutations and excludes build directories (`node_modules`, `target`, `dist`, `.git`).
 - **SSH Concurrency Cap & Timeout**: Embedded russh server enforces an inactivity timeout of 600 seconds and limits active channels to 10.
 - **Offline Outbox Durability**: Messages composed offline are deduplicated by `message_id`, staged through in-flight storage, and safely restored across reloads.
-- **Accessibility & Focus Trapping**: Modals implement Tab/Shift+Tab focus traps, high-visibility focus rings, and universal Escape dismissal.
+### 13. Windows WebView2 & Packaging Stabilization
+- **Windows WebView2 Origin Normalization**: The loopback proxy (`proxy/server.rs`) recognizes Microsoft Edge WebView2 origins (`http://tauri.localhost`, `https://tauri.localhost`, `127.0.0.1:<port>`, and `localhost:<port>`), preventing WebSocket connection rejections on Windows.
+- **Graceful Upstream Handshake Softening**: If the upstream gateway is unreachable or initializing, the proxy issues soft close code `1001 (Going Away)` instead of hard errors, allowing automatic client reconnection without breaking the webview session.
+- **Non-Blocking Connection State & Retry**: UI indicators provide smooth visual reconnection status pills with an instant manual retry button instead of blocking modal error alerts.
+- **Production Bundling & Size Guards**: Pre-configured Linux (`.deb`, `.rpm`) and Windows (`.exe` NSIS with `downloadBootstrapper`, `.msi`) bundle configurations maintaining full compliance with the strict `< 10 MB` binary size gate (`VAL-CI-003`).
+- **Headless Agent Service Management**: Full CLI service management (`aqvn-agent install/uninstall/status`) with idempotent unit creation, diagnostics reporting, and update detection across user and system systemd services.
+- **PTY Backpressure & Bounded Streaming**: PTY stdout reading employs bounded channels (`DEFAULT_PTY_BUFFER_CAPACITY = 64`) with flow control to prevent memory spikes under high-throughput terminal dumps.
 
 ---
 

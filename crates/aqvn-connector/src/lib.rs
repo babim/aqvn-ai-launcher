@@ -7,9 +7,17 @@
 
 pub mod client;
 pub mod handlers;
+pub mod pool;
 pub mod protocol;
 
 pub use client::{GatewayClient, GatewayConfig, GatewayHandle, GatewayManager};
+pub use pool::{
+    compute_heartbeat_jitter, AgentNode, HeartbeatJitterConfig, MultiHostPoolHub, NodeCapabilities,
+    NodeMetrics, NodeRegistration, NodeStatus, PoolError, PoolMessage, RouteTarget, RoutingError,
+    TaskDispatchResult, TaskPayload, TaskResult, POOL_MSG_HEARTBEAT_PING, POOL_MSG_HEARTBEAT_PONG,
+    POOL_MSG_REGISTER, POOL_MSG_REGISTER_ACK, POOL_MSG_STATUS_UPDATE, POOL_MSG_TASK_DISPATCH,
+    POOL_MSG_TASK_RESULT, POOL_MSG_UNREGISTER,
+};
 pub use protocol::{
     AuthPayload, ConnectorBrowserOp, ConnectorBrowserOpResult, ConnectorGatewayControl,
     ConnectorGatewayControlResult, ConnectorHello, ConnectorHelloAck, ConnectorRemoteTreeUpdate,

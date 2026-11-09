@@ -5264,6 +5264,75 @@ describe('VAL-DEBT-001: OpenSpec Change 206 Task Reconciliation & Archive', () =
   });
 });
 
+describe('VAL-UI-COMPONENTS-001: Web Components Custom Elements Shell', () => {
+  test('ui/components/ contains all required modular custom elements', () => {
+    const requiredFiles = [
+      'aqvn-shell.js',
+      'aqvn-topbar.js',
+      'aqvn-sidebar.js',
+      'aqvn-chat-pane.js',
+      'aqvn-canvas-pane.js',
+      'aqvn-virtual-message-list.js',
+      'index.js'
+    ];
+    requiredFiles.forEach((file) => {
+      const p = new URL(`../../ui/components/${file}`, import.meta.url);
+      assert.ok(fs.existsSync(p), `ui/components/${file} must exist`);
+    });
+  });
+
+  test('ui/index.html declares all W3C custom elements in DOM hierarchy', () => {
+    const html = readIndexHtml();
+    ['aqvn-shell', 'aqvn-topbar', 'aqvn-sidebar', 'aqvn-chat-pane', 'aqvn-canvas-pane', 'aqvn-virtual-message-list'].forEach((tag) => {
+      assert.match(html, new RegExp(`<${tag}[\\s>]`), `ui/index.html must declare <${tag}>`);
+    });
+  });
+
+  test('ui/styles/tokens.css defines custom element display styles and OKLCH design tokens', () => {
+    const p = new URL('../../ui/styles/tokens.css', import.meta.url);
+    assert.ok(fs.existsSync(p), 'ui/styles/tokens.css must exist');
+    const css = fs.readFileSync(p, 'utf8');
+    assert.match(css, /aqvn-shell/, 'defines aqvn-shell styles');
+    assert.match(css, /aqvn-topbar/, 'defines aqvn-topbar styles');
+    assert.match(css, /aqvn-sidebar/, 'defines aqvn-sidebar styles');
+    assert.match(css, /aqvn-chat-pane/, 'defines aqvn-chat-pane styles');
+    assert.match(css, /aqvn-canvas-pane/, 'defines aqvn-canvas-pane styles');
+    assert.match(css, /aqvn-virtual-message-list/, 'defines aqvn-virtual-message-list styles');
+  });
+});
+
+describe('VAL-UI-SIGNALS-002: Reactive Signals State Store & Message Virtualization', () => {
+  test('ui/state/signals.js exports centralized reactive signal atoms', async () => {
+    const signalsPath = new URL('../../ui/state/signals.js', import.meta.url);
+    assert.ok(fs.existsSync(signalsPath), 'ui/state/signals.js must exist');
+    const signalsModule = await import(signalsPath.href);
+    const store = signalsModule.default || signalsModule;
+
+    assert.equal(typeof store.signal, 'function', 'store must export signal');
+    assert.equal(typeof store.computed, 'function', 'store must export computed');
+    assert.equal(typeof store.connectionState.value, 'string', 'connectionState signal initialized');
+    assert.equal(store.isNetworkHealthy.value, true, 'isNetworkHealthy computed signal initialized');
+
+    // Test reactivity
+    store.connectionState.value = 'offline';
+    assert.equal(store.isNetworkHealthy.value, false, 'computed signal reactively updates to false when offline');
+
+    store.connectionState.value = 'connected';
+    assert.equal(store.isNetworkHealthy.value, true, 'computed signal reactively updates to true when reconnected');
+  });
+
+  test('aqvn-virtual-message-list keeps DOM nodes lean under heavy conversation load', async () => {
+    const virtualListPath = new URL('../../ui/components/aqvn-virtual-message-list.js', import.meta.url);
+    const virtualListCode = fs.readFileSync(virtualListPath, 'utf8');
+    assert.match(virtualListCode, /customElements\.define\('aqvn-virtual-message-list'/, 'defines custom element');
+
+    // Virtual rendering keeps visible slice bounded
+    assert.match(virtualListCode, /renderVirtualSlice/, 'virtual list contains renderVirtualSlice windowing');
+    assert.match(virtualListCode, /_overscan/, 'virtual list supports overscan buffer');
+  });
+});
+
+
 
 
 

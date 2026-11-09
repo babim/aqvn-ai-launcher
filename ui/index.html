@@ -85,13 +85,18 @@
       })();
     </script>
     <link rel="stylesheet" href="chat.css">
+    <link rel="stylesheet" href="styles/tokens.css">
+    <script src="vendor/signals-core.min.js"></script>
+    <script src="state/signals.js"></script>
     <script src="vendor/socket.io.min.js"></script>
     <script src="bridge.js"></script>
     <script defer src="vendor/marked.min.js"></script>
     <script defer src="vendor/highlight.min.js"></script>
+    <script defer src="components/index.js"></script>
     <script defer src="chat.js"></script>
   </head>
   <body>
+    <aqvn-topbar id="aqvn-topbar-root">
     <header class="topbar">
       <a class="brand" href="index.html">AQVN Workspace</a>
       <div class="server-dropdown-wrap">
@@ -205,6 +210,7 @@
         <a class="nav" id="open-settings" href="settings.html">Settings</a>
       </div>
     </header>
+    </aqvn-topbar>
 
     <main>
       <section id="login-view" class="panel" aria-labelledby="login-title">
@@ -267,7 +273,9 @@
         </details>
       </section>
 
+      <aqvn-shell id="aqvn-shell-root">
       <section id="chat-view" class="chat-shell" aria-label="Conversation" hidden>
+        <aqvn-sidebar id="aqvn-sidebar-root">
         <aside id="sidebar" class="sidebar" aria-label="Sessions and server">
           <div class="sidebar-tabs" role="tablist" aria-label="Sidebar navigation">
             <button
@@ -326,6 +334,7 @@
             <ul id="workspace-file-list" class="workspace-file-list" aria-label="Workspace files"></ul>
           </div>
         </aside>
+        </aqvn-sidebar>
 
         <div
           id="splitter-left"
@@ -336,6 +345,7 @@
           tabindex="0"
         ></div>
 
+        <aqvn-chat-pane id="aqvn-chat-pane-root">
         <div id="chat-pane" class="chat-pane">
           <div class="chat-toolbar">
             <div class="chat-title-group">
@@ -394,7 +404,9 @@
               <button id="filter-error-btn" type="button" class="filter-pill" data-category="error">Errors</button>
             </div>
           </div>
+          <aqvn-virtual-message-list id="virtual-message-list">
           <div id="messages" class="messages" role="log" aria-live="polite"></div>
+          </aqvn-virtual-message-list>
           <button id="scroll-bottom-btn" type="button" class="scroll-bottom-btn" hidden>
             &darr; New messages below (<span id="unread-count">0</span>)
           </button>
@@ -448,6 +460,7 @@
             </form>
           </section>
         </div>
+        </aqvn-chat-pane>
 
         <div
           id="splitter-right"
@@ -458,6 +471,7 @@
           tabindex="0"
         ></div>
 
+        <aqvn-canvas-pane id="aqvn-canvas-pane-root">
         <aside id="canvas-pane" class="canvas-pane" aria-label="Intel Suite">
           <div class="canvas-tab">
             <span class="canvas-tab-title">Intel Suite</span>
@@ -477,7 +491,9 @@
             data-src="/plugins/aqvn_intel_suite/webui/canvas.html"
           ></iframe>
         </aside>
+        </aqvn-canvas-pane>
       </section>
+      </aqvn-shell>
     </main>
 
     <div id="diagnostics-modal" class="diagnostics-modal" role="dialog" aria-modal="true" aria-labelledby="diagnostics-title" hidden>

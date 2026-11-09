@@ -651,6 +651,13 @@
     if (dom.messages.childElementCount !== before) {
       scrollToBottom();
     }
+
+    var vList = (typeof document !== 'undefined' && typeof document.querySelector === 'function')
+      ? document.querySelector('aqvn-virtual-message-list')
+      : (typeof byId === 'function' ? byId('virtual-message-list') : null);
+    if (vList && typeof vList.setMessages === 'function') {
+      vList.setMessages(Array.from(state.logs.values()));
+    }
   }
 
   function clearLogs() {
@@ -658,6 +665,12 @@
     state.order = [];
     state.rows.clear();
     dom.messages.textContent = '';
+    var vList = (typeof document !== 'undefined' && typeof document.querySelector === 'function')
+      ? document.querySelector('aqvn-virtual-message-list')
+      : (typeof byId === 'function' ? byId('virtual-message-list') : null);
+    if (vList && typeof vList.setMessages === 'function') {
+      vList.setMessages([]);
+    }
   }
 
   function applyProgress(active, text) {
@@ -977,6 +990,9 @@
     }
     if (typeof window !== 'undefined' && window.__AQVN_CONTAINER__ && typeof window.__AQVN_CONTAINER__.setConnectionStatus === 'function') {
       window.__AQVN_CONTAINER__.setConnectionStatus(key === 'online' ? 'connected' : key);
+    }
+    if (typeof window !== 'undefined' && window.AqvnSignals && window.AqvnSignals.connectionState) {
+      window.AqvnSignals.connectionState.value = (key === 'online' ? 'connected' : (key === 'polling' || key === 'reconnecting' ? 'reconnecting' : 'offline'));
     }
   }
 
@@ -1379,11 +1395,17 @@
   function setSidebarCollapsed(collapsed) {
     state.sidebarCollapsed = !!collapsed;
     setPanelCollapsed(dom.sidebar, dom.toggleSidebarBtn, SIDEBAR_KEY, state.sidebarCollapsed);
+    if (typeof window !== 'undefined' && window.AqvnSignals && window.AqvnSignals.sidebarCollapsed) {
+      window.AqvnSignals.sidebarCollapsed.value = state.sidebarCollapsed;
+    }
   }
 
   function setCanvasCollapsed(collapsed) {
     state.canvasCollapsed = !!collapsed;
     setPanelCollapsed(dom.canvasPane, dom.toggleCanvasBtn, CANVAS_KEY, state.canvasCollapsed);
+    if (typeof window !== 'undefined' && window.AqvnSignals && window.AqvnSignals.canvasCollapsed) {
+      window.AqvnSignals.canvasCollapsed.value = state.canvasCollapsed;
+    }
     if (!state.canvasCollapsed) {
       loadCanvas();
     }
@@ -4149,6 +4171,34 @@
     dom.proxyUrl.value = state.base;
 
     initLayout();
+
+    function syncSignals() {
+      if (typeof window !== 'undefined' && window.AqvnSignals) {
+        var sig = window.AqvnSignals;
+        if (sig.connectionState) {
+          sig.connectionState.value = state.online ? 'connected' : (state.polling ? 'reconnecting' : 'offline');
+        }
+        if (sig.activeSessionId) {
+          sig.activeSessionId.value = state.context;
+        }
+        if (sig.sidebarCollapsed) {
+          sig.sidebarCollapsed.value = state.sidebarCollapsed;
+        }
+        if (sig.canvasCollapsed) {
+          sig.canvasCollapsed.value = state.canvasCollapsed;
+        }
+        if (sig.focusMode) {
+          sig.focusMode.value = state.focusMode;
+        }
+        if (sig.activeSidebarTab) {
+          sig.activeSidebarTab.value = state.sidebarTab;
+        }
+        if (sig.currentTheme && state.theme) {
+          sig.currentTheme.value = state.theme;
+        }
+      }
+    }
+    syncSignals();
 
     try {
       dom.username.value = window.localStorage.getItem(USER_KEY) || '';

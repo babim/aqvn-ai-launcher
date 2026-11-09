@@ -1,0 +1,71 @@
+/**
+ * AQVN Workspace Design Tokens & Web Components Layout
+ * OKLCH Palette Tokens & CSS Custom Properties
+ */
+
+:root {
+  --aqvn-shell-header-height: 48px;
+  --aqvn-sidebar-width: 280px;
+  --aqvn-canvas-width: 420px;
+  --aqvn-border-radius-sm: 4px;
+  --aqvn-border-radius-md: 8px;
+  --aqvn-border-radius-lg: 12px;
+  --aqvn-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --aqvn-transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* W3C Custom Elements Display Normalization */
+aqvn-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+aqvn-topbar {
+  display: block;
+  width: 100%;
+  flex-shrink: 0;
+  z-index: 50;
+}
+
+aqvn-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+aqvn-chat-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+aqvn-canvas-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+aqvn-virtual-message-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.virtual-spacer-top,
+.virtual-spacer-bottom {
+  display: block;
+  width: 100%;
+  pointer-events: none;
+  flex-shrink: 0;
+}

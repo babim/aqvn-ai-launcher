@@ -1,6 +1,5 @@
 //! Outbound WebSocket client for AQVN Workspace Gateway Hub.
 
-use aqvn_core::config::{AppConfig, ConfigWatcher};
 use crate::handlers;
 use crate::protocol::{
     format_socketio_ack, format_socketio_connect, format_socketio_event, parse_socketio_packet,
@@ -8,6 +7,7 @@ use crate::protocol::{
     MSG_TYPE_HELLO, MSG_TYPE_HELLO_ACK, SCOPE_BROWSER, SCOPE_DESKTOP, SCOPE_EXEC, SCOPE_FILES,
     SIO_PACKET_ACK, SIO_PACKET_CONNECT_ERROR, SIO_PACKET_DISCONNECT, SIO_PACKET_EVENT,
 };
+use aqvn_core::config::{AppConfig, ConfigWatcher};
 use futures_util::{SinkExt, StreamExt};
 use http::header::{self, HeaderValue};
 use serde::{Deserialize, Serialize};

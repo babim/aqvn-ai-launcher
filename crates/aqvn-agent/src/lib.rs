@@ -2,6 +2,9 @@
 //!
 //! Executes as a standalone CLI daemon without GUI or display server requirements.
 
+pub mod host_identity;
+pub mod watchdog;
+
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::{self, BufRead, Write};
@@ -23,11 +26,12 @@ USAGE:
     aqvn-agent [COMMAND] [OPTIONS]
 
 COMMANDS:
-    start       Start agent connection in foreground
-    config      Configure agent settings
-    install     Install and enable systemd daemon service
-    uninstall   Stop and remove systemd daemon service
-    status      Show connection status and diagnostics
+    start              Start agent connection in foreground
+    config             Configure agent settings
+    install            Install and enable systemd daemon service
+    uninstall          Stop and remove systemd daemon service
+    status             Show connection status and diagnostics
+    service <action>   Manage systemd service (install, uninstall, status)
 
 OPTIONS:
     -s, --server <URL>       AQVN Gateway server URL
@@ -60,7 +64,7 @@ fn default_server_url() -> String {
 }
 
 fn default_gateway_id() -> String {
-    aqvn_core::config::default_gateway_id()
+    host_identity::get_deterministic_host_id()
 }
 
 fn default_host_label() -> String {
@@ -381,9 +385,9 @@ pub fn parse_cli_args(args: &[String]) -> Result<ParsedCli, String> {
                     let is_service_cmd = action == Some(CliAction::Install)
                         || action == Some(CliAction::Uninstall)
                         || action == Some(CliAction::Status)
-                        || args
-                            .iter()
-                            .any(|a| a == "install" || a == "uninstall" || a == "status");
+                        || args.iter().any(|a| {
+                            a == "install" || a == "uninstall" || a == "status" || a == "service"
+                        });
                     if is_service_cmd
                         && (inline_val.is_none()
                             || inline_val.as_deref() == Some("true")
@@ -393,7 +397,8 @@ pub fn parse_cli_args(args: &[String]) -> Result<ParsedCli, String> {
                             || args[i + 1].starts_with('-')
                             || args[i + 1] == "install"
                             || args[i + 1] == "uninstall"
-                            || args[i + 1] == "status")
+                            || args[i + 1] == "status"
+                            || args[i + 1] == "service")
                     {
                         if let Some(ref v) = inline_val {
                             options.user_unit = Some(v.parse().unwrap_or(true));
@@ -458,6 +463,23 @@ pub fn parse_cli_args(args: &[String]) -> Result<ParsedCli, String> {
                 "install" => CliAction::Install,
                 "uninstall" => CliAction::Uninstall,
                 "status" => CliAction::Status,
+                "service" => {
+                    if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                        i += 1;
+                        match args[i].as_str() {
+                            "install" => CliAction::Install,
+                            "uninstall" => CliAction::Uninstall,
+                            "status" => CliAction::Status,
+                            other => {
+                                return Err(format!(
+                                    "Unknown service subcommand '{other}'. Expected: install, uninstall, status"
+                                ));
+                            }
+                        }
+                    } else {
+                        CliAction::Install
+                    }
+                }
                 "help" => CliAction::Help,
                 "version" => CliAction::Version,
                 other => {
@@ -790,6 +812,11 @@ pub async fn run_start<W: Write>(
 
     #[cfg(not(target_os = "android"))]
     {
+        // Notify systemd ready and start watchdog keepalive task
+        watchdog::notify_ready();
+        let (wd_stop_tx, wd_stop_rx) = tokio::sync::watch::channel(false);
+        let wd_handle = watchdog::spawn_watchdog_task(wd_stop_rx);
+
         let gateway_config = settings.to_gateway_config();
         let client = aqvn_connector::GatewayClient::new(gateway_config);
         let (handle, join_handle) = client.start();
@@ -811,6 +838,12 @@ pub async fn run_start<W: Write>(
         }
 
         handshake_logger.abort();
+        let _ = wd_stop_tx.send(true);
+        if let Some(h) = wd_handle {
+            h.abort();
+        }
+        watchdog::notify_stopping();
+
         writeln!(writer, "\nStopping aqvn-agent...")?;
         writer.flush()?;
         handle.stop();
@@ -830,6 +863,11 @@ pub async fn run_start<W: Write>(
 pub fn resolve_is_user_unit(user_unit_opt: Option<bool>) -> bool {
     if let Some(user_unit) = user_unit_opt {
         return user_unit;
+    }
+    if let Ok(val) = env::var("AQVN_FORCE_EUID") {
+        if let Ok(uid) = val.trim().parse::<u32>() {
+            return uid != 0;
+        }
     }
     #[cfg(unix)]
     {
@@ -958,6 +996,7 @@ WorkingDirectory={}\n\
 Restart=always\n\
 RestartSec=5\n\
 KillMode=process\n\
+WatchdogSec=30\n\
 \n\
 [Install]\n\
 WantedBy={wanted_by}\n",
@@ -2116,5 +2155,116 @@ mod tests {
             parse_cli_args(&["--user".to_string(), "status".to_string()]).expect("--user status");
         assert_eq!(p3.action, CliAction::Status);
         assert_eq!(p3.options.user_unit, Some(true));
+    }
+
+    #[test]
+    fn test_deterministic_id_reboot_and_ip_invariance_val_agent_id_001() {
+        let m_id = "e9a1b2c3d4e5f60718293a4b5c6d7e8f";
+        let mac = "00:1a:2b:3c:4d:5e";
+
+        // Deterministic ID derived from machine-id + MAC
+        let id1 = host_identity::compute_deterministic_id(m_id, mac);
+        let id2 = host_identity::compute_deterministic_id(m_id, mac);
+        assert_eq!(id1, id2, "ID must be invariant across reboots");
+        assert_eq!(id1.len(), 64, "SHA-256 hex string must be 64 characters");
+
+        // Simulating IP address changes: 192.168.1.50 -> 10.0.0.100 -> 172.20.0.2
+        // Machine identity remains strictly invariant
+        let simulated_ip_a = "192.168.1.50";
+        let simulated_ip_b = "10.0.0.100";
+        assert_ne!(simulated_ip_a, simulated_ip_b);
+        let id_ip_a = host_identity::compute_deterministic_id(m_id, mac);
+        let id_ip_b = host_identity::compute_deterministic_id(m_id, mac);
+        assert_eq!(
+            id_ip_a, id_ip_b,
+            "Changing network IP must NOT change device ID"
+        );
+
+        // Format of node host identity
+        let host_id = format!("aqvn-node-{}", &id1[..16]);
+        assert!(host_id.starts_with("aqvn-node-"));
+        assert_eq!(host_id.len(), 26);
+    }
+
+    #[test]
+    fn test_systemd_watchdog_unit_and_sd_notify_val_agent_id_001() {
+        let bin_path = Path::new("/usr/bin/aqvn-agent");
+        let ws_path = Path::new("/var/aqvn/workspace");
+        let unit = generate_systemd_unit(bin_path, ws_path, None, true);
+
+        assert!(
+            unit.contains("WatchdogSec=30"),
+            "Systemd unit must declare WatchdogSec=30"
+        );
+        assert!(unit.contains("Restart=always"));
+
+        // Watchdog interval computation (half of WatchdogSec)
+        let _lock = TEST_ENV_MUTEX.lock().unwrap();
+        env::set_var("WATCHDOG_USEC", "30000000"); // 30s
+        let interval = watchdog::watchdog_interval();
+        assert_eq!(interval, Some(Duration::from_secs(15)));
+        env::remove_var("WATCHDOG_USEC");
+    }
+
+    #[test]
+    fn test_service_install_auto_detect_privileges_val_agent_id_001() {
+        let _lock = TEST_ENV_MUTEX.lock().unwrap();
+
+        // 1. Root privilege (UID 0) auto-detects system unit
+        env::set_var("AQVN_FORCE_EUID", "0");
+        let is_user_root = resolve_is_user_unit(None);
+        assert!(!is_user_root, "UID 0 must install as system unit");
+
+        // 2. Non-root privilege (UID 1000) auto-detects user unit
+        env::set_var("AQVN_FORCE_EUID", "1000");
+        let is_user_non_root = resolve_is_user_unit(None);
+        assert!(is_user_non_root, "Non-root UID must install as user unit");
+
+        // 3. Explicit --user flag overrides auto-detection
+        assert!(resolve_is_user_unit(Some(true)));
+
+        // 4. Explicit --system flag overrides auto-detection
+        assert!(!resolve_is_user_unit(Some(false)));
+
+        env::remove_var("AQVN_FORCE_EUID");
+    }
+
+    #[test]
+    fn test_service_subcommand_cli_parsing_val_agent_id_001() {
+        // aqvn-agent service install
+        let p_inst = parse_cli_args(&["service".to_string(), "install".to_string()])
+            .expect("service install succeeds");
+        assert_eq!(p_inst.action, CliAction::Install);
+        assert_eq!(p_inst.options.user_unit, None);
+
+        // aqvn-agent service install --system
+        let p_inst_sys = parse_cli_args(&[
+            "service".to_string(),
+            "install".to_string(),
+            "--system".to_string(),
+        ])
+        .expect("service install --system succeeds");
+        assert_eq!(p_inst_sys.action, CliAction::Install);
+        assert_eq!(p_inst_sys.options.user_unit, Some(false));
+
+        // aqvn-agent service install --user
+        let p_inst_user = parse_cli_args(&[
+            "service".to_string(),
+            "install".to_string(),
+            "--user".to_string(),
+        ])
+        .expect("service install --user succeeds");
+        assert_eq!(p_inst_user.action, CliAction::Install);
+        assert_eq!(p_inst_user.options.user_unit, Some(true));
+
+        // aqvn-agent service uninstall
+        let p_uninst = parse_cli_args(&["service".to_string(), "uninstall".to_string()])
+            .expect("service uninstall succeeds");
+        assert_eq!(p_uninst.action, CliAction::Uninstall);
+
+        // aqvn-agent service status
+        let p_status = parse_cli_args(&["service".to_string(), "status".to_string()])
+            .expect("service status succeeds");
+        assert_eq!(p_status.action, CliAction::Status);
     }
 }

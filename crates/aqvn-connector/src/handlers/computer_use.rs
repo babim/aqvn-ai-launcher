@@ -3,9 +3,7 @@
 //! Handles `connector_computer_use_op` actions for desktop screen capture,
 //! active window capture, and native mouse/keyboard event injection.
 
-use crate::protocol::{
-    attach_id_and_op_id, extract_id_and_op_id, MSG_TYPE_COMPUTER_USE_OP_RESULT,
-};
+use crate::protocol::{attach_id_and_op_id, extract_id_and_op_id, MSG_TYPE_COMPUTER_USE_OP_RESULT};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use serde_json::{json, Value};

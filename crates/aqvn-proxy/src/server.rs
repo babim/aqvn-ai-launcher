@@ -1,10 +1,10 @@
 //! Local reverse proxy forwarding WebUI requests and WebSocket connections
 //! as if it were the chat server's own origin.
 
-use aqvn_core::config::{AppConfig, ConfigWatcher};
 use crate::cache::{self, AssetCache};
 use crate::upstream::{ForwardResponse, Upstream};
 use crate::ws;
+use aqvn_core::config::{AppConfig, ConfigWatcher};
 use axum::body::Body;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{FromRequestParts, State};

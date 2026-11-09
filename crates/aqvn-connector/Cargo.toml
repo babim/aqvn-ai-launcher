@@ -1,0 +1,36 @@
+[package]
+name = "aqvn-connector"
+version = "0.1.9"
+edition = "2021"
+description = "Outbound Gateway WebSocket client for AQVN Workspace"
+
+[dependencies]
+aqvn-core = { path = "../aqvn-core" }
+aqvn-rfc = { path = "../aqvn-rfc" }
+aqvn-ssh = { path = "../aqvn-ssh" }
+aqvn-proxy = { path = "../aqvn-proxy" }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+url = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+sha2 = "0.10"
+rand = "0.8"
+thiserror = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+libc = "0.2"
+portable-pty = "0.9.0"
+glob = "0.3"
+zip = { version = "9.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
+http = "1"
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake", "native-tls"] }
+native-tls = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

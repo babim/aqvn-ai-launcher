@@ -24,6 +24,12 @@ default = ["desktop"]
 desktop = []
 
 [dependencies]
+aqvn-core = { path = "../crates/aqvn-core" }
+aqvn-rfc = { path = "../crates/aqvn-rfc" }
+aqvn-ssh = { path = "../crates/aqvn-ssh" }
+aqvn-proxy = { path = "../crates/aqvn-proxy" }
+aqvn-connector = { path = "../crates/aqvn-connector" }
+aqvn-agent = { path = "../crates/aqvn-agent" }
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"

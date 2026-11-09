@@ -37,44 +37,11 @@ pub const STORE_FILENAME: &str = "settings.json";
 
 /// Returns a stable, deterministic gateway identifier for this device/installation.
 pub fn default_gateway_id() -> String {
-    deterministic_gateway_id()
+    aqvn_core::config::default_gateway_id()
 }
 
 pub fn deterministic_gateway_id() -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"aqvn-workspace-gateway-seed:");
-
-    let mut found_seed = false;
-    for path in &["/etc/machine-id", "/var/lib/dbus/machine-id"] {
-        if let Ok(id) = std::fs::read_to_string(path) {
-            let trimmed = id.trim();
-            if !trimmed.is_empty() {
-                hasher.update(trimmed.as_bytes());
-                found_seed = true;
-                break;
-            }
-        }
-    }
-
-    if let Ok(hostname) = std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")) {
-        hasher.update(hostname.as_bytes());
-        found_seed = true;
-    }
-
-    if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("USERNAME")) {
-        hasher.update(user.as_bytes());
-    }
-
-    if !found_seed {
-        hasher.update(b"aqvn-default-deterministic-seed");
-    }
-
-    let hash = hasher.finalize();
-    let hex_part = format!(
-        "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        hash[0], hash[1], hash[2], hash[3], hash[4], hash[5]
-    );
-    format!("aqvn-gw-{hex_part}")
+    aqvn_core::config::deterministic_gateway_id()
 }
 
 fn default_app_language() -> String {

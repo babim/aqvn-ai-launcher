@@ -1,0 +1,1604 @@
+//! Remote file operations handler for Outbound Host Gateway Hub (`_a0_connector`).
+
+use crate::protocol::{
+    extract_id_and_op_id, MSG_TYPE_FILE_OP_RESULT, MSG_TYPE_REMOTE_TREE_UPDATE,
+    TRANSFER_PROTOCOL_V1,
+};
+use aqvn_rfc::sandbox::{Sandbox, DEFAULT_SANDBOX};
+use aqvn_rfc::text_editor::{apply_context_patch, apply_parsed_edits, parse_edits};
+use aqvn_rfc::util::{count_content_lines, decode_base64, encode_base64, epoch_secs};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
+use std::sync::RwLock;
+
+static CUSTOM_SANDBOX: RwLock<Option<Sandbox>> = RwLock::new(None);
+static CONFIGURED_WORKSPACE_PATH: RwLock<Option<String>> = RwLock::new(None);
+static CONFIGURED_ALLOWED_PATHS: RwLock<Option<Vec<String>>> = RwLock::new(None);
+
+pub fn set_test_sandbox(sandbox: Option<Sandbox>) {
+    if let Ok(mut lock) = CUSTOM_SANDBOX.write() {
+        *lock = sandbox;
+    }
+}
+
+pub fn set_workspace_path(path: Option<&str>) {
+    if let Ok(mut lock) = CONFIGURED_WORKSPACE_PATH.write() {
+        *lock = path.map(|s| s.to_string());
+    }
+}
+
+pub fn bind_workspace_path(path: &str) {
+    set_workspace_path(Some(path));
+}
+
+pub fn get_workspace_path() -> String {
+    if let Ok(lock) = CONFIGURED_WORKSPACE_PATH.read() {
+        if let Some(ref path) = *lock {
+            if !path.trim().is_empty() {
+                return path.clone();
+            }
+        }
+    }
+    DEFAULT_SANDBOX.to_string()
+}
+
+pub fn set_allowed_paths(paths: Option<&[String]>) {
+    if let Ok(mut lock) = CONFIGURED_ALLOWED_PATHS.write() {
+        *lock = paths.map(|p| p.to_vec());
+    }
+}
+
+pub fn bind_allowed_paths(paths: &[String]) {
+    set_allowed_paths(Some(paths));
+}
+
+pub fn get_allowed_paths() -> Vec<String> {
+    if let Ok(lock) = CONFIGURED_ALLOWED_PATHS.read() {
+        if let Some(ref paths) = *lock {
+            return paths.clone();
+        }
+    }
+    Vec::new()
+}
+
+pub fn unified_allowed_paths() -> Vec<String> {
+    let ws = get_workspace_path();
+    let mut unified = Vec::new();
+    let ws_trimmed = ws.trim();
+    if !ws_trimmed.is_empty() {
+        unified.push(ws_trimmed.to_string());
+    }
+    for p in get_allowed_paths() {
+        let trimmed = p.trim();
+        if !trimmed.is_empty() && !unified.iter().any(|u| u == trimmed) {
+            unified.push(trimmed.to_string());
+        }
+    }
+    if unified.is_empty() {
+        unified.push(DEFAULT_SANDBOX.to_string());
+    }
+    unified
+}
+
+pub fn sync_from_app_config(config: &aqvn_core::config::AppConfig) {
+    set_workspace_path(Some(&config.workspace_path));
+    set_allowed_paths(Some(&config.allowed_paths));
+}
+
+pub fn current_sandbox() -> Sandbox {
+    if let Ok(lock) = CUSTOM_SANDBOX.read() {
+        if let Some(ref sb) = *lock {
+            return sb.clone();
+        }
+    }
+    let unified = unified_allowed_paths();
+    Sandbox::from_allowed_paths(&unified)
+}
+
+pub fn normalize_requested_path(requested: &str) -> String {
+    let trimmed = requested.trim();
+    if trimmed.is_empty() || trimmed == "." {
+        return "/a0".to_string();
+    }
+    if trimmed.starts_with("/a0") || trimmed.starts_with('~') || trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/a0/{trimmed}")
+    }
+}
+
+pub fn calculate_checksum(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+pub fn parse_file_offset(envelope: &Value) -> Option<u64> {
+    envelope.get("offset").and_then(|v| {
+        v.as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+    })
+}
+
+pub fn parse_file_length(envelope: &Value) -> Option<usize> {
+    envelope.get("length").and_then(|v| {
+        v.as_u64()
+            .map(|l| l as usize)
+            .or_else(|| v.as_str().and_then(|s| s.parse::<usize>().ok()))
+    })
+}
+
+pub fn parse_file_encoding(envelope: &Value) -> String {
+    envelope
+        .get("encoding")
+        .and_then(Value::as_str)
+        .unwrap_or("utf-8")
+        .to_lowercase()
+}
+
+pub fn parse_file_mode(envelope: &Value) -> String {
+    envelope
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("overwrite")
+        .to_lowercase()
+}
+
+pub fn parse_file_final(envelope: &Value) -> bool {
+    envelope
+        .get("final")
+        .or_else(|| envelope.get("is_final"))
+        .is_some_and(|v| {
+            v.as_bool().unwrap_or_else(|| {
+                v.as_str()
+                    .map(|s| s.eq_ignore_ascii_case("true") || s == "1")
+                    .unwrap_or(false)
+            })
+        })
+}
+
+pub fn parse_expected_sha256(envelope: &Value) -> Option<String> {
+    envelope
+        .get("expected_sha256")
+        .or_else(|| envelope.get("expected_checksum"))
+        .or_else(|| envelope.get("sha256"))
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_string())
+}
+
+pub fn compute_file_sha256(path: &Path) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn make_error_reply(
+    id: &str,
+    op_id: &str,
+    action: &str,
+    path: Option<&str>,
+    error_msg: impl Into<String>,
+) -> String {
+    let err = error_msg.into();
+    let res = json!({
+        "type": MSG_TYPE_FILE_OP_RESULT,
+        "op": MSG_TYPE_FILE_OP_RESULT,
+        "id": id,
+        "op_id": op_id,
+        "success": false,
+        "status": "error",
+        "action": action,
+        "path": path,
+        "transfer_protocol": TRANSFER_PROTOCOL_V1,
+        "protocol_version": TRANSFER_PROTOCOL_V1,
+        "error": err,
+        "data": Value::Null,
+        "result": Value::Null,
+    });
+    res.to_string()
+}
+
+pub async fn handle_file_op(envelope: &Value) -> String {
+    handle_file_op_with_sandbox(envelope, &current_sandbox()).await
+}
+
+pub async fn handle_file_op_with_sandbox(envelope: &Value, sandbox: &Sandbox) -> String {
+    let (id, op_id) = extract_id_and_op_id(envelope, "file-op-auto");
+
+    let action = envelope
+        .get("action")
+        .or_else(|| envelope.get("operation"))
+        .or_else(|| envelope.get("sub_op"))
+        .or_else(|| envelope.get("cmd"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_lowercase();
+
+    let raw_path = envelope.get("path").and_then(Value::as_str).unwrap_or("");
+
+    match action.as_str() {
+        "read" => op_read(&id, &op_id, raw_path, envelope, sandbox),
+        "write" => op_write(&id, &op_id, raw_path, envelope, sandbox),
+        "patch" => op_patch(&id, &op_id, raw_path, envelope, sandbox),
+        "files_list" | "list" => op_files_list(&id, &op_id, raw_path, envelope, sandbox),
+        "files_stat" | "stat" => op_files_stat(&id, &op_id, raw_path, sandbox),
+        "files_mkdir" | "mkdir" => op_files_mkdir(&id, &op_id, raw_path, sandbox),
+        "files_remove" | "remove" | "delete" => op_files_remove(&id, &op_id, raw_path, sandbox),
+        "files_rename" | "rename" | "move" => op_files_rename(&id, &op_id, envelope, sandbox),
+        "tree" | "tree_update" | "remote_tree" => {
+            let max_depth = envelope
+                .get("max_depth")
+                .and_then(Value::as_u64)
+                .unwrap_or(3) as usize;
+            let mut snapshot = generate_remote_tree_update(sandbox, max_depth);
+            if let Some(obj) = snapshot.as_object_mut() {
+                if !id.is_empty() {
+                    obj.insert("id".to_string(), Value::String(id));
+                }
+                if !op_id.is_empty() {
+                    obj.insert("op_id".to_string(), Value::String(op_id));
+                }
+            }
+            snapshot.to_string()
+        }
+        unknown => make_error_reply(
+            &id,
+            &op_id,
+            unknown,
+            Some(raw_path),
+            format!("unsupported file operation action: {unknown}"),
+        ),
+    }
+}
+
+fn op_read(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
+    let normalized = normalize_requested_path(raw_path);
+    let jailed = match sandbox.jail(&normalized) {
+        Ok(p) => p,
+        Err(err) => return make_error_reply(id, op_id, "read", Some(raw_path), err.to_string()),
+    };
+
+    if !jailed.exists() {
+        return make_error_reply(
+            id,
+            op_id,
+            "read",
+            Some(raw_path),
+            format!("file not found: {raw_path}"),
+        );
+    }
+    if !jailed.is_file() {
+        return make_error_reply(
+            id,
+            op_id,
+            "read",
+            Some(raw_path),
+            format!("path is not a file: {raw_path}"),
+        );
+    }
+
+    let mut file = match File::open(&jailed) {
+        Ok(f) => f,
+        Err(err) => {
+            return make_error_reply(
+                id,
+                op_id,
+                "read",
+                Some(raw_path),
+                format!("failed to open file: {err}"),
+            )
+        }
+    };
+
+    let total_size = match file.metadata() {
+        Ok(m) => m.len() as usize,
+        Err(err) => {
+            return make_error_reply(
+                id,
+                op_id,
+                "read",
+                Some(raw_path),
+                format!("failed to read file metadata: {err}"),
+            )
+        }
+    };
+
+    let offset = parse_file_offset(envelope).unwrap_or(0) as usize;
+    const MAX_READ_CHUNK_BYTES: usize = 8 * 1024 * 1024;
+    let requested_length = parse_file_length(envelope).unwrap_or(total_size.saturating_sub(offset));
+    let length = requested_length.min(MAX_READ_CHUNK_BYTES);
+
+    let start = offset.min(total_size);
+    let end = (start + length).min(total_size);
+    let read_len = end.saturating_sub(start);
+
+    if let Err(err) = file.seek(SeekFrom::Start(start as u64)) {
+        return make_error_reply(
+            id,
+            op_id,
+            "read",
+            Some(raw_path),
+            format!("failed to seek file: {err}"),
+        );
+    }
+
+    let mut chunk_bytes = Vec::with_capacity(read_len);
+    if read_len > 0 {
+        if let Err(err) = (&mut file)
+            .take(read_len as u64)
+            .read_to_end(&mut chunk_bytes)
+        {
+            return make_error_reply(
+                id,
+                op_id,
+                "read",
+                Some(raw_path),
+                format!("failed to read file chunk: {err}"),
+            );
+        }
+    }
+
+    let checksum = calculate_checksum(&chunk_bytes);
+
+    let requested_encoding = envelope
+        .get("encoding")
+        .and_then(Value::as_str)
+        .map(str::to_lowercase);
+
+    let is_binary = chunk_bytes.iter().take(8192).any(|&b| b == 0);
+    let (content, encoding) = match requested_encoding.as_deref() {
+        Some("base64") | Some("binary") => (encode_base64(&chunk_bytes), "base64"),
+        Some("utf-8") | Some("text") => {
+            (String::from_utf8_lossy(&chunk_bytes).to_string(), "utf-8")
+        }
+        _ => {
+            if is_binary {
+                (encode_base64(&chunk_bytes), "base64")
+            } else {
+                (String::from_utf8_lossy(&chunk_bytes).to_string(), "utf-8")
+            }
+        }
+    };
+
+    let total_lines = if encoding == "utf-8" {
+        count_content_lines(&content)
+    } else {
+        0
+    };
+
+    let mut res = json!({
+        "type": MSG_TYPE_FILE_OP_RESULT,
+        "op": MSG_TYPE_FILE_OP_RESULT,
+        "id": id,
+        "op_id": op_id,
+        "success": true,
+        "status": "ok",
+        "action": "read",
+        "path": raw_path,
+        "transfer_protocol": TRANSFER_PROTOCOL_V1,
+        "protocol_version": TRANSFER_PROTOCOL_V1,
+        "content": content,
+        "encoding": encoding,
+        "size": chunk_bytes.len(),
+        "total_size": total_size,
+        "offset": offset,
+        "checksum": checksum,
+        "total_lines": total_lines,
+    });
+
+    let data_payload = json!({
+        "content": content,
+        "encoding": encoding,
+        "size": chunk_bytes.len(),
+        "total_size": total_size,
+        "offset": offset,
+        "checksum": checksum,
+        "total_lines": total_lines,
+    });
+    res["data"] = data_payload.clone();
+    res["result"] = data_payload;
+
+    res.to_string()
+}
+
+fn op_write(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
+    let normalized = normalize_requested_path(raw_path);
+    let jailed = match sandbox.jail(&normalized) {
+        Ok(p) => p,
+        Err(err) => return make_error_reply(id, op_id, "write", Some(raw_path), err.to_string()),
+    };
+
+    let encoding = parse_file_encoding(envelope);
+
+    let content_raw = envelope
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    let bytes = if encoding == "base64" {
+        match decode_base64(content_raw) {
+            Ok(b) => b,
+            Err(err) => {
+                return make_error_reply(
+                    id,
+                    op_id,
+                    "write",
+                    Some(raw_path),
+                    format!("invalid base64 content: {err}"),
+                )
+            }
+        }
+    } else {
+        content_raw.as_bytes().to_vec()
+    };
+
+    if let Some(parent) = jailed.parent() {
+        if let Err(err) = fs::create_dir_all(parent) {
+            return make_error_reply(
+                id,
+                op_id,
+                "write",
+                Some(raw_path),
+                format!("failed to create parent directories: {err}"),
+            );
+        }
+    }
+
+    let mode = parse_file_mode(envelope);
+    let maybe_offset = parse_file_offset(envelope);
+
+    let (write_res, final_total_size) = if let Some(offset) = maybe_offset {
+        let res = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&jailed)
+            .and_then(|mut f| {
+                f.seek(SeekFrom::Start(offset))?;
+                f.write_all(&bytes)?;
+                f.flush()?;
+                let len = f
+                    .metadata()
+                    .map(|m| m.len() as usize)
+                    .unwrap_or((offset as usize) + bytes.len());
+                Ok(len)
+            });
+        match res {
+            Ok(len) => (Ok(()), Some(len)),
+            Err(e) => (Err(e), None),
+        }
+    } else if mode == "append" {
+        let res = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&jailed)
+            .and_then(|mut f| {
+                f.write_all(&bytes)?;
+                f.flush()?;
+                let len = f
+                    .metadata()
+                    .map(|m| m.len() as usize)
+                    .unwrap_or(bytes.len());
+                Ok(len)
+            });
+        match res {
+            Ok(len) => (Ok(()), Some(len)),
+            Err(e) => (Err(e), None),
+        }
+    } else {
+        let parent_dir = jailed.parent().unwrap_or_else(|| Path::new("."));
+        let file_stem = jailed
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file");
+        static TMP_WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let seq = TMP_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp_path =
+            parent_dir.join(format!(".{}.tmp.{}.{}", file_stem, std::process::id(), seq));
+
+        match fs::write(&tmp_path, &bytes) {
+            Ok(()) => {
+                let maybe_expected = parse_expected_sha256(envelope);
+                if let Some(ref expected) = maybe_expected {
+                    let clean_expected = expected
+                        .trim()
+                        .strip_prefix("sha256:")
+                        .unwrap_or(expected.trim());
+                    if !clean_expected.is_empty() {
+                        let computed = compute_file_sha256(&tmp_path).unwrap_or_default();
+                        if !clean_expected.eq_ignore_ascii_case(&computed) {
+                            let _ = fs::remove_file(&tmp_path);
+                            let mut err_reply: Value = serde_json::from_str(&make_error_reply(
+                                id,
+                                op_id,
+                                "write",
+                                Some(raw_path),
+                                format!(
+                                    "SHA-256 checksum mismatch: expected {clean_expected}, calculated {computed}"
+                                ),
+                            ))
+                            .unwrap_or_default();
+                            err_reply["file_sha256"] = json!(&computed);
+                            err_reply["expected_sha256"] = json!(clean_expected);
+                            err_reply["rollback"] = json!(true);
+                            let rollback_data = json!({
+                                "rollback": true,
+                                "file_sha256": &computed,
+                                "expected_sha256": clean_expected,
+                            });
+                            err_reply["data"] = rollback_data.clone();
+                            err_reply["result"] = rollback_data;
+                            return err_reply.to_string();
+                        }
+                    }
+                }
+                let rename_res = fs::rename(&tmp_path, &jailed).or_else(|_| {
+                    fs::copy(&tmp_path, &jailed).map(|_| {
+                        let _ = fs::remove_file(&tmp_path);
+                    })
+                });
+                match rename_res {
+                    Ok(()) => (Ok(()), Some(bytes.len())),
+                    Err(e) => {
+                        let _ = fs::remove_file(&tmp_path);
+                        (Err(e), None)
+                    }
+                }
+            }
+            Err(e) => (Err(e), None),
+        }
+    };
+
+    if let Err(err) = write_res {
+        return make_error_reply(
+            id,
+            op_id,
+            "write",
+            Some(raw_path),
+            format!("failed to write file: {err}"),
+        );
+    }
+
+    let bytes_written = bytes.len();
+    let checksum = calculate_checksum(&bytes);
+    let total_lines = if encoding != "base64" {
+        count_content_lines(content_raw)
+    } else {
+        0
+    };
+
+    let is_final = parse_file_final(envelope);
+    let maybe_expected_sha256 = parse_expected_sha256(envelope);
+
+    let maybe_file_sha256 = if is_final
+        || (maybe_offset.is_none() && mode != "append" && maybe_expected_sha256.is_some())
+    {
+        let computed = match compute_file_sha256(&jailed) {
+            Ok(h) => h,
+            Err(err) => {
+                return make_error_reply(
+                    id,
+                    op_id,
+                    "write",
+                    Some(raw_path),
+                    format!("failed to compute file SHA-256: {err}"),
+                );
+            }
+        };
+
+        if let Some(ref expected) = maybe_expected_sha256 {
+            let clean_expected = expected
+                .trim()
+                .strip_prefix("sha256:")
+                .unwrap_or(expected.trim());
+            if !clean_expected.is_empty() && !clean_expected.eq_ignore_ascii_case(&computed) {
+                if let Some(offset) = maybe_offset {
+                    if offset > 0 {
+                        if let Ok(file) = fs::OpenOptions::new().write(true).open(&jailed) {
+                            let _ = file.set_len(offset);
+                        }
+                    } else if fs::remove_file(&jailed).is_err() {
+                        if let Ok(file) = fs::OpenOptions::new().write(true).open(&jailed) {
+                            let _ = file.set_len(0);
+                        }
+                    }
+                } else if fs::remove_file(&jailed).is_err() {
+                    if let Ok(file) = fs::OpenOptions::new().write(true).open(&jailed) {
+                        let _ = file.set_len(0);
+                    }
+                }
+
+                let mut err_reply: Value = serde_json::from_str(&make_error_reply(
+                    id,
+                    op_id,
+                    "write",
+                    Some(raw_path),
+                    format!(
+                        "SHA-256 checksum mismatch: expected {clean_expected}, calculated {computed}"
+                    ),
+                ))
+                .unwrap_or_default();
+                err_reply["file_sha256"] = json!(&computed);
+                err_reply["expected_sha256"] = json!(clean_expected);
+                err_reply["rollback"] = json!(true);
+                let rollback_data = json!({
+                    "rollback": true,
+                    "file_sha256": &computed,
+                    "expected_sha256": clean_expected,
+                });
+                err_reply["data"] = rollback_data.clone();
+                err_reply["result"] = rollback_data;
+                return err_reply.to_string();
+            }
+        }
+
+        Some(computed)
+    } else {
+        None
+    };
+
+    let mut res = json!({
+        "type": MSG_TYPE_FILE_OP_RESULT,
+        "op": MSG_TYPE_FILE_OP_RESULT,
+        "id": id,
+        "op_id": op_id,
+        "success": true,
+        "status": "ok",
+        "action": "write",
+        "path": raw_path,
+        "transfer_protocol": TRANSFER_PROTOCOL_V1,
+        "protocol_version": TRANSFER_PROTOCOL_V1,
+        "bytes_written": bytes_written,
+        "checksum": checksum,
+        "total_lines": total_lines,
+    });
+
+    let mut data_payload = json!({
+        "bytes_written": bytes_written,
+        "checksum": checksum,
+        "total_lines": total_lines,
+    });
+    if let Some(offset) = maybe_offset {
+        res["offset"] = json!(offset);
+        data_payload["offset"] = json!(offset);
+        if let Some(total_size) = final_total_size {
+            res["total_size"] = json!(total_size);
+            data_payload["total_size"] = json!(total_size);
+        }
+    }
+    if is_final {
+        res["final"] = json!(true);
+        data_payload["final"] = json!(true);
+    }
+    if let Some(ref file_sha256) = maybe_file_sha256 {
+        res["file_sha256"] = json!(file_sha256);
+        data_payload["file_sha256"] = json!(file_sha256);
+    }
+    res["data"] = data_payload.clone();
+    res["result"] = data_payload;
+
+    res.to_string()
+}
+
+fn op_patch(id: &str, op_id: &str, raw_path: &str, envelope: &Value, sandbox: &Sandbox) -> String {
+    let normalized = normalize_requested_path(raw_path);
+    let jailed = match sandbox.jail(&normalized) {
+        Ok(p) => p,
+        Err(err) => return make_error_reply(id, op_id, "patch", Some(raw_path), err.to_string()),
+    };
+
+    if !jailed.exists() {
+        return make_error_reply(
+            id,
+            op_id,
+            "patch",
+            Some(raw_path),
+            format!("file not found: {raw_path}"),
+        );
+    }
+    if !jailed.is_file() {
+        return make_error_reply(
+            id,
+            op_id,
+            "patch",
+            Some(raw_path),
+            format!("path is not a file: {raw_path}"),
+        );
+    }
+
+    let original = match fs::read_to_string(&jailed) {
+        Ok(s) => s,
+        Err(err) => {
+            return make_error_reply(
+                id,
+                op_id,
+                "patch",
+                Some(raw_path),
+                format!("failed to read file for patching: {err}"),
+            )
+        }
+    };
+
+    let mut hunk_count = 0usize;
+    let mut replacement_count = 0usize;
+
+    let updated = if let (Some(old_text), Some(new_text)) = (
+        envelope.get("old_text").and_then(Value::as_str),
+        envelope.get("new_text").and_then(Value::as_str),
+    ) {
+        if old_text.is_empty() {
+            return make_error_reply(
+                id,
+                op_id,
+                "patch",
+                Some(raw_path),
+                "old_text cannot be empty",
+            );
+        }
+        let matches = original.matches(old_text).count();
+        if matches == 0 {
+            return make_error_reply(
+                id,
+                op_id,
+                "patch",
+                Some(raw_path),
+                format!("old_text not found in file: {old_text}"),
+            );
+        }
+        if matches > 1 {
+            return make_error_reply(
+                id,
+                op_id,
+                "patch",
+                Some(raw_path),
+                format!("old_text matched {matches} times; provide a longer unique context"),
+            );
+        }
+        replacement_count = 1;
+        original.replacen(old_text, new_text, 1)
+    } else if let Some(edits_val) = envelope.get("edits") {
+        let parsed = match parse_edits(edits_val) {
+            Ok(p) => p,
+            Err(err) => {
+                return make_error_reply(
+                    id,
+                    op_id,
+                    "patch",
+                    Some(raw_path),
+                    format!("failed to parse edits: {err}"),
+                )
+            }
+        };
+        replacement_count = parsed.len();
+        apply_parsed_edits(&original, &parsed)
+    } else if let Some(patch_text) = envelope.get("patch_text").and_then(Value::as_str) {
+        let applied = match apply_context_patch(&original, patch_text) {
+            Ok(res) => res,
+            Err(err) => {
+                return make_error_reply(
+                    id,
+                    op_id,
+                    "patch",
+                    Some(raw_path),
+                    format!("failed to apply context patch: {err}"),
+                )
+            }
+        };
+        hunk_count = applied.hunk_count;
+        applied.content
+    } else {
+        return make_error_reply(
+            id,
+            op_id,
+            "patch",
+            Some(raw_path),
+            "patch requires 'patch_text', 'old_text'/'new_text', or 'edits'",
+        );
+    };
+
+    let parent_dir = jailed.parent().unwrap_or_else(|| Path::new("."));
+    let file_stem = jailed
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    static TMP_PATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let seq = TMP_PATCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = parent_dir.join(format!(
+        ".{}.patch.tmp.{}.{}",
+        file_stem,
+        std::process::id(),
+        seq
+    ));
+
+    if let Err(err) = fs::write(&tmp_path, updated.as_bytes()) {
+        return make_error_reply(
+            id,
+            op_id,
+            "patch",
+            Some(raw_path),
+            format!("failed to write patched file: {err}"),
+        );
+    }
+
+    let expected_sha256 = parse_expected_sha256(envelope);
+    let computed_sha256 = match compute_file_sha256(&tmp_path) {
+        Ok(hash) => {
+            if let Some(ref exp) = expected_sha256 {
+                let norm_exp = exp.trim().trim_start_matches("sha256:").to_lowercase();
+                let norm_comp = hash.to_lowercase();
+                if norm_exp != norm_comp {
+                    let _ = fs::remove_file(&tmp_path);
+                    let mut err_reply = serde_json::from_str::<Value>(&make_error_reply(
+                        id,
+                        op_id,
+                        "patch",
+                        Some(raw_path),
+                        format!(
+                            "SHA-256 checksum mismatch on patched file: expected {exp}, got {hash}. File rolled back."
+                        ),
+                    ))
+                    .unwrap_or_else(|_| json!({}));
+                    err_reply["rollback"] = json!(true);
+                    err_reply["file_sha256"] = json!(hash);
+                    err_reply["expected_sha256"] = json!(exp);
+                    err_reply["data"] = json!({
+                        "error": format!("SHA-256 checksum mismatch on patched file: expected {exp}, got {hash}"),
+                        "file_sha256": hash,
+                        "expected_sha256": exp,
+                        "rollback": true
+                    });
+                    return err_reply.to_string();
+                }
+            }
+            Some(hash)
+        }
+        Err(e) => {
+            let _ = fs::remove_file(&tmp_path);
+            return make_error_reply(
+                id,
+                op_id,
+                "patch",
+                Some(raw_path),
+                format!("failed to compute SHA-256 for patched file: {e}. File rolled back."),
+            );
+        }
+    };
+
+    let rename_res = fs::rename(&tmp_path, &jailed).or_else(|_| {
+        fs::copy(&tmp_path, &jailed).map(|_| {
+            let _ = fs::remove_file(&tmp_path);
+        })
+    });
+    if let Err(err) = rename_res {
+        let _ = fs::remove_file(&tmp_path);
+        return make_error_reply(
+            id,
+            op_id,
+            "patch",
+            Some(raw_path),
+            format!("failed to rename patched file: {err}"),
+        );
+    }
+
+    let total_lines = count_content_lines(&updated);
+    let checksum = calculate_checksum(updated.as_bytes());
+
+    let mut res = json!({
+        "type": MSG_TYPE_FILE_OP_RESULT,
+        "op": MSG_TYPE_FILE_OP_RESULT,
+        "id": id,
+        "op_id": op_id,
+        "success": true,
+        "status": "ok",
+        "action": "patch",
+        "path": raw_path,
+        "transfer_protocol": TRANSFER_PROTOCOL_V1,
+        "protocol_version": TRANSFER_PROTOCOL_V1,
+        "total_lines": total_lines,
+        "checksum": checksum,
+        "hunk_count": hunk_count,
+        "replacement_count": replacement_count,
+    });
+    if let Some(ref sha) = computed_sha256 {
+        res["file_sha256"] = json!(sha);
+    }
+
+    let mut data_payload = json!({
+        "total_lines": total_lines,
+        "checksum": checksum,
+        "hunk_count": hunk_count,
+        "replacement_count": replacement_count,
+    });
+    if let Some(ref sha) = computed_sha256 {
+        data_payload["file_sha256"] = json!(sha);
+    }
+    res["data"] = data_payload.clone();
+    res["result"] = data_payload;
+
+    res.to_string()
+}
+// ------------------------------------------------------------- files_list operation
+
+fn op_files_list(
+    id: &str,
+    op_id: &str,
+    raw_path: &str,
+    envelope: &Value,
+    sandbox: &Sandbox,
+) -> String {
+    let normalized = normalize_requested_path(raw_path);
+    let jailed = match sandbox.jail(&normalized) {
+        Ok(p) => p,
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_list", Some(raw_path), err.to_string())
+        }
+    };
+
+    if !jailed.exists() {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_list",
+            Some(raw_path),
+            format!("directory not found: {raw_path}"),
+        );
+    }
+    if !jailed.is_dir() {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_list",
+            Some(raw_path),
+            format!("path is not a directory: {raw_path}"),
+        );
+    }
+
+    let include_hidden = envelope
+        .get("include_hidden")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let recursive = envelope
+        .get("recursive")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let mut entries = Vec::new();
+    if let Err(err) = collect_entries(&jailed, &jailed, include_hidden, recursive, &mut entries) {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_list",
+            Some(raw_path),
+            format!("failed to list directory: {err}"),
+        );
+    }
+
+    entries.sort_by(|a, b| {
+        let name_a = a["name"].as_str().unwrap_or("").to_lowercase();
+        let name_b = b["name"].as_str().unwrap_or("").to_lowercase();
+        name_a.cmp(&name_b)
+    });
+
+    let count = entries.len();
+    let mut res = json!({
+        "type": MSG_TYPE_FILE_OP_RESULT,
+        "op": MSG_TYPE_FILE_OP_RESULT,
+        "id": id,
+        "op_id": op_id,
+        "success": true,
+        "status": "ok",
+        "action": "files_list",
+        "path": raw_path,
+        "transfer_protocol": TRANSFER_PROTOCOL_V1,
+        "protocol_version": TRANSFER_PROTOCOL_V1,
+        "entries": entries,
+        "count": count,
+    });
+
+    let data_payload = json!({
+        "entries": res["entries"],
+        "count": count,
+    });
+    res["data"] = data_payload.clone();
+    res["result"] = data_payload;
+
+    res.to_string()
+}
+
+fn collect_entries(
+    base: &Path,
+    current: &Path,
+    include_hidden: bool,
+    recursive: bool,
+    out: &mut Vec<Value>,
+) -> std::io::Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !include_hidden && name.starts_with('.') {
+            continue;
+        }
+
+        let entry_path = entry.path();
+        let metadata = match fs::metadata(&entry_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        let is_file = metadata.is_file();
+        let is_dir = metadata.is_dir();
+        let rel_path = entry_path
+            .strip_prefix(base)
+            .unwrap_or(&entry_path)
+            .to_string_lossy()
+            .to_string();
+
+        out.push(json!({
+            "name": name,
+            "path": rel_path,
+            "is_file": is_file,
+            "is_dir": is_dir,
+            "size": metadata.len(),
+            "modified": epoch_secs(metadata.modified().unwrap_or(std::time::UNIX_EPOCH)),
+        }));
+
+        if recursive && is_dir {
+            let _ = collect_entries(base, &entry_path, include_hidden, recursive, out);
+        }
+    }
+    Ok(())
+}
+
+fn op_files_stat(id: &str, op_id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
+    let normalized = normalize_requested_path(raw_path);
+    let jailed = match sandbox.jail(&normalized) {
+        Ok(p) => p,
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_stat", Some(raw_path), err.to_string())
+        }
+    };
+
+    let exists = jailed.exists();
+    let is_file = jailed.is_file();
+    let is_dir = jailed.is_dir();
+    let (size, modified) = if exists {
+        if let Ok(m) = fs::metadata(&jailed) {
+            (
+                m.len(),
+                epoch_secs(m.modified().unwrap_or(std::time::UNIX_EPOCH)),
+            )
+        } else {
+            (0, 0.0)
+        }
+    } else {
+        (0, 0.0)
+    };
+
+    let mut res = json!({
+        "type": MSG_TYPE_FILE_OP_RESULT,
+        "op": MSG_TYPE_FILE_OP_RESULT,
+        "id": id,
+        "op_id": op_id,
+        "success": true,
+        "status": "ok",
+        "action": "files_stat",
+        "path": raw_path,
+        "transfer_protocol": TRANSFER_PROTOCOL_V1,
+        "protocol_version": TRANSFER_PROTOCOL_V1,
+        "exists": exists,
+        "is_file": is_file,
+        "is_dir": is_dir,
+        "size": size,
+        "modified": modified,
+    });
+
+    let data_payload = json!({
+        "exists": exists,
+        "is_file": is_file,
+        "is_dir": is_dir,
+        "size": size,
+        "modified": modified,
+    });
+    res["data"] = data_payload.clone();
+    res["result"] = data_payload;
+
+    res.to_string()
+}
+
+fn op_files_mkdir(id: &str, op_id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
+    let normalized = normalize_requested_path(raw_path);
+    let jailed = match sandbox.jail(&normalized) {
+        Ok(p) => p,
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_mkdir", Some(raw_path), err.to_string())
+        }
+    };
+
+    if let Err(err) = fs::create_dir_all(&jailed) {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_mkdir",
+            Some(raw_path),
+            format!("failed to create directory: {err}"),
+        );
+    }
+
+    let mut res = json!({
+        "type": MSG_TYPE_FILE_OP_RESULT,
+        "op": MSG_TYPE_FILE_OP_RESULT,
+        "id": id,
+        "op_id": op_id,
+        "success": true,
+        "status": "ok",
+        "action": "files_mkdir",
+        "path": raw_path,
+        "transfer_protocol": TRANSFER_PROTOCOL_V1,
+        "protocol_version": TRANSFER_PROTOCOL_V1,
+    });
+    res["data"] = json!({"success": true});
+    res["result"] = json!({"success": true});
+    res.to_string()
+}
+
+fn op_files_remove(id: &str, op_id: &str, raw_path: &str, sandbox: &Sandbox) -> String {
+    let trimmed = raw_path.trim();
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == "/"
+        || trimmed == "/a0"
+        || trimmed == "/a0/"
+    {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_remove",
+            Some(raw_path),
+            "cannot remove workspace root directory",
+        );
+    }
+
+    let normalized = normalize_requested_path(raw_path);
+    let jailed = match sandbox.jail(&normalized) {
+        Ok(p) => p,
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_remove", Some(raw_path), err.to_string())
+        }
+    };
+
+    if sandbox
+        .canonical_roots()
+        .unwrap_or_default()
+        .iter()
+        .any(|r| r == &jailed)
+    {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_remove",
+            Some(raw_path),
+            "cannot remove workspace root directory",
+        );
+    }
+
+    if !jailed.exists() {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_remove",
+            Some(raw_path),
+            format!("path does not exist: {raw_path}"),
+        );
+    }
+
+    let remove_res = if jailed.is_dir() {
+        fs::remove_dir_all(&jailed)
+    } else {
+        fs::remove_file(&jailed)
+    };
+
+    if let Err(err) = remove_res {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_remove",
+            Some(raw_path),
+            format!("failed to remove path: {err}"),
+        );
+    }
+
+    let mut res = json!({
+        "type": MSG_TYPE_FILE_OP_RESULT,
+        "op": MSG_TYPE_FILE_OP_RESULT,
+        "id": id,
+        "op_id": op_id,
+        "success": true,
+        "status": "ok",
+        "action": "files_remove",
+        "path": raw_path,
+        "transfer_protocol": TRANSFER_PROTOCOL_V1,
+        "protocol_version": TRANSFER_PROTOCOL_V1,
+    });
+    res["data"] = json!({"success": true});
+    res["result"] = json!({"success": true});
+    res.to_string()
+}
+
+fn op_files_rename(id: &str, op_id: &str, envelope: &Value, sandbox: &Sandbox) -> String {
+    let src_raw = envelope
+        .get("src")
+        .or_else(|| envelope.get("source"))
+        .or_else(|| envelope.get("from"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    let dst_raw = envelope
+        .get("dst")
+        .or_else(|| envelope.get("destination"))
+        .or_else(|| envelope.get("to"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    if src_raw.trim().is_empty() || dst_raw.trim().is_empty() {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_rename",
+            None,
+            "src and dst paths cannot be empty",
+        );
+    }
+
+    let src_norm = normalize_requested_path(src_raw);
+    let dst_norm = normalize_requested_path(dst_raw);
+
+    let src_jailed = match sandbox.jail(&src_norm) {
+        Ok(p) => p,
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_rename", Some(src_raw), err.to_string())
+        }
+    };
+    let dst_jailed = match sandbox.jail(&dst_norm) {
+        Ok(p) => p,
+        Err(err) => {
+            return make_error_reply(id, op_id, "files_rename", Some(dst_raw), err.to_string())
+        }
+    };
+
+    if sandbox
+        .canonical_roots()
+        .unwrap_or_default()
+        .iter()
+        .any(|r| r == &src_jailed)
+    {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_rename",
+            Some(src_raw),
+            "cannot rename workspace root directory",
+        );
+    }
+
+    if !src_jailed.exists() {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_rename",
+            Some(src_raw),
+            format!("source path does not exist: {src_raw}"),
+        );
+    }
+
+    if let Some(parent) = dst_jailed.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    if let Err(err) = fs::rename(&src_jailed, &dst_jailed) {
+        return make_error_reply(
+            id,
+            op_id,
+            "files_rename",
+            Some(src_raw),
+            format!("failed to rename: {err}"),
+        );
+    }
+
+    let mut res = json!({
+        "type": MSG_TYPE_FILE_OP_RESULT,
+        "op": MSG_TYPE_FILE_OP_RESULT,
+        "id": id,
+        "op_id": op_id,
+        "success": true,
+        "status": "ok",
+        "action": "files_rename",
+        "src": src_raw,
+        "dst": dst_raw,
+        "transfer_protocol": TRANSFER_PROTOCOL_V1,
+        "protocol_version": TRANSFER_PROTOCOL_V1,
+    });
+    res["data"] = json!({"success": true});
+    res["result"] = json!({"success": true});
+    res.to_string()
+}
+
+type TreeCacheEntry = (std::time::Instant, Vec<std::path::PathBuf>, usize, Value);
+static LAST_TREE_UPDATE: RwLock<Option<TreeCacheEntry>> = RwLock::new(None);
+
+pub fn clear_tree_cache() {
+    if let Ok(mut lock) = LAST_TREE_UPDATE.write() {
+        *lock = None;
+    }
+}
+
+pub fn generate_remote_tree_update(sandbox: &Sandbox, max_depth: usize) -> Value {
+    let roots = sandbox.canonical_roots().unwrap_or_default();
+    if let Ok(lock) = LAST_TREE_UPDATE.read() {
+        if let Some((instant, ref cached_roots, cached_depth, ref cached_val)) = *lock {
+            if instant.elapsed() < std::time::Duration::from_millis(250)
+                && cached_depth == max_depth
+                && *cached_roots == roots
+            {
+                return cached_val.clone();
+            }
+        }
+    }
+
+    let mut flat_entries = Vec::new();
+    let mut file_count = 0usize;
+    let mut dir_count = 0usize;
+
+    let mut tree_nodes = Vec::new();
+    for root in &roots {
+        let mut root_nodes = build_tree_recursive(
+            root,
+            root,
+            1,
+            max_depth,
+            &mut flat_entries,
+            &mut file_count,
+            &mut dir_count,
+        );
+        tree_nodes.append(&mut root_nodes);
+    }
+
+    let total_count = flat_entries.len();
+
+    let res = json!({
+        "type": MSG_TYPE_REMOTE_TREE_UPDATE,
+        "op": MSG_TYPE_REMOTE_TREE_UPDATE,
+        "workspace_path": "/a0",
+        "root": "/a0",
+        "max_depth": max_depth,
+        "tree": tree_nodes,
+        "entries": flat_entries,
+        "count": total_count,
+        "total_count": total_count,
+        "total_files": file_count,
+        "total_dirs": dir_count,
+    });
+
+    if let Ok(mut lock) = LAST_TREE_UPDATE.write() {
+        *lock = Some((std::time::Instant::now(), roots, max_depth, res.clone()));
+    }
+
+    res
+}
+
+pub fn generate_remote_tree_snapshot(sandbox: &Sandbox, max_depth: usize) -> Value {
+    generate_remote_tree_update(sandbox, max_depth)
+}
+
+fn build_tree_recursive(
+    base: &Path,
+    current: &Path,
+    current_depth: usize,
+    max_depth: usize,
+    flat_entries: &mut Vec<Value>,
+    file_count: &mut usize,
+    dir_count: &mut usize,
+) -> Vec<Value> {
+    if current_depth > max_depth {
+        return Vec::new();
+    }
+
+    let mut nodes = Vec::new();
+    let Ok(entries) = fs::read_dir(current) else {
+        return nodes;
+    };
+
+    let mut sorted_entries: Vec<_> = entries.filter_map(Result::ok).collect();
+    sorted_entries.sort_by_key(|e| e.file_name());
+
+    for entry in sorted_entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist" {
+            continue;
+        }
+
+        let entry_path = entry.path();
+        let metadata = match fs::metadata(&entry_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        let is_dir = metadata.is_dir();
+        let is_file = metadata.is_file();
+        let rel_path = entry_path
+            .strip_prefix(base)
+            .unwrap_or(&entry_path)
+            .to_string_lossy()
+            .to_string();
+
+        if is_file {
+            *file_count += 1;
+        } else if is_dir {
+            *dir_count += 1;
+        }
+
+        let size = metadata.len();
+        let modified = epoch_secs(metadata.modified().unwrap_or(std::time::UNIX_EPOCH));
+
+        flat_entries.push(json!({
+            "name": name,
+            "path": rel_path,
+            "is_file": is_file,
+            "is_dir": is_dir,
+            "depth": current_depth,
+            "size": size,
+            "modified": modified,
+        }));
+
+        let children = if is_dir && current_depth < max_depth {
+            build_tree_recursive(
+                base,
+                &entry_path,
+                current_depth + 1,
+                max_depth,
+                flat_entries,
+                file_count,
+                dir_count,
+            )
+        } else {
+            Vec::new()
+        };
+
+        nodes.push(json!({
+            "name": name,
+            "path": rel_path,
+            "is_file": is_file,
+            "is_dir": is_dir,
+            "depth": current_depth,
+            "size": size,
+            "modified": modified,
+            "children": children,
+        }));
+    }
+
+    nodes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_requested_path() {
+        assert_eq!(normalize_requested_path(""), "/a0");
+        assert_eq!(normalize_requested_path("   "), "/a0");
+        assert_eq!(normalize_requested_path("."), "/a0");
+        assert_eq!(normalize_requested_path("  .  "), "/a0");
+
+        assert_eq!(normalize_requested_path("/a0"), "/a0");
+        assert_eq!(
+            normalize_requested_path("/a0/workspace/file.txt"),
+            "/a0/workspace/file.txt"
+        );
+
+        assert_eq!(
+            normalize_requested_path("~/projects/code.rs"),
+            "~/projects/code.rs"
+        );
+
+        assert_eq!(normalize_requested_path("/tmp/test.txt"), "/tmp/test.txt");
+        assert_eq!(normalize_requested_path("/usr/bin/bash"), "/usr/bin/bash");
+
+        assert_eq!(normalize_requested_path("hello.txt"), "/a0/hello.txt");
+        assert_eq!(
+            normalize_requested_path("sub/dir/nested.rs"),
+            "/a0/sub/dir/nested.rs"
+        );
+        assert_eq!(
+            normalize_requested_path("  trimmed/path.json  "),
+            "/a0/trimmed/path.json"
+        );
+    }
+
+    #[test]
+    fn test_calculate_checksum() {
+        assert_eq!(
+            calculate_checksum(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            calculate_checksum(b"hello world"),
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
+    }
+
+    #[test]
+    fn test_file_parameter_parsing() {
+        let env_offset_num = json!({ "offset": 1024 });
+        assert_eq!(parse_file_offset(&env_offset_num), Some(1024));
+
+        let env_offset_str = json!({ "offset": "2048" });
+        assert_eq!(parse_file_offset(&env_offset_str), Some(2048));
+
+        let env_empty = json!({});
+        assert_eq!(parse_file_offset(&env_empty), None);
+        assert_eq!(parse_file_length(&env_empty), None);
+        assert_eq!(parse_file_encoding(&env_empty), "utf-8");
+        assert_eq!(parse_file_mode(&env_empty), "overwrite");
+
+        let env_length_num = json!({ "length": 512 });
+        assert_eq!(parse_file_length(&env_length_num), Some(512));
+
+        let env_length_str = json!({ "length": "256" });
+        assert_eq!(parse_file_length(&env_length_str), Some(256));
+
+        let env_opts = json!({
+            "encoding": "BASE64",
+            "mode": "APPEND",
+        });
+        assert_eq!(parse_file_encoding(&env_opts), "base64");
+        assert_eq!(parse_file_mode(&env_opts), "append");
+    }
+
+    #[test]
+    fn test_file_op_read_write_sandbox() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aqvn_files_unit_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::create_dir_all(&temp_dir);
+        let temp_str = temp_dir.to_string_lossy().to_string();
+        let sandbox = Sandbox::from_allowed_paths(&[temp_str]);
+
+        let write_req = json!({
+            "action": "write",
+            "path": "test.txt",
+            "content": "Hello connector unit test!",
+        });
+        let write_reply_raw = op_write("req-w", "op-w", "test.txt", &write_req, &sandbox);
+        let write_reply: Value = serde_json::from_str(&write_reply_raw).expect("parse write reply");
+        assert_eq!(write_reply["success"], true);
+
+        let read_req = json!({
+            "action": "read",
+            "path": "test.txt",
+        });
+        let read_reply_raw = op_read("req-r", "op-r", "test.txt", &read_req, &sandbox);
+        let read_reply: Value = serde_json::from_str(&read_reply_raw).expect("parse read reply");
+        assert_eq!(read_reply["success"], true);
+        assert_eq!(read_reply["data"]["content"], "Hello connector unit test!");
+        assert_eq!(read_reply["data"]["size"], 26);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+}

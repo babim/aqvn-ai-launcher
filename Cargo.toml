@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "crates/aqvn-core",
+    "crates/aqvn-rfc",
+    "crates/aqvn-ssh",
+    "crates/aqvn-proxy",
+    "crates/aqvn-connector",
+    "crates/aqvn-agent",
+    "src-tauri",
+]
+resolver = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+panic = "abort"
+strip = true

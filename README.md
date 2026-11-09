@@ -382,6 +382,32 @@ On Android, desktop-only modules (RFC server, SSH server, tray, global shortcut)
 
 ---
 
+## Architecture Evaluation & Modernization Roadmap (November 2026)
+
+A comprehensive architectural audit, deep UI/UX capability research, and multi-phase modernization roadmap was established in November 2026. Detailed reports and specifications are organized as follows:
+
+### 1. Detailed Domain Evaluation Reports (`docs/eval-reports/`)
+- `01_rust_core_audit.md` — Rust core backend, main window lifecycle, and axum bridge proxy complexity.
+- `02_agent_headless_audit.md` — Headless standalone daemon `aqvn-agent`, host pool coordination, and systemd units.
+- `03_cbm_graph_scan.md` — 16 Cypher queries via Codebase Memory (CBM) detecting structural cycles and god modules.
+- `04_test_coverage_ci.md` — Test coverage across 32 integration suites and CI workflow analysis.
+- `05_ui_shell_components.md` — 3-column layout, splitters, FCP benchmarking, and Markdown rendering performance.
+- `06_interactive_drawers_ux.md` — PTY terminal streaming, Workspace file browser, and Activity feed.
+- `07_settings_themes_i18n.md` — Multi-theme OKLCH palettes, persistence via `tauri-plugin-store`, and i18n sync.
+- `08_a11y_shortcuts_palette.md` — WCAG 2.2 AA accessibility, Command Palette (`Ctrl+K`), and Focus Mode (`F11`).
+- `09_rfc_security_sandbox.md` — RFC host bridge sandbox (`allowed_paths`), HMAC constant-time auth, and path jail.
+- `10_ssh_guard_approval.md` — SSH bridge (`russh`), RSA-OAEP key exchange, denylist, and Human-in-the-Loop modal.
+- `11_performance_benchmarks.md` — FCP benchmarks (< 35ms), binary footprint (< 7MB), and PTY backpressure channels.
+- `12_telemetry_outbox_durability.md` — Telemetry stream radar and atomic offline outbox queueing.
+
+### 2. Master Modernization Blueprint & OpenSpec Proposals (`docs/proposals/`)
+- `AQVN_LAUNCHER_UPGRADE_MASTER_PLAN.md` — Master 4-phase architectural upgrade roadmap, modular Rust workspace design, and cross-platform matrix.
+- `01_frontend_modernization_blueprint.md` — Next-gen Web Components/Lit shell, xterm.js WebGL terminal, and Monaco/CodeMirror editor integration.
+- `openspec_drafts_core_security.md` — Actionable OpenSpec change proposals (Core Workspace, Anti-Replay, AST Guard, Multi-Host Pool).
+- `openspec_drafts_ui_telemetry.md` — Actionable OpenSpec change proposals (Component Shell, xterm.js, CodeMirror 6, Telemetry Radar).
+
+---
+
 ## License & Whitelabel Notice
 
 This software is an enterprise client for the AQVN platform. All branding, identifiers, window titles, icons, and package namespaces are configured for `AQVN Workspace` (`net.aqvn.workspace`).

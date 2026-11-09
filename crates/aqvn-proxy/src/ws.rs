@@ -1,0 +1,331 @@
+//! Two-leg WebSocket proxy: browser ⇄ this process ⇄ target chat server.
+
+use crate::upstream::Upstream;
+use axum::extract::ws::{CloseFrame as ClientCloseFrame, Message as ClientMessage, WebSocket};
+use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio_tungstenite::tungstenite::{
+    protocol::CloseFrame as ServerCloseFrame, Message as ServerMessage, Utf8Bytes,
+};
+
+pub const HEARTBEAT_INTERVAL_SECS: u64 = 15;
+pub const INACTIVITY_TIMEOUT_SECS: u64 = 60;
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(HEARTBEAT_INTERVAL_SECS);
+pub const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(INACTIVITY_TIMEOUT_SECS);
+pub const WATCHDOG_PROBE: &[u8] = b"aqvn-heartbeat";
+
+pub fn parse_watchdog_config(path_and_query: &str) -> (Duration, Duration, String) {
+    let mut heartbeat = std::env::var("AQVN_WS_HEARTBEAT_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(HEARTBEAT_INTERVAL);
+
+    let mut timeout = std::env::var("AQVN_WS_INACTIVITY_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(INACTIVITY_TIMEOUT);
+
+    let (path, query) = match path_and_query.split_once('?') {
+        Some((p, q)) => (p, Some(q)),
+        None => (path_and_query, None),
+    };
+
+    let clean_path = if let Some(q) = query {
+        let mut clean_pairs = Vec::new();
+        for (k, v) in url::form_urlencoded::parse(q.as_bytes()) {
+            match k.as_ref() {
+                "inactivity_timeout_ms" | "watchdog_timeout_ms" => {
+                    if let Ok(ms) = v.parse::<u64>() {
+                        timeout = Duration::from_millis(ms);
+                    }
+                }
+                "heartbeat_interval_ms" | "watchdog_interval_ms" => {
+                    if let Ok(ms) = v.parse::<u64>() {
+                        heartbeat = Duration::from_millis(ms);
+                    }
+                }
+                _ => clean_pairs.push((k, v)),
+            }
+        }
+        if clean_pairs.is_empty() {
+            path.to_string()
+        } else {
+            let mut encoded = String::new();
+            let mut serializer = url::form_urlencoded::Serializer::new(&mut encoded);
+            for (k, v) in clean_pairs {
+                serializer.append_pair(&k, &v);
+            }
+            format!("{path}?{encoded}")
+        }
+    } else {
+        path_and_query.to_string()
+    };
+
+    let heartbeat = heartbeat.max(Duration::from_millis(1));
+    let timeout = timeout.max(Duration::from_millis(1));
+
+    (heartbeat, timeout, clean_path)
+}
+
+pub fn upstream_handshake_error_close_frame(err: &str) -> ClientCloseFrame {
+    let reason = if err.len() > 123 {
+        let mut end = 120;
+        while end > 0 && !err.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &err[..end])
+    } else {
+        err.to_string()
+    };
+
+    ClientCloseFrame {
+        code: 1001,
+        reason: reason.into(),
+    }
+}
+
+pub async fn bridge(socket: WebSocket, upstream: Arc<Upstream>, path_and_query: String) {
+    let (heartbeat, timeout, clean_path) = parse_watchdog_config(&path_and_query);
+    bridge_with_watchdog(socket, upstream, clean_path, heartbeat, timeout).await;
+}
+
+pub async fn bridge_with_watchdog(
+    socket: WebSocket,
+    upstream: Arc<Upstream>,
+    path_and_query: String,
+    heartbeat_interval: Duration,
+    inactivity_timeout: Duration,
+) {
+    let server = match upstream.connect_ws(&path_and_query).await {
+        Ok(stream) => stream,
+        Err(err) => {
+            eprintln!(
+                "Bridge proxy: upstream websocket handshake failed: {err}; closing client leg with 1001 (Going Away)"
+            );
+            let close_frame = upstream_handshake_error_close_frame(&err);
+            let mut socket = socket;
+            let _ = socket.send(ClientMessage::Close(Some(close_frame))).await;
+            return;
+        }
+    };
+    println!(
+        "Bridge proxy: websocket connected to {}",
+        upstream.target().ws_url(&path_and_query)
+    );
+
+    let (mut client_sink, mut client_stream) = socket.split();
+    let (mut server_sink, mut server_stream) = server.split();
+
+    let mut last_client_activity = tokio::time::Instant::now();
+    let mut last_server_activity = tokio::time::Instant::now();
+    let mut interval = tokio::time::interval(heartbeat_interval);
+    interval.tick().await;
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                let now = tokio::time::Instant::now();
+                let client_elapsed = now.duration_since(last_client_activity);
+                let server_elapsed = now.duration_since(last_server_activity);
+
+                if client_elapsed >= inactivity_timeout && server_elapsed >= inactivity_timeout {
+                    println!(
+                        "Bridge proxy: websocket inactivity timeout (client: {:.1}s, server: {:.1}s >= {:.1}s), terminating bridge",
+                        client_elapsed.as_secs_f64(),
+                        server_elapsed.as_secs_f64(),
+                        inactivity_timeout.as_secs_f64()
+                    );
+                    break;
+                }
+
+                let probe = axum::body::Bytes::from_static(WATCHDOG_PROBE);
+                if client_sink.send(ClientMessage::Ping(probe.clone())).await.is_err() {
+                    println!("Bridge proxy: failed to send ping probe to client, terminating bridge");
+                    break;
+                }
+                if server_sink.send(ServerMessage::Ping(probe)).await.is_err() {
+                    println!("Bridge proxy: failed to send ping probe to server, terminating bridge");
+                    break;
+                }
+            }
+            message = client_stream.next() => {
+                let Some(message) = message else { break };
+                let Ok(message) = message else { break };
+                if is_watchdog_pong(&message) {
+                    continue;
+                }
+                last_client_activity = tokio::time::Instant::now();
+                let Some(message) = to_server(message) else { continue };
+                log_engineio("browser->server", &message);
+                if server_sink.send(message).await.is_err() {
+                    break;
+                }
+            }
+            message = server_stream.next() => {
+                let Some(message) = message else { break };
+                let Ok(message) = message else { break };
+                if is_server_watchdog_pong(&message) {
+                    continue;
+                }
+                last_server_activity = tokio::time::Instant::now();
+                log_engineio("server->browser", &message);
+                let Some(message) = to_client(message) else { continue };
+                if client_sink.send(message).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
+
+    let _ = server_sink.send(ServerMessage::Close(None)).await;
+    let _ = client_sink.send(ClientMessage::Close(None)).await;
+}
+
+fn is_watchdog_pong(message: &ClientMessage) -> bool {
+    match message {
+        ClientMessage::Pong(bytes) | ClientMessage::Ping(bytes) => bytes.as_ref() == WATCHDOG_PROBE,
+        _ => false,
+    }
+}
+
+fn is_server_watchdog_pong(message: &ServerMessage) -> bool {
+    match message {
+        ServerMessage::Pong(bytes) | ServerMessage::Ping(bytes) => bytes.as_ref() == WATCHDOG_PROBE,
+        _ => false,
+    }
+}
+
+fn log_engineio(direction: &str, message: &ServerMessage) {
+    match message {
+        ServerMessage::Text(text) if text.as_str() == "2" => {
+            println!("Bridge proxy: engine.io ping {direction} (45s keepalive)")
+        }
+        ServerMessage::Text(text) if text.as_str() == "3" => {
+            println!("Bridge proxy: engine.io pong {direction}")
+        }
+        ServerMessage::Ping(_) => println!("Bridge proxy: websocket ping {direction}"),
+        ServerMessage::Pong(_) => println!("Bridge proxy: websocket pong {direction}"),
+        _ => {}
+    }
+}
+
+fn to_server(message: ClientMessage) -> Option<ServerMessage> {
+    match message {
+        ClientMessage::Text(text) => Some(ServerMessage::Text(Utf8Bytes::from(text.to_string()))),
+        ClientMessage::Binary(bytes) => Some(ServerMessage::Binary(bytes)),
+        ClientMessage::Ping(bytes) => Some(ServerMessage::Ping(bytes)),
+        ClientMessage::Pong(bytes) => Some(ServerMessage::Pong(bytes)),
+        ClientMessage::Close(frame) => Some(ServerMessage::Close(frame.map(to_server_close))),
+    }
+}
+
+fn to_client(message: ServerMessage) -> Option<ClientMessage> {
+    match message {
+        ServerMessage::Text(text) => Some(ClientMessage::Text(text.to_string().into())),
+        ServerMessage::Binary(bytes) => Some(ClientMessage::Binary(bytes)),
+        ServerMessage::Ping(bytes) => Some(ClientMessage::Ping(bytes)),
+        ServerMessage::Pong(bytes) => Some(ClientMessage::Pong(bytes)),
+        ServerMessage::Close(frame) => Some(ClientMessage::Close(frame.map(to_client_close))),
+        ServerMessage::Frame(_) => None,
+    }
+}
+
+fn to_server_close(frame: ClientCloseFrame) -> ServerCloseFrame {
+    ServerCloseFrame {
+        code: frame.code.into(),
+        reason: Utf8Bytes::from(frame.reason.to_string()),
+    }
+}
+
+fn to_client_close(frame: ServerCloseFrame) -> ClientCloseFrame {
+    ClientCloseFrame {
+        code: frame.code.into(),
+        reason: frame.reason.as_str().into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_and_binary_frames_round_trip() {
+        let text = ClientMessage::Text("2".to_string().into());
+        let converted = to_server(text).expect("text frame");
+        assert!(matches!(converted, ServerMessage::Text(ref value) if value.as_str() == "2"));
+
+        let binary = ClientMessage::Binary(vec![0, 1, 2].into());
+        let converted = to_client(to_server(binary).expect("binary frame")).expect("binary back");
+        assert!(
+            matches!(converted, ClientMessage::Binary(ref value) if value.as_ref() == [0, 1, 2])
+        );
+    }
+
+    #[test]
+    fn close_frames_preserve_code_and_reason() {
+        let close = ClientMessage::Close(Some(ClientCloseFrame {
+            code: 1000,
+            reason: "done".to_string().into(),
+        }));
+        let converted = to_server(close).expect("close frame");
+        let back = to_client(converted).expect("close back");
+        let ClientMessage::Close(Some(frame)) = back else {
+            panic!("expected a close frame");
+        };
+        assert_eq!(frame.code, 1000);
+        assert_eq!(frame.reason.as_str(), "done");
+    }
+
+    #[test]
+    fn zero_watchdog_overrides_are_clamped() {
+        let (heartbeat, timeout, clean_path) =
+            parse_watchdog_config("/ws?heartbeat_interval_ms=0&inactivity_timeout_ms=0");
+        assert!(heartbeat > Duration::ZERO);
+        assert!(timeout > Duration::ZERO);
+        assert_eq!(clean_path, "/ws");
+    }
+
+    #[test]
+    fn non_zero_watchdog_overrides_are_preserved() {
+        let (heartbeat, timeout, clean_path) =
+            parse_watchdog_config("/ws?heartbeat_interval_ms=500&inactivity_timeout_ms=2000");
+        assert_eq!(heartbeat, Duration::from_millis(500));
+        assert_eq!(timeout, Duration::from_millis(2000));
+        assert_eq!(clean_path, "/ws");
+    }
+
+    #[test]
+    fn test_handshake_failure_status_translation_to_1001() {
+        let err = "upstream websocket connect failed: connection refused";
+        let frame = upstream_handshake_error_close_frame(err);
+        assert_eq!(
+            frame.code, 1001,
+            "upstream handshake failure must emit 1001 (Going Away)"
+        );
+        assert_eq!(frame.reason.as_str(), err);
+
+        let http_err = "upstream websocket handshake returned HTTP 502";
+        let frame_http = upstream_handshake_error_close_frame(http_err);
+        assert_eq!(frame_http.code, 1001);
+        assert_eq!(frame_http.reason.as_str(), http_err);
+
+        let long_err = "x".repeat(200);
+        let frame_long = upstream_handshake_error_close_frame(&long_err);
+        assert_eq!(frame_long.code, 1001);
+        assert!(frame_long.reason.len() <= 123);
+        assert!(frame_long.reason.ends_with("..."));
+    }
+
+    #[test]
+    fn test_handshake_error_close_frame_round_trip() {
+        let frame = upstream_handshake_error_close_frame("upstream unreachable");
+        let server_frame = to_server_close(frame);
+        assert_eq!(server_frame.code, 1001.into());
+        let back_to_client = to_client_close(server_frame);
+        assert_eq!(back_to_client.code, 1001);
+        assert_eq!(back_to_client.reason.as_str(), "upstream unreachable");
+    }
+}

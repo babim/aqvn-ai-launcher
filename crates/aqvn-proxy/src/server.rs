@@ -1,0 +1,1080 @@
+//! Local reverse proxy forwarding WebUI requests and WebSocket connections
+//! as if it were the chat server's own origin.
+
+use aqvn_core::config::{AppConfig, ConfigWatcher};
+use crate::cache::{self, AssetCache};
+use crate::upstream::{ForwardResponse, Upstream};
+use crate::ws;
+use axum::body::Body;
+use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::{FromRequestParts, State};
+use axum::http::{
+    header::{self, HeaderMap, HeaderValue},
+    Method, Request, StatusCode, Uri,
+};
+use axum::response::{IntoResponse, Response};
+use axum::routing::any;
+use axum::{Json, Router};
+use serde::Deserialize;
+use serde_json::json;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use tokio::net::TcpListener;
+use tokio::sync::RwLock;
+
+pub const PREFERRED_PROXY_PORT: u16 = 55088;
+pub const PROXY_PORT_RANGE: std::ops::RangeInclusive<u16> = 55088..=55099;
+
+const BIND_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+const LOGIN_PATH: &str = "/login";
+
+#[derive(Clone, Debug)]
+pub struct ProxyInfo {
+    pub port: u16,
+    pub url: String,
+}
+
+impl ProxyInfo {
+    fn from_addr(addr: SocketAddr) -> Self {
+        Self {
+            port: addr.port(),
+            url: format!("http://{addr}"),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ProxyState {
+    upstream: Arc<RwLock<Arc<Upstream>>>,
+    cache: Arc<AssetCache>,
+    port: u16,
+}
+
+impl ProxyState {
+    pub fn new(upstream: Upstream) -> Self {
+        Self::with_cache_and_port(upstream, Arc::new(AssetCache::default()), 0)
+    }
+
+    pub fn with_cache(upstream: Upstream, cache: Arc<AssetCache>) -> Self {
+        Self::with_cache_and_port(upstream, cache, 0)
+    }
+
+    pub fn with_cache_and_port(upstream: Upstream, cache: Arc<AssetCache>, port: u16) -> Self {
+        Self {
+            upstream: Arc::new(RwLock::new(Arc::new(upstream))),
+            cache,
+            port,
+        }
+    }
+
+    pub async fn upstream(&self) -> Arc<Upstream> {
+        self.upstream.read().await.clone()
+    }
+
+    pub fn cache(&self) -> &Arc<AssetCache> {
+        &self.cache
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub async fn replace(&self, upstream: Upstream) {
+        *self.upstream.write().await = Arc::new(upstream);
+    }
+
+    pub async fn refresh(&self) {
+        self.cache.clear().await;
+        let up = self.upstream.read().await.clone();
+        up.reset_jar().await;
+    }
+}
+
+pub async fn bind_ephemeral(
+    server_url: &str,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_port_with_cache(server_url, 0, Arc::new(AssetCache::default())).await
+}
+
+pub async fn bind_ephemeral_with_cache(
+    server_url: &str,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_port_with_cache(server_url, 0, cache).await
+}
+
+pub async fn bind_port(
+    server_url: &str,
+    port: u16,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_port_with_cache(server_url, port, Arc::new(AssetCache::default())).await
+}
+
+pub async fn bind_port_with_cache(
+    server_url: &str,
+    port: u16,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    let upstream = Upstream::new(server_url)?;
+    bind_port_with_upstream(upstream, port, cache).await
+}
+
+pub async fn bind_port_with_upstream(
+    upstream: Upstream,
+    port: u16,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    let address = SocketAddr::new(BIND_ADDRESS, port);
+    let listener = TcpListener::bind(address)
+        .await
+        .map_err(|err| format!("bridge proxy failed to bind to {address}: {err}"))?;
+    let local = listener
+        .local_addr()
+        .map_err(|err| format!("bridge proxy has no local address: {err}"))?;
+    println!(
+        "Bridge proxy listening on http://{local} (target {})",
+        upstream.target().origin()
+    );
+    Ok((
+        listener,
+        ProxyState::with_cache_and_port(upstream, cache, local.port()),
+        ProxyInfo::from_addr(local),
+    ))
+}
+
+pub async fn bind(server_url: &str) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_with_cache(server_url, Arc::new(AssetCache::default())).await
+}
+
+pub async fn bind_with_config(
+    config: &AppConfig,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    bind_with_config_and_cache(config, Arc::new(AssetCache::default())).await
+}
+
+pub async fn bind_with_config_and_cache(
+    config: &AppConfig,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    let upstream = Upstream::from_config(config)?;
+    bind_upstream_with_cache(upstream, cache).await
+}
+
+pub async fn bind_with_cache(
+    server_url: &str,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    let upstream = Upstream::new(server_url)?;
+    bind_upstream_with_cache(upstream, cache).await
+}
+
+pub async fn bind_upstream_with_cache(
+    upstream: Upstream,
+    cache: Arc<AssetCache>,
+) -> Result<(TcpListener, ProxyState, ProxyInfo), String> {
+    if let Ok(val) = std::env::var("AQVN_PROXY_PORT") {
+        if let Ok(port) = val.parse::<u16>() {
+            return bind_port_with_upstream(upstream, port, cache).await;
+        }
+    }
+    if std::env::var("AQVN_PROXY_EPHEMERAL")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return bind_port_with_upstream(upstream, 0, cache).await;
+    }
+
+    let mut bound_listener = None;
+    for port in PROXY_PORT_RANGE {
+        let address = SocketAddr::new(BIND_ADDRESS, port);
+        if let Ok(listener) = TcpListener::bind(address).await {
+            bound_listener = Some(listener);
+            break;
+        }
+    }
+    let listener = match bound_listener {
+        Some(l) => l,
+        None => {
+            let address = SocketAddr::new(BIND_ADDRESS, 0);
+            TcpListener::bind(address)
+                .await
+                .map_err(|err| format!("bridge proxy failed to bind: {err}"))?
+        }
+    };
+    let local = listener
+        .local_addr()
+        .map_err(|err| format!("bridge proxy has no local address: {err}"))?;
+    println!(
+        "Bridge proxy listening on http://{local} (target {})",
+        upstream.target().origin()
+    );
+    Ok((
+        listener,
+        ProxyState::with_cache_and_port(upstream, cache, local.port()),
+        ProxyInfo::from_addr(local),
+    ))
+}
+
+pub async fn serve(listener: TcpListener, state: ProxyState) -> std::io::Result<()> {
+    axum::serve(listener, router(state)).await
+}
+
+pub const CONTAINER_BRIDGE_SCRIPT: &str = include_str!("../../../ui/container.js");
+
+pub fn init_script(port: u16) -> String {
+    format!(
+        "window.__AQVN_PROXY__ = Object.freeze({{ url: \"http://127.0.0.1:{port}\", port: {port} }}); window.__AQVN_WINDOW_SHOWN__ = performance.now();\n{CONTAINER_BRIDGE_SCRIPT}"
+    )
+}
+
+pub fn inject_container_bridge(html_bytes: &[u8], port: u16) -> Vec<u8> {
+    let Ok(html) = std::str::from_utf8(html_bytes) else {
+        return html_bytes.to_vec();
+    };
+    if html.contains("__AQVN_CONTAINER__") || html.contains("__aqvn_bridge__") {
+        return html_bytes.to_vec();
+    }
+    let script = format!(
+        "<script id=\"__aqvn_bridge__\">{}</script>",
+        init_script(port)
+    );
+    let bytes = html.as_bytes();
+    if let Some(pos) = html.rfind("</body>") {
+        let mut out = Vec::with_capacity(html_bytes.len() + script.len() + 16);
+        out.extend_from_slice(&bytes[..pos]);
+        out.extend_from_slice(script.as_bytes());
+        out.extend_from_slice(&bytes[pos..]);
+        out
+    } else if let Some(pos) = html.find("</head>") {
+        let mut out = Vec::with_capacity(html_bytes.len() + script.len() + 16);
+        out.extend_from_slice(&bytes[..pos]);
+        out.extend_from_slice(script.as_bytes());
+        out.extend_from_slice(&bytes[pos..]);
+        out
+    } else {
+        let mut out = html_bytes.to_vec();
+        out.extend_from_slice(script.as_bytes());
+        out
+    }
+}
+
+pub async fn watch_target(watcher: ConfigWatcher, state: ProxyState) {
+    let mut receiver = watcher.subscribe();
+    let initial = watcher.current();
+    let mut current_url = initial.server_url;
+    let mut current_ca = initial.tls_ca_cert_path;
+    let mut current_skip = initial.tls_skip_verify;
+    loop {
+        if receiver.changed().await.is_err() {
+            return;
+        }
+        let config = receiver.borrow_and_update().clone();
+        if config.server_url == current_url
+            && config.tls_ca_cert_path == current_ca
+            && config.tls_skip_verify == current_skip
+        {
+            continue;
+        }
+        match Upstream::from_config(&config) {
+            Ok(upstream) => {
+                println!(
+                    "Bridge proxy: retargeted to {} (cookie jar reset)",
+                    upstream.target().origin()
+                );
+                state.cache().clear().await;
+                state.replace(upstream).await;
+                current_url = config.server_url;
+                current_ca = config.tls_ca_cert_path;
+                current_skip = config.tls_skip_verify;
+            }
+            Err(err) => eprintln!("Bridge proxy: ignoring invalid server configuration: {err}"),
+        }
+    }
+}
+
+pub fn router(state: ProxyState) -> Router {
+    Router::new()
+        .route("/health", any(handle_health))
+        .route("/proxy/csrf", any(handle_proxy_csrf))
+        .route("/api/csrf_token", any(handle_proxy_csrf))
+        .route("/proxy/clear_disk_cache", any(handle_clear_disk_cache))
+        .route("/proxy/cache/clear", any(handle_clear_disk_cache))
+        .route("/benchmark/fcp", any(handle_benchmark_fcp))
+        .route(LOGIN_PATH, any(handle_login))
+        .route("/api/{*rest}", any(handle_api))
+        .route("/", any(handle_forward_raw))
+        .route("/login.css", any(handle_forward_raw))
+        .route("/vendor/{*rest}", any(handle_forward_raw))
+        .route("/css/{*rest}", any(handle_forward_raw))
+        .route("/js/{*rest}", any(handle_forward_raw))
+        .route("/plugins/{*rest}", any(handle_forward_raw))
+        .route("/extensions/{*rest}", any(handle_forward_raw))
+        .route("/public/{*rest}", any(handle_forward_raw))
+        .route("/ui/{*rest}", any(handle_forward_raw))
+        .route("/sw.js", any(handle_forward_raw))
+        .route("/components/{*rest}", any(handle_forward_raw))
+        .route("/socket.io/", any(handle_socket_io))
+        .route("/socket.io", any(handle_socket_io))
+        .fallback(handle_forward_raw)
+        .with_state(state)
+}
+
+#[derive(Debug, Deserialize)]
+struct LoginBody {
+    username: String,
+    password: String,
+}
+
+async fn handle_health(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
+    }
+    let upstream = state.upstream().await;
+    with_cors(
+        Json(json!({ "ok": true, "target": upstream.target().origin() })).into_response(),
+        origin.as_deref(),
+        state.port(),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct FcpPayload {
+    fcp_ms: f64,
+    method: String,
+}
+
+async fn handle_benchmark_fcp(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Result<Json<FcpPayload>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
+    }
+    if let Ok(Json(payload)) = body {
+        let doc = json!({
+            "fcp_ms": payload.fcp_ms,
+            "method": payload.method,
+        });
+        let _ = std::fs::write("/tmp/aqvn-benchmark-fcp.json", doc.to_string());
+    }
+    with_cors(
+        Json(json!({ "ok": true })).into_response(),
+        origin.as_deref(),
+        state.port(),
+    )
+}
+
+async fn handle_proxy_csrf(
+    State(state): State<ProxyState>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
+    }
+    if method == Method::OPTIONS {
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
+    }
+    let force_refresh = method == Method::POST
+        || headers
+            .get(header::CACHE_CONTROL)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|c| c.contains("no-store") || c.contains("no-cache"));
+    let upstream = state.upstream().await;
+    let response = match upstream.csrf_with_option(force_refresh).await {
+        Ok(Some((runtime_id, token))) => {
+            Json(json!({ "ok": true, "runtime_id": runtime_id, "token": token })).into_response()
+        }
+        Ok(None) => {
+            let accepts_html = headers
+                .get(header::ACCEPT)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|a| a.contains("text/html") && !a.contains("application/json"));
+            if accepts_html {
+                (
+                    StatusCode::FOUND,
+                    [(header::LOCATION, HeaderValue::from_static("/login"))],
+                )
+                    .into_response()
+            } else {
+                Json(json!({
+                    "ok": false,
+                    "login_required": true,
+                    "error": "login_required",
+                    "redirect": "/login"
+                }))
+                .into_response()
+            }
+        }
+        Err(err) => text_response(StatusCode::BAD_GATEWAY, err),
+    };
+    with_cors(response, origin.as_deref(), state.port())
+}
+
+async fn handle_clear_disk_cache(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
+    }
+    state.cache().clear_disk_cache().await;
+    with_cors(
+        Json(json!({ "ok": true, "cleared": true })).into_response(),
+        origin.as_deref(),
+        state.port(),
+    )
+}
+
+async fn handle_login(
+    State(state): State<ProxyState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
+    }
+    if method == Method::OPTIONS {
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
+    }
+    if method == Method::GET {
+        return handle_forward_raw(State(state), method, uri, headers, body).await;
+    }
+    if method != Method::POST {
+        return with_cors(
+            text_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                format!("method {method} is not supported for {LOGIN_PATH}"),
+            ),
+            origin.as_deref(),
+            state.port(),
+        );
+    }
+
+    let is_json = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|val| val.to_str().ok())
+        .is_some_and(|ct| ct.contains("application/json"))
+        || body.first() == Some(&b'{');
+
+    if is_json {
+        let login: LoginBody = match serde_json::from_slice(&body) {
+            Ok(login) => login,
+            Err(err) => {
+                return with_cors(
+                    text_response(
+                        StatusCode::BAD_REQUEST,
+                        format!("login body must be JSON {{username,password}}: {err}"),
+                    ),
+                    origin.as_deref(),
+                    state.port(),
+                );
+            }
+        };
+        if login.username.trim().is_empty() || login.password.is_empty() {
+            return with_cors(
+                text_response(
+                    StatusCode::BAD_REQUEST,
+                    "username and password are required".to_string(),
+                ),
+                origin.as_deref(),
+                state.port(),
+            );
+        }
+
+        let upstream = state.upstream().await;
+        let response = match upstream.login(&login.username, &login.password).await {
+            Ok(()) => Json(json!({ "ok": true })).into_response(),
+            Err(err) => (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "ok": false, "error": err })),
+            )
+                .into_response(),
+        };
+        return with_cors(response, origin.as_deref(), state.port());
+    }
+
+    let mut username = String::new();
+    let mut password = String::new();
+    let mut next = String::new();
+
+    for (key, val) in url::form_urlencoded::parse(&body) {
+        match key.as_ref() {
+            "username" => username = val.into_owned(),
+            "password" => password = val.into_owned(),
+            "next" => next = val.into_owned(),
+            _ => {}
+        }
+    }
+
+    if next.is_empty() {
+        if let Some(query) = uri.query() {
+            for (key, val) in url::form_urlencoded::parse(query.as_bytes()) {
+                if key == "next" {
+                    next = val.into_owned();
+                    break;
+                }
+            }
+        }
+    }
+
+    let redirect_target = if !next.is_empty() && next != "/login" && !next.starts_with("//") {
+        next
+    } else {
+        "/".to_string()
+    };
+
+    let upstream = state.upstream().await;
+    let response = match upstream.login(&username, &password).await {
+        Ok(()) => {
+            let location = HeaderValue::try_from(redirect_target.as_str())
+                .unwrap_or_else(|_| HeaderValue::from_static("/"));
+            (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response()
+        }
+        Err(err) => {
+            let error_query =
+                url::form_urlencoded::byte_serialize(err.as_bytes()).collect::<String>();
+            let error_location = format!("/login?error={error_query}");
+            let location = HeaderValue::try_from(error_location.as_str())
+                .unwrap_or_else(|_| HeaderValue::from_static("/login"));
+            (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response()
+        }
+    };
+    with_cors(response, origin.as_deref(), state.port())
+}
+
+async fn handle_api(
+    State(state): State<ProxyState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
+    }
+    if method == Method::OPTIONS {
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
+    }
+    if !matches!(
+        method,
+        Method::GET | Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    ) {
+        return with_cors(
+            text_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                format!("method {method} is not proxied"),
+            ),
+            origin.as_deref(),
+            state.port(),
+        );
+    }
+
+    let Ok(upstream_method) = reqwest::Method::from_bytes(method.as_str().as_bytes()) else {
+        return with_cors(
+            text_response(StatusCode::METHOD_NOT_ALLOWED, "unsupported method"),
+            origin.as_deref(),
+            state.port(),
+        );
+    };
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let upstream = state.upstream().await;
+    let result = upstream
+        .forward(
+            upstream_method,
+            &path_and_query(&uri),
+            content_type.as_deref(),
+            body.to_vec(),
+        )
+        .await;
+    upstream_response(result, origin.as_deref(), state.port())
+}
+
+async fn handle_forward_raw(
+    State(state): State<ProxyState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let origin = request_origin(&headers);
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
+    }
+    if method == Method::OPTIONS {
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
+    }
+    let Ok(upstream_method) = reqwest::Method::from_bytes(method.as_str().as_bytes()) else {
+        return with_cors(
+            text_response(StatusCode::METHOD_NOT_ALLOWED, "unsupported method"),
+            origin.as_deref(),
+            state.port(),
+        );
+    };
+    let upstream = state.upstream().await;
+    let target_origin = upstream.target().origin();
+    let path = uri.path();
+
+    if upstream_method == reqwest::Method::GET && state.cache().is_cacheable(path) {
+        if let Some(cached) = state.cache().get(target_origin, path).await {
+            let if_none_match = headers
+                .get(header::IF_NONE_MATCH)
+                .and_then(|val| val.to_str().ok());
+
+            if let Some(inm) = if_none_match {
+                if cache::etag_matches(inm, &cached.etag) {
+                    let mut response = Response::new(Body::empty());
+                    *response.status_mut() = StatusCode::NOT_MODIFIED;
+                    if let Ok(value) = HeaderValue::from_str(&cached.etag) {
+                        response.headers_mut().insert(header::ETAG, value);
+                    }
+                    response
+                        .headers_mut()
+                        .insert("x-cache", HeaderValue::from_static("HIT"));
+                    response
+                        .headers_mut()
+                        .insert("x-aqvn-cache", HeaderValue::from_static("HIT"));
+                    response.headers_mut().insert(
+                        header::CACHE_CONTROL,
+                        HeaderValue::from_static("public, max-age=31536000, immutable"),
+                    );
+                    return with_cors(response, origin.as_deref(), state.port());
+                }
+            }
+
+            let mut response = Response::new(Body::from(cached.body));
+            *response.status_mut() = StatusCode::OK;
+            let ct = cached
+                .content_type
+                .unwrap_or_else(|| cache::mime_type_for_path(path).to_string());
+            if let Ok(value) = HeaderValue::from_str(&ct) {
+                response.headers_mut().insert(header::CONTENT_TYPE, value);
+            }
+            if let Ok(value) = HeaderValue::from_str(&cached.etag) {
+                response.headers_mut().insert(header::ETAG, value);
+            }
+            response
+                .headers_mut()
+                .insert("x-cache", HeaderValue::from_static("HIT"));
+            response
+                .headers_mut()
+                .insert("x-aqvn-cache", HeaderValue::from_static("HIT"));
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=31536000, immutable"),
+            );
+            return with_cors(response, origin.as_deref(), state.port());
+        }
+    }
+
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let result = upstream
+        .forward_raw(
+            upstream_method.clone(),
+            &path_and_query(&uri),
+            content_type.as_deref(),
+            body.to_vec(),
+        )
+        .await;
+
+    match result {
+        Ok(outcome) => {
+            let status = StatusCode::from_u16(outcome.status).unwrap_or(StatusCode::BAD_GATEWAY);
+            let mut body_bytes = outcome.body.clone();
+            let is_html = status == StatusCode::OK
+                && outcome
+                    .content_type
+                    .as_deref()
+                    .is_some_and(|ct| ct.contains("text/html"));
+            if is_html && state.port() > 0 {
+                body_bytes = inject_container_bridge(&body_bytes, state.port());
+            }
+            let mut response = Response::new(Body::from(body_bytes));
+            *response.status_mut() = status;
+            if let Some(ref ct) = outcome.content_type {
+                if let Ok(value) = HeaderValue::from_str(ct) {
+                    response.headers_mut().insert(header::CONTENT_TYPE, value);
+                }
+            }
+
+            if upstream_method == reqwest::Method::GET
+                && status == StatusCode::OK
+                && state.cache().is_cacheable(path)
+            {
+                state
+                    .cache()
+                    .put(
+                        target_origin,
+                        path,
+                        outcome.content_type.as_deref(),
+                        &outcome.body,
+                    )
+                    .await;
+                let etag = cache::compute_etag(&outcome.body);
+                if let Ok(value) = HeaderValue::from_str(&etag) {
+                    response.headers_mut().insert(header::ETAG, value);
+                }
+                response
+                    .headers_mut()
+                    .insert("x-cache", HeaderValue::from_static("MISS"));
+                response
+                    .headers_mut()
+                    .insert("x-aqvn-cache", HeaderValue::from_static("MISS"));
+                response.headers_mut().insert(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("public, max-age=31536000, immutable"),
+                );
+            }
+
+            with_cors(response, origin.as_deref(), state.port())
+        }
+        Err(err) => with_cors(
+            text_response(StatusCode::BAD_GATEWAY, err),
+            origin.as_deref(),
+            state.port(),
+        ),
+    }
+}
+
+async fn handle_socket_io(State(state): State<ProxyState>, request: Request<Body>) -> Response {
+    let origin = request_origin(request.headers());
+    if let Some(response) = reject_bad_origin(origin.as_deref(), state.port()) {
+        return with_cors(response, origin.as_deref(), state.port());
+    }
+    if request.method() == Method::OPTIONS {
+        return with_cors(
+            StatusCode::NO_CONTENT.into_response(),
+            origin.as_deref(),
+            state.port(),
+        );
+    }
+
+    if is_websocket_upgrade(&request) {
+        let (mut parts, _body) = request.into_parts();
+        let upgrade = match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
+            Ok(upgrade) => upgrade,
+            Err(rejection) => {
+                return with_cors(rejection.into_response(), origin.as_deref(), state.port())
+            }
+        };
+        let path_and_query = path_and_query(&parts.uri);
+        let upstream = state.upstream().await;
+        return upgrade.on_upgrade(move |socket| ws::bridge(socket, upstream, path_and_query));
+    }
+
+    let (parts, body) = request.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, MAX_BODY_BYTES).await else {
+        return with_cors(
+            text_response(StatusCode::PAYLOAD_TOO_LARGE, "request body too large"),
+            origin.as_deref(),
+            state.port(),
+        );
+    };
+    let Ok(method) = reqwest::Method::from_bytes(parts.method.as_str().as_bytes()) else {
+        return with_cors(
+            text_response(StatusCode::METHOD_NOT_ALLOWED, "unsupported method"),
+            origin.as_deref(),
+            state.port(),
+        );
+    };
+    let content_type = parts
+        .headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let upstream = state.upstream().await;
+    let result = upstream
+        .forward_raw(
+            method,
+            &path_and_query(&parts.uri),
+            content_type.as_deref(),
+            bytes.to_vec(),
+        )
+        .await;
+    upstream_response(result, origin.as_deref(), state.port())
+}
+
+fn upstream_response(
+    result: Result<ForwardResponse, String>,
+    origin: Option<&str>,
+    proxy_port: u16,
+) -> Response {
+    match result {
+        Ok(outcome) => {
+            let mut response = Response::new(Body::from(outcome.body));
+            *response.status_mut() =
+                StatusCode::from_u16(outcome.status).unwrap_or(StatusCode::BAD_GATEWAY);
+            if let Some(content_type) = outcome.content_type {
+                if let Ok(value) = HeaderValue::from_str(&content_type) {
+                    response.headers_mut().insert(header::CONTENT_TYPE, value);
+                }
+            }
+            with_cors(response, origin, proxy_port)
+        }
+        Err(err) => with_cors(
+            text_response(StatusCode::BAD_GATEWAY, err),
+            origin,
+            proxy_port,
+        ),
+    }
+}
+
+fn text_response(status: StatusCode, message: impl Into<String>) -> Response {
+    (
+        status,
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/plain; charset=utf-8"),
+        )],
+        message.into(),
+    )
+        .into_response()
+}
+
+fn request_origin(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+}
+
+pub fn reject_bad_origin(origin: Option<&str>, proxy_port: u16) -> Option<Response> {
+    match origin {
+        Some(origin) if !allowed_origin(origin, proxy_port) => Some(text_response(
+            StatusCode::FORBIDDEN,
+            format!("bridge proxy: origin {origin:?} is not allowed"),
+        )),
+        _ => None,
+    }
+}
+
+pub fn allowed_origin(origin: &str, proxy_port: u16) -> bool {
+    if origin == "tauri://localhost" || origin == "tauri://localhost/" {
+        return true;
+    }
+    let Ok(url) = url::Url::parse(origin) else {
+        return false;
+    };
+    if url.scheme() == "tauri" && url.host_str() == Some("localhost") {
+        return true;
+    }
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return false;
+    }
+    match url.host_str() {
+        Some("tauri.localhost") => true,
+        Some("localhost") | Some("127.0.0.1") | Some("[::1]") => {
+            proxy_port > 0 && url.port() == Some(proxy_port)
+        }
+        _ => false,
+    }
+}
+
+fn with_cors(mut response: Response, origin: Option<&str>, proxy_port: u16) -> Response {
+    let Some(origin) = origin else {
+        return response;
+    };
+    if !allowed_origin(origin, proxy_port) {
+        return response;
+    }
+    let Ok(value) = HeaderValue::from_str(origin) else {
+        return response;
+    };
+    let headers = response.headers_mut();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, POST, PUT, PATCH, DELETE, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static(
+            "Content-Type, X-CSRF-Token, Accept, Authorization, If-None-Match, Cache-Control",
+        ),
+    );
+    headers.append(header::VARY, HeaderValue::from_static("Origin"));
+    response
+}
+
+fn is_websocket_upgrade(request: &Request<Body>) -> bool {
+    let connection_upgrade = request
+        .headers()
+        .get(header::CONNECTION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|part| part.trim().eq_ignore_ascii_case("upgrade"))
+        });
+    let websocket = request
+        .headers()
+        .get(header::UPGRADE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
+    connection_upgrade && websocket
+}
+
+fn path_and_query(uri: &Uri) -> String {
+    uri.path_and_query()
+        .map(|value| value.as_str().to_string())
+        .unwrap_or_else(|| uri.path().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_script_carries_the_runtime_port() {
+        let script = init_script(54321);
+        assert!(script.contains("port: 54321"));
+        assert!(script.contains("http://127.0.0.1:54321"));
+        assert!(script.contains("notify_task_complete"));
+        assert!(script.contains("set_tray_busy"));
+        assert!(script.contains("__AQVN_CONTAINER__"));
+    }
+
+    #[test]
+    fn accepts_webview_and_local_origins() {
+        for origin in [
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "http://localhost:55088",
+            "https://localhost:55088",
+            "http://127.0.0.1:55088",
+            "https://127.0.0.1:55088",
+        ] {
+            assert!(allowed_origin(origin, 55088), "{origin} must be allowed");
+        }
+    }
+
+    #[test]
+    fn test_webview2_origins() {
+        let port = 55088;
+        let valid_origins = [
+            "tauri://localhost",
+            "tauri://localhost/",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "http://tauri.localhost:55088",
+            "https://tauri.localhost:55088",
+            "http://127.0.0.1:55088",
+            "https://127.0.0.1:55088",
+            "http://localhost:55088",
+            "https://localhost:55088",
+            "http://[::1]:55088",
+            "https://[::1]:55088",
+        ];
+
+        for origin in valid_origins {
+            assert!(
+                allowed_origin(origin, port),
+                "WebView2 origin {origin} must be allowed"
+            );
+            assert!(
+                reject_bad_origin(Some(origin), port).is_none(),
+                "reject_bad_origin must allow {origin}"
+            );
+        }
+
+        assert!(reject_bad_origin(None, port).is_none());
+
+        let invalid_origins = [
+            "https://evil.example",
+            "http://evil.example:55088",
+            "http://localhost.evil.example:55088",
+            "http://tauri.localhost.evil.example",
+            "http://evil-tauri.localhost",
+            "http://localhost:3000",
+            "https://localhost:3000",
+            "http://127.0.0.1:8080",
+            "https://127.0.0.1:8080",
+            "http://localhost",
+            "https://localhost",
+            "http://127.0.0.1",
+            "https://127.0.0.1",
+            "ws://localhost:55088",
+            "file:///path",
+            "null",
+            "not a url",
+            "",
+        ];
+
+        for origin in invalid_origins {
+            assert!(
+                !allowed_origin(origin, port),
+                "Origin {origin} must be rejected"
+            );
+            let rejection = reject_bad_origin(Some(origin), port);
+            assert!(
+                rejection.is_some(),
+                "reject_bad_origin must reject {origin}"
+            );
+            assert_eq!(
+                rejection.unwrap().status(),
+                StatusCode::FORBIDDEN,
+                "rejection must yield 403 Forbidden for {origin}"
+            );
+        }
+
+        assert!(!allowed_origin("http://127.0.0.1:55088", 0));
+        assert!(!allowed_origin("http://localhost:55088", 0));
+    }
+
+    #[test]
+    fn rejects_foreign_origins() {
+        for origin in [
+            "https://evil.example",
+            "http://localhost.evil.example",
+            "http://localhost:3000",
+            "http://localhost:3155",
+            "http://127.0.0.1:8080",
+            "file://",
+            "null",
+            "not a url",
+        ] {
+            assert!(!allowed_origin(origin, 55088), "{origin} must be rejected");
+        }
+    }
+
+    #[test]
+    fn binds_loopback_only_on_an_ephemeral_port() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let (_listener, _state, info) = runtime
+            .block_on(bind("http://127.0.0.1:5000"))
+            .expect("bind");
+
+        assert_ne!(info.port, 0, "kernel must resolve a real port");
+        assert_eq!(info.url, format!("http://127.0.0.1:{}", info.port));
+    }
+}

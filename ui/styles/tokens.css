@@ -62,6 +62,11 @@ aqvn-virtual-message-list {
   position: relative;
 }
 
+aqvn-terminal-drawer {
+  display: block;
+  width: 100%;
+}
+
 .virtual-spacer-top,
 .virtual-spacer-bottom {
   display: block;

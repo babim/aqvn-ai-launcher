@@ -1436,9 +1436,19 @@
       } else {
         dom.terminalDrawer.removeAttribute('hidden');
         dom.terminalDrawer.hidden = false;
+        initXtermTerminal();
+        fitTerminal();
         if (dom.terminalInput && typeof dom.terminalInput.focus === 'function') {
           dom.terminalInput.focus();
         }
+      }
+    }
+    var drawerRoot = byId('terminal-drawer-root');
+    if (drawerRoot && typeof drawerRoot.setAttribute === 'function') {
+      if (collapsed) {
+        drawerRoot.removeAttribute('open');
+      } else {
+        drawerRoot.setAttribute('open', '');
       }
     }
     if (dom.toggleTerminalBtn) {
@@ -1448,6 +1458,202 @@
 
   function toggleTerminal() {
     setTerminalCollapsed(state.terminalOpen);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* xterm.js WebGL Terminal Engine & Themes (VAL-UI-XTERM-001)        */
+  /* ------------------------------------------------------------------ */
+
+  var XTERM_THEMES = {
+    'aqvn-dark': {
+      background: '#0f172a',
+      foreground: '#f1f5f9',
+      cursor: '#38bdf8',
+      cursorAccent: '#0f172a',
+      selectionBackground: '#1e293b',
+      black: '#0f172a',
+      red: '#ef4444',
+      green: '#10b981',
+      yellow: '#f59e0b',
+      blue: '#3b82f6',
+      magenta: '#d946ef',
+      cyan: '#06b6d4',
+      white: '#f1f5f9',
+      brightBlack: '#64748b',
+      brightRed: '#f87171',
+      brightGreen: '#34d399',
+      brightYellow: '#fbbf24',
+      brightBlue: '#60a5fa',
+      brightMagenta: '#e879f9',
+      brightCyan: '#22d3ee',
+      brightWhite: '#ffffff'
+    },
+    'oled-black': {
+      background: '#000000',
+      foreground: '#ffffff',
+      cursor: '#e2e8f0',
+      cursorAccent: '#000000',
+      selectionBackground: '#1f2937',
+      black: '#000000',
+      red: '#ef4444',
+      green: '#10b981',
+      yellow: '#f59e0b',
+      blue: '#3b82f6',
+      magenta: '#a855f7',
+      cyan: '#06b6d4',
+      white: '#ffffff',
+      brightBlack: '#4b5563',
+      brightRed: '#f87171',
+      brightGreen: '#34d399',
+      brightYellow: '#fbbf24',
+      brightBlue: '#60a5fa',
+      brightMagenta: '#c084fc',
+      brightCyan: '#22d3ee',
+      brightWhite: '#ffffff'
+    },
+    'cyberpunk-terminal': {
+      background: '#0d1117',
+      foreground: '#00ff9f',
+      cursor: '#00ff9f',
+      cursorAccent: '#0d1117',
+      selectionBackground: '#16382b',
+      black: '#0d1117',
+      red: '#ff0055',
+      green: '#00ff9f',
+      yellow: '#ffe600',
+      blue: '#00b8ff',
+      magenta: '#ff00ff',
+      cyan: '#00ffff',
+      white: '#d1f7ff',
+      brightBlack: '#1f2e27',
+      brightRed: '#ff3377',
+      brightGreen: '#33ffb2',
+      brightYellow: '#ffeb33',
+      brightBlue: '#33c6ff',
+      brightMagenta: '#ff33ff',
+      brightCyan: '#33ffff',
+      brightWhite: '#ffffff'
+    },
+    'clean-studio-light': {
+      background: '#f8fafc',
+      foreground: '#0f172a',
+      cursor: '#2563eb',
+      cursorAccent: '#ffffff',
+      selectionBackground: '#e2e8f0',
+      black: '#0f172a',
+      red: '#dc2626',
+      green: '#059669',
+      yellow: '#d97706',
+      blue: '#2563eb',
+      magenta: '#9333ea',
+      cyan: '#0891b2',
+      white: '#f8fafc',
+      brightBlack: '#94a3b8',
+      brightRed: '#ef4444',
+      brightGreen: '#10b981',
+      brightYellow: '#f59e0b',
+      brightBlue: '#3b82f6',
+      brightMagenta: '#a855f7',
+      brightCyan: '#06b6d4',
+      brightWhite: '#0f172a'
+    }
+  };
+
+  function getXtermTheme(themeName) {
+    return XTERM_THEMES[themeName] || XTERM_THEMES['aqvn-dark'];
+  }
+
+  function initXtermTerminal() {
+    if (state.term) return state.term;
+    var TerminalClass = (typeof window !== 'undefined' && window.Terminal)
+      ? window.Terminal
+      : (typeof globalThis !== 'undefined' && globalThis.Terminal ? globalThis.Terminal : null);
+    if (!TerminalClass) return null;
+
+    try {
+      var currentThemeName = (typeof readTheme === 'function' ? readTheme() : 'aqvn-dark') || 'aqvn-dark';
+      var term = new TerminalClass({
+        cols: 80,
+        rows: 24,
+        cursorBlink: true,
+        convertEol: true,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+        fontSize: 13,
+        lineHeight: 1.25,
+        theme: getXtermTheme(currentThemeName)
+      });
+
+      var FitAddonClass = (typeof window !== 'undefined' && window.FitAddon && (window.FitAddon.FitAddon || window.FitAddon))
+        || (typeof globalThis !== 'undefined' && globalThis.FitAddon && (globalThis.FitAddon.FitAddon || globalThis.FitAddon));
+      if (FitAddonClass) {
+        var fitAddon = new FitAddonClass();
+        term.loadAddon(fitAddon);
+        state.fitAddon = fitAddon;
+      }
+
+      var WebglAddonClass = (typeof window !== 'undefined' && window.WebglAddon && (window.WebglAddon.WebglAddon || window.WebglAddon))
+        || (typeof globalThis !== 'undefined' && globalThis.WebglAddon && (globalThis.WebglAddon.WebglAddon || globalThis.WebglAddon));
+      if (WebglAddonClass) {
+        try {
+          var webglAddon = new WebglAddonClass();
+          webglAddon.onContextLoss(function () {
+            try { webglAddon.dispose(); } catch (e) {}
+            state.xtermWebglActive = false;
+          });
+          term.loadAddon(webglAddon);
+          state.webglAddon = webglAddon;
+          state.xtermWebglActive = true;
+        } catch (glErr) {
+          state.xtermWebglActive = false;
+        }
+      }
+
+      var mountTarget = dom.terminalOutput;
+      if (mountTarget && typeof term.open === 'function') {
+        var termContainer = mountTarget.querySelector ? mountTarget.querySelector('.xterm-container') : null;
+        if (!termContainer && typeof document !== 'undefined' && document.createElement) {
+          termContainer = document.createElement('div');
+          termContainer.className = 'xterm-container';
+          if (mountTarget.insertBefore && mountTarget.firstChild) {
+            mountTarget.insertBefore(termContainer, mountTarget.firstChild);
+          } else if (mountTarget.appendChild) {
+            mountTarget.appendChild(termContainer);
+          }
+        }
+        if (termContainer) {
+          term.open(termContainer);
+        } else if (typeof term.open === 'function') {
+          term.open(mountTarget);
+        }
+      }
+
+      state.term = term;
+
+      var drawerComponent = byId('terminal-drawer-root');
+      if (drawerComponent) {
+        drawerComponent.terminal = term;
+        drawerComponent.fitAddon = state.fitAddon;
+        drawerComponent.webglAddon = state.webglAddon;
+      }
+
+      var activeTab = state.terminalTabs.find(function (t) { return t.id === state.activeTerminalTabId; });
+      if (activeTab && activeTab.output && typeof term.write === 'function') {
+        term.write(activeTab.output);
+      }
+
+      return term;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function fitTerminal() {
+    if (state.fitAddon && typeof state.fitAddon.fit === 'function') {
+      try {
+        state.fitAddon.fit();
+      } catch (e) {}
+    }
+    emitTerminalResize();
   }
 
   /* ------------------------------------------------------------------ */
@@ -1540,6 +1746,11 @@
         targetTab.output = lines.slice(-2000).join('\n');
       }
     }
+    if (state.term && typeof state.term.write === 'function' && targetTab && targetTab.id === state.activeTerminalTabId) {
+      try {
+        state.term.write(strText);
+      } catch (e) {}
+    }
     if (!dom.terminalOutput) return;
     if (targetTab && targetTab.id !== state.activeTerminalTabId) return;
 
@@ -1566,6 +1777,11 @@
   }
 
   function clearTerminalOutput() {
+    if (state.term && typeof state.term.clear === 'function') {
+      try {
+        state.term.clear();
+      } catch (e) {}
+    }
     if (!dom.terminalOutput) return;
     dom.terminalOutput.textContent = '';
     if (dom.terminalOutput.innerHTML !== undefined) {
@@ -1610,10 +1826,19 @@
     state.activeTerminalTabId = tabId;
     renderTerminalTabs();
     var activeTab = state.terminalTabs.find(function(t) { return t.id === tabId; });
+    if (state.term && typeof state.term.reset === 'function') {
+      try {
+        state.term.reset();
+        if (activeTab && activeTab.output && typeof state.term.write === 'function') {
+          state.term.write(activeTab.output);
+        }
+      } catch (e) {}
+    }
     if (dom.terminalOutput) {
       dom.terminalOutput.innerHTML = activeTab ? parseAnsiToHtml(activeTab.output) : '';
       dom.terminalOutput.scrollTop = dom.terminalOutput.scrollHeight;
     }
+    fitTerminal();
   }
 
   function addTerminalTab() {
@@ -1659,9 +1884,16 @@
 
   function emitTerminalResize() {
     if (!dom.terminalOutput) return;
-    var rect = dom.terminalOutput.getBoundingClientRect();
-    var cols = Math.max(20, Math.floor(rect.width / 8));
-    var rows = Math.max(5, Math.floor(rect.height / 18));
+    var cols = 80;
+    var rows = 24;
+    if (state.term && state.term.cols && state.term.rows) {
+      cols = state.term.cols;
+      rows = state.term.rows;
+    } else if (dom.terminalOutput.getBoundingClientRect) {
+      var rect = dom.terminalOutput.getBoundingClientRect();
+      cols = Math.max(20, Math.floor((rect.width || 640) / 8));
+      rows = Math.max(5, Math.floor((rect.height || 200) / 18));
+    }
     try {
       if (state.socket && state.socket.connected) {
         state.socket.emit('connector_exec_resize', { cols: cols, rows: rows });
@@ -2384,6 +2616,9 @@
     state.theme = theme;
     if (document.documentElement) {
       document.documentElement.setAttribute('data-theme', theme);
+    }
+    if (state.term && state.term.options) {
+      state.term.options.theme = getXtermTheme(theme);
     }
     try {
       window.localStorage.setItem(THEME_KEY, theme);
@@ -3724,7 +3959,14 @@
       dom.terminalInput.addEventListener('keydown', handleTerminalKeydown);
     }
     if (typeof ResizeObserver !== 'undefined' && dom.terminalDrawer) {
-      new ResizeObserver(emitTerminalResize).observe(dom.terminalDrawer);
+      new ResizeObserver(fitTerminal).observe(dom.terminalDrawer);
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('resize', function () {
+        if (state.terminalOpen) {
+          fitTerminal();
+        }
+      });
     }
     if (dom.terminalForm) {
       dom.terminalForm.addEventListener('submit', function (e) {

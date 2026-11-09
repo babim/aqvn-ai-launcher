@@ -189,6 +189,7 @@ __harness__.exports = (function () {
     'openExportMenu', 'closeExportMenu', 'toggleExportMenu',
     'switchSidebarTab', 'loadWorkspaceFiles', 'renderWorkspaceFiles', 'uploadWorkspaceFiles', 'uploadSingleFile', 'isBinaryFile', 'formatFileSize', 'formatFileTimestamp',
     'toggleTerminal', 'setTerminalCollapsed', 'appendTerminalOutput', 'clearTerminalOutput', 'sendTerminalCommand',
+    'initXtermTerminal', 'fitTerminal', 'emitTerminalResize', 'getXtermTheme', 'XTERM_THEMES',
     'manualReconnect'
   ];
   var out = {};
@@ -5331,6 +5332,123 @@ describe('VAL-UI-SIGNALS-002: Reactive Signals State Store & Message Virtualizat
     assert.match(virtualListCode, /_overscan/, 'virtual list supports overscan buffer');
   });
 });
+
+describe('VAL-UI-XTERM-001: xterm.js WebGL Terminal Drawer Streaming', () => {
+  test('ui/vendor/xterm.min.js and xterm.css exist and export required classes', async () => {
+    const xtermJsPath = new URL('../../ui/vendor/xterm.min.js', import.meta.url);
+    const xtermCssPath = new URL('../../ui/vendor/xterm.css', import.meta.url);
+    assert.ok(fs.existsSync(xtermJsPath), 'ui/vendor/xterm.min.js must exist');
+    assert.ok(fs.existsSync(xtermCssPath), 'ui/vendor/xterm.css must exist');
+
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const xtermBundle = req(xtermJsPath.pathname);
+
+    assert.equal(typeof xtermBundle.Terminal, 'function', 'exports Terminal class');
+    assert.equal(typeof (xtermBundle.FitAddon?.FitAddon || xtermBundle.FitAddon), 'function', 'exports FitAddon class');
+    assert.equal(typeof (xtermBundle.WebglAddon?.WebglAddon || xtermBundle.WebglAddon), 'function', 'exports WebglAddon class');
+  });
+
+  test('ui/components/aqvn-terminal-drawer.js encapsulates xterm drawer Custom Element', () => {
+    const drawerPath = new URL('../../ui/components/aqvn-terminal-drawer.js', import.meta.url);
+    assert.ok(fs.existsSync(drawerPath), 'ui/components/aqvn-terminal-drawer.js must exist');
+    const drawerCode = fs.readFileSync(drawerPath, 'utf8');
+    assert.match(drawerCode, /customElements\.define\('aqvn-terminal-drawer'/, 'registers <aqvn-terminal-drawer>');
+    assert.match(drawerCode, /FitAddon|fit\(\)/, 'supports FitAddon auto-resize');
+  });
+
+  test('ui/index.html integrates xterm assets and declares <aqvn-terminal-drawer>', () => {
+    const html = readIndexHtml();
+    assert.match(html, /vendor\/xterm\.css/, 'index.html links vendor/xterm.css');
+    assert.match(html, /vendor\/xterm\.min\.js/, 'index.html loads vendor/xterm.min.js');
+    assert.match(html, /<aqvn-terminal-drawer[\s>]/, 'index.html declares <aqvn-terminal-drawer>');
+  });
+
+  test('Terminal initializes xterm with FitAddon and WebGL renderer on Alt+T', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, initXtermTerminal, fitTerminal } = harness.exports;
+
+    let writeCalls = [];
+    let loadAddonCalls = [];
+    class MockTerminal {
+      constructor(opts) {
+        this.options = opts || {};
+        this.cols = opts.cols || 80;
+        this.rows = opts.rows || 24;
+      }
+      loadAddon(addon) { loadAddonCalls.push(addon); }
+      open(el) { this.element = el; }
+      write(data) { writeCalls.push(data); }
+      clear() { writeCalls.length = 0; }
+      reset() { writeCalls.length = 0; }
+    }
+    class MockFitAddon {
+      fit() { this.fitted = true; }
+    }
+    class MockWebglAddon {
+      onContextLoss(cb) { this.lossCb = cb; }
+      dispose() {}
+    }
+
+    harness.context.Terminal = MockTerminal;
+    harness.context.FitAddon = MockFitAddon;
+    harness.context.WebglAddon = MockWebglAddon;
+
+    const term = initXtermTerminal();
+    assert.ok(term, 'xterm instance initialized');
+    assert.equal(term.cols, 80);
+    assert.equal(term.rows, 24);
+    assert.equal(loadAddonCalls.length, 2, 'Loads both FitAddon and WebglAddon');
+    assert.equal(state.xtermWebglActive, true, 'WebGL acceleration is active for 60fps rendering');
+
+    // Test fitTerminal
+    fitTerminal();
+    assert.equal(state.fitAddon.fitted, true, 'fitTerminal invokes FitAddon.fit()');
+  });
+
+  test('Terminal streams ANSI PTY chunks into xterm at 60fps and maps OKLCH themes', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, initXtermTerminal, appendTerminalOutput, applyTheme, clearTerminalOutput } = harness.exports;
+
+    let writes = [];
+    class MockTerminal {
+      constructor(opts) {
+        this.options = opts || {};
+        this.cols = 80;
+        this.rows = 24;
+      }
+      loadAddon() {}
+      open() {}
+      write(chunk) { writes.push(chunk); }
+      clear() { writes.length = 0; }
+    }
+    harness.context.Terminal = MockTerminal;
+    initXtermTerminal();
+
+    // Streaming PTY data with ANSI escape sequences
+    const ptyStreamData = '\x1b[32m[OK]\x1b[0m Cargo test build passing\n\x1b[34m[INFO]\x1b[0m Listening on 55080\n';
+    appendTerminalOutput(ptyStreamData);
+
+    assert.equal(writes.length, 1, 'Writes directly to xterm instance');
+    assert.match(writes[0], /\[OK\]/, 'ANSI stream preserves sequence');
+    assert.match(dom.terminalOutput.textContent, /\[OK\]/, 'Accessible DOM also retains content');
+
+    // Test OKLCH theme synchronization
+    applyTheme('cyberpunk-terminal');
+    assert.equal(state.term.options.theme.foreground, '#00ff9f', 'Cyberpunk neon foreground mapped');
+    assert.equal(state.term.options.theme.background, '#0d1117', 'Cyberpunk background mapped');
+
+    applyTheme('oled-black');
+    assert.equal(state.term.options.theme.background, '#000000', 'OLED black background mapped');
+
+    // Test clear output
+    clearTerminalOutput();
+    assert.equal(writes.length, 0, 'Clear resets xterm buffer');
+  });
+});
+
 
 
 

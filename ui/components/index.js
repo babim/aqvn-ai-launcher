@@ -7,6 +7,7 @@
  * - <aqvn-chat-pane>
  * - <aqvn-canvas-pane>
  * - <aqvn-virtual-message-list>
+ * - <aqvn-terminal-drawer>
  */
 
 (function (root, factory) {
@@ -19,7 +20,8 @@
     var chatPane = require('./aqvn-chat-pane.js');
     var canvasPane = require('./aqvn-canvas-pane.js');
     var virtualList = require('./aqvn-virtual-message-list.js');
-    module.exports = factory(shell, topbar, sidebar, chatPane, canvasPane, virtualList);
+    var terminalDrawer = require('./aqvn-terminal-drawer.js');
+    module.exports = factory(shell, topbar, sidebar, chatPane, canvasPane, virtualList, terminalDrawer);
   } else {
     root.AqvnComponents = factory(
       { AqvnShell: root.AqvnShell },
@@ -27,10 +29,11 @@
       { AqvnSidebar: root.AqvnSidebar },
       { AqvnChatPane: root.AqvnChatPane },
       { AqvnCanvasPane: root.AqvnCanvasPane },
-      { AqvnVirtualMessageList: root.AqvnVirtualMessageList }
+      { AqvnVirtualMessageList: root.AqvnVirtualMessageList },
+      { AqvnTerminalDrawer: root.AqvnTerminalDrawer }
     );
   }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (shell, topbar, sidebar, chatPane, canvasPane, virtualList) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (shell, topbar, sidebar, chatPane, canvasPane, virtualList, terminalDrawer) {
   'use strict';
 
   var components = {
@@ -39,7 +42,8 @@
     AqvnSidebar: sidebar && sidebar.AqvnSidebar,
     AqvnChatPane: chatPane && chatPane.AqvnChatPane,
     AqvnCanvasPane: canvasPane && canvasPane.AqvnCanvasPane,
-    AqvnVirtualMessageList: virtualList && virtualList.AqvnVirtualMessageList
+    AqvnVirtualMessageList: virtualList && virtualList.AqvnVirtualMessageList,
+    AqvnTerminalDrawer: terminalDrawer && terminalDrawer.AqvnTerminalDrawer
   };
 
   return components;

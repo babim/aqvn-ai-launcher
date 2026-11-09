@@ -86,10 +86,12 @@
     </script>
     <link rel="stylesheet" href="chat.css">
     <link rel="stylesheet" href="styles/tokens.css">
+    <link rel="stylesheet" href="vendor/xterm.css">
     <script src="vendor/signals-core.min.js"></script>
     <script src="state/signals.js"></script>
     <script src="vendor/socket.io.min.js"></script>
     <script src="bridge.js"></script>
+    <script defer src="vendor/xterm.min.js"></script>
     <script defer src="vendor/marked.min.js"></script>
     <script defer src="vendor/highlight.min.js"></script>
     <script defer src="components/index.js"></script>
@@ -424,6 +426,7 @@
             <button id="send-btn" type="submit">Send</button>
           </form>
 
+          <aqvn-terminal-drawer id="terminal-drawer-root">
           <section id="terminal-drawer" class="terminal-drawer" aria-label="Interactive Terminal" hidden>
             <div class="terminal-header">
               <div class="terminal-title-group">
@@ -459,6 +462,7 @@
               <button id="terminal-send-btn" type="submit" class="terminal-send-btn">Run</button>
             </form>
           </section>
+          </aqvn-terminal-drawer>
         </div>
         </aqvn-chat-pane>
 

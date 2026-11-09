@@ -32,6 +32,30 @@ pub fn verify(password: &str, data: &str, expected_hex: &str) -> bool {
     mac.verify_slice(&expected).is_ok()
 }
 
+/// Computes the lowercase-hex HMAC-SHA256 for a timestamped, nonced RFC envelope.
+pub fn compute_envelope_hash(
+    password: &str,
+    rfc_input: &str,
+    timestamp: u64,
+    nonce: &str,
+) -> String {
+    let canonical = format!("{rfc_input}:{timestamp}:{nonce}");
+    compute_hash(password, &canonical)
+}
+
+/// Verifies HMAC for an RFC envelope in constant time.
+/// Supports both standard `rfc_input` digest and canonical `rfc_input:timestamp:nonce` digest.
+pub fn verify_envelope(
+    password: &str,
+    rfc_input: &str,
+    timestamp: u64,
+    nonce: &str,
+    expected_hex: &str,
+) -> bool {
+    let canonical = format!("{rfc_input}:{timestamp}:{nonce}");
+    verify(password, rfc_input, expected_hex) || verify(password, &canonical, expected_hex)
+}
+
 fn new_mac(password: &str) -> HmacSha256 {
     // HMAC accepts keys of any length.
     HmacSha256::new_from_slice(password.as_bytes()).expect("HMAC accepts any key length")

@@ -1,9 +1,10 @@
 //! `/api/rfc` HTTP endpoint: authentication, dispatch, and wire-exact errors.
 
-use aqvn_core::config::{AppConfig, ConfigWatcher};
 use crate::auth;
 use crate::dispatch::{self, DispatchContext, DispatchError, RfcCall};
+use crate::replay::{self, AntiReplayWindow};
 use crate::sandbox::Sandbox;
+use aqvn_core::config::{AppConfig, ConfigWatcher};
 use axum::{
     body::Body,
     extract::{ConnectInfo, State},
@@ -141,11 +142,16 @@ pub struct RfcState {
     pub password: String,
     pub context: DispatchContext,
     pub rate_limiter: RateLimiter,
+    pub replay_guard: AntiReplayWindow,
 }
 
 impl RfcState {
     pub fn rate_limiter(&self) -> &RateLimiter {
         &self.rate_limiter
+    }
+
+    pub fn replay_guard(&self) -> &AntiReplayWindow {
+        &self.replay_guard
     }
 }
 
@@ -154,6 +160,14 @@ pub fn build_state(config: &AppConfig) -> RfcState {
 }
 
 pub fn build_state_with_rate_limiter(config: &AppConfig, rate_limiter: RateLimiter) -> RfcState {
+    build_state_with_guards(config, rate_limiter, AntiReplayWindow::default_rfc())
+}
+
+pub fn build_state_with_guards(
+    config: &AppConfig,
+    rate_limiter: RateLimiter,
+    replay_guard: AntiReplayWindow,
+) -> RfcState {
     RfcState {
         password: config.rfc_password.trim().to_string(),
         context: DispatchContext {
@@ -161,6 +175,7 @@ pub fn build_state_with_rate_limiter(config: &AppConfig, rate_limiter: RateLimit
             ssh_password: config.ssh_password.clone(),
         },
         rate_limiter,
+        replay_guard,
     }
 }
 
@@ -212,11 +227,57 @@ async fn handle_rfc(State(state): State<RfcState>, request: Request<Body>) -> Re
             "request body is missing the string field `rfc_input`",
         );
     };
+
+    let raw_timestamp = match envelope.get("timestamp") {
+        Some(v) => v,
+        None => {
+            return text_error(
+                StatusCode::UNAUTHORIZED,
+                "RFC request rejected: missing required `timestamp` in envelope",
+            );
+        }
+    };
+    let timestamp_secs = match replay::extract_timestamp(raw_timestamp) {
+        Ok(ts) => ts,
+        Err(_) => {
+            return text_error(
+                StatusCode::UNAUTHORIZED,
+                "RFC request rejected: invalid `timestamp` in envelope",
+            );
+        }
+    };
+
+    let raw_nonce = match envelope.get("nonce") {
+        Some(v) => v,
+        None => {
+            return text_error(
+                StatusCode::UNAUTHORIZED,
+                "RFC request rejected: missing required `nonce` in envelope",
+            );
+        }
+    };
+    let nonce = match replay::extract_nonce(raw_nonce) {
+        Ok(n) => n,
+        Err(_) => {
+            return text_error(
+                StatusCode::UNAUTHORIZED,
+                "RFC request rejected: missing or invalid `nonce` in envelope",
+            );
+        }
+    };
+
+    if let Err(err) = state.replay_guard.check_and_record(timestamp_secs, nonce) {
+        return text_error(
+            StatusCode::UNAUTHORIZED,
+            format!("RFC request rejected: {err}"),
+        );
+    }
+
     let hash = envelope
         .get("hash")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if !auth::verify(&state.password, rfc_input, hash) {
+    if !auth::verify_envelope(&state.password, rfc_input, timestamp_secs, nonce, hash) {
         return text_error(
             StatusCode::FORBIDDEN,
             "RFC request rejected: invalid HMAC hash",
@@ -333,6 +394,7 @@ pub async fn run_supervised_with_backoff(
 ) -> Result<(), String> {
     let mut receiver = watcher.subscribe();
     let rate_limiter = RateLimiter::default_rfc();
+    let replay_guard = AntiReplayWindow::default_rfc();
     let mut current_backoff = initial_backoff;
 
     loop {
@@ -370,7 +432,7 @@ pub async fn run_supervised_with_backoff(
             }
         };
 
-        let state = build_state_with_rate_limiter(&config, rate_limiter.clone());
+        let state = build_state_with_guards(&config, rate_limiter.clone(), replay_guard.clone());
         tokio::select! {
             changed = receiver.changed() => {
                 if changed.is_err() {

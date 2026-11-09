@@ -4,10 +4,12 @@ pub mod auth;
 pub mod dispatch;
 pub mod exchange;
 pub mod files;
+pub mod replay;
 pub mod sandbox;
 pub mod server;
 pub mod text_editor;
 pub mod util;
 pub mod workdir;
 
+pub use replay::{AntiReplayWindow, ReplayError, DEFAULT_MAX_NONCES, DEFAULT_REPLAY_TTL};
 pub use server::{build_state, router, run_supervised, RfcState};

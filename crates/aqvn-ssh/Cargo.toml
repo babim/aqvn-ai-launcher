@@ -13,5 +13,6 @@ aws-lc-rs = { version = "1.19", features = ["prebuilt-nasm"] }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
 rand = "0.8"
 thiserror = "2"

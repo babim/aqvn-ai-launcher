@@ -186,6 +186,7 @@ dependencies = [
  "aqvn-core",
  "aqvn-rfc",
  "aws-lc-rs",
+ "base64 0.22.1",
  "portable-pty",
  "rand 0.8.8",
  "russh",

@@ -1,9 +1,9 @@
 //! russh server: password auth → command guard → PTY shell.
 
-use aqvn_core::config::{AppConfig, ConfigWatcher};
 use crate::guard;
 use crate::session_cwd;
 use crate::shell::{self, ShellSession, SHELL_PROGRAM};
+use aqvn_core::config::{AppConfig, ConfigWatcher};
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::PrivateKey;
 use russh::server::{Auth, ChannelOpenHandle, Handler, Msg, Server, Session};

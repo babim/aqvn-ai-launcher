@@ -1,0 +1,211 @@
+/**
+ * CodeMirror 6 + Visual Merge Diff Stylesheet
+ * For AQVN Workspace Native Client
+ */
+
+.cm-editor {
+  position: relative !important;
+  box-sizing: border-box;
+  display: flex !important;
+  flex-direction: column;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #f1f5f9);
+  background-color: var(--panel, #0f172a);
+  border: 1px solid var(--border, #334155);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 100%;
+  min-height: 250px;
+}
+
+.cm-scroller {
+  display: flex !important;
+  align-items: flex-start !important;
+  font-family: inherit;
+  line-height: 1.5;
+  height: 100%;
+  flex-grow: 1;
+  overflow: auto;
+  position: relative;
+  z-index: 0;
+}
+
+.cm-gutters {
+  display: flex !important;
+  flex-direction: row;
+  flex-shrink: 0;
+  background-color: var(--panel, #0f172a);
+  color: var(--muted, #64748b);
+  border-right: 1px solid var(--border, #1e293b);
+  user-select: none;
+  min-height: 100%;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.cm-gutter {
+  display: flex !important;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 100%;
+}
+
+.cm-lineNumbers .cm-gutterElement {
+  padding: 0 8px 0 10px;
+  min-width: 32px;
+  text-align: right;
+  white-space: pre;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+}
+
+.cm-content {
+  padding: 4px 0;
+  min-height: 100%;
+  flex-grow: 1;
+  outline: none;
+  white-space: pre;
+  word-wrap: normal;
+  tab-size: 2;
+}
+
+.cm-line {
+  padding: 0 8px;
+  line-height: 1.5;
+  min-height: 20px;
+  white-space: pre;
+}
+
+.cm-activeLine {
+  background-color: rgba(56, 189, 248, 0.08);
+}
+
+.cm-activeLineGutter {
+  color: var(--accent, #38bdf8);
+  font-weight: 600;
+}
+
+/* Syntax Highlighting Tokens */
+.tok-keyword { color: #f43f5e; font-weight: 600; }
+.tok-string { color: #10b981; }
+.tok-comment { color: #64748b; font-style: italic; }
+.tok-number { color: #f59e0b; }
+.tok-function { color: #38bdf8; font-weight: 500; }
+.tok-type { color: #a855f7; }
+.tok-operator { color: #ec4899; }
+.tok-variable { color: var(--text, #f1f5f9); }
+.tok-property { color: #38bdf8; }
+.tok-punctuation { color: #94a3b8; }
+.tok-tag { color: #ef4444; }
+.tok-attrName { color: #f59e0b; }
+.tok-attrValue { color: #10b981; }
+
+/* Visual Diff Viewer (CodeMirror Merge) Styles */
+.cm-mergeView {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  border: 1px solid var(--border, #334155);
+  border-radius: 6px;
+  overflow: hidden;
+  background-color: var(--panel, #0f172a);
+}
+
+.cm-mergeViewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-alt, #1e293b);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #334155);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cm-mergeViewHeader .diff-stats {
+  display: flex;
+  gap: 12px;
+}
+
+.cm-mergeViewHeader .diff-stat-add {
+  color: #10b981;
+}
+
+.cm-mergeViewHeader .diff-stat-del {
+  color: #ef4444;
+}
+
+.cm-mergeViewEditors {
+  display: flex;
+  flex-direction: row;
+  flex-grow: 1;
+  width: 100%;
+  min-height: 320px;
+  overflow: hidden;
+}
+
+.cm-merge-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.cm-merge-a {
+  border-right: 2px solid var(--border, #334155);
+}
+
+.cm-merge-panel-title {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted, #94a3b8);
+  background: var(--bg, #090d16);
+  border-bottom: 1px solid var(--border, #1e293b);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cm-deletedChunk {
+  background-color: rgba(239, 68, 68, 0.18) !important;
+}
+
+.cm-insertedChunk {
+  background-color: rgba(16, 185, 129, 0.18) !important;
+}
+
+.cm-deletedLine {
+  background-color: rgba(239, 68, 68, 0.12) !important;
+  color: #f87171 !important;
+}
+
+.cm-insertedLine {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  color: #34d399 !important;
+}
+
+.cm-revertChunkBtn {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent, #38bdf8);
+  color: #0f172a;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.cm-revertChunkBtn:hover {
+  opacity: 0.85;
+}

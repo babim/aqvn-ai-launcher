@@ -87,11 +87,13 @@
     <link rel="stylesheet" href="chat.css">
     <link rel="stylesheet" href="styles/tokens.css">
     <link rel="stylesheet" href="vendor/xterm.css">
+    <link rel="stylesheet" href="vendor/codemirror.css">
     <script src="vendor/signals-core.min.js"></script>
     <script src="state/signals.js"></script>
     <script src="vendor/socket.io.min.js"></script>
     <script src="bridge.js"></script>
     <script defer src="vendor/xterm.min.js"></script>
+    <script defer src="vendor/codemirror.min.js"></script>
     <script defer src="vendor/marked.min.js"></script>
     <script defer src="vendor/highlight.min.js"></script>
     <script defer src="components/index.js"></script>
@@ -570,6 +572,7 @@
           </div>
         </div>
         <div id="file-preview-body" class="file-preview-body">
+          <aqvn-code-editor id="file-code-editor" class="file-code-editor"></aqvn-code-editor>
           <div id="file-preview-content" class="file-preview-content"></div>
           <textarea id="file-editor-textarea" class="file-editor-textarea" spellcheck="false" hidden></textarea>
         </div>
@@ -589,6 +592,7 @@
           </div>
         </div>
         <div id="diff-viewer-body" class="diff-viewer-body">
+          <aqvn-code-editor id="diff-code-editor" mode="diff" class="diff-code-editor"></aqvn-code-editor>
           <pre id="diff-viewer-content" class="diff-viewer-content"></pre>
         </div>
       </div>

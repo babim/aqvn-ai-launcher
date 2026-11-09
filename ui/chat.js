@@ -71,7 +71,10 @@
     searchMatchesCount: 0,
     sidebarTab: 'sessions',
     workspaceFiles: [],
-    terminalOpen: false
+    terminalOpen: false,
+    codeEditor: null,
+    codeDiffViewer: null,
+    editorDirty: false
   };
 
   function byId(id) {
@@ -2620,6 +2623,12 @@
     if (state.term && state.term.options) {
       state.term.options.theme = getXtermTheme(theme);
     }
+    if (dom.fileCodeEditor && typeof dom.fileCodeEditor.setTheme === 'function') {
+      dom.fileCodeEditor.setTheme(theme);
+    }
+    if (dom.diffCodeEditor && typeof dom.diffCodeEditor.setTheme === 'function') {
+      dom.diffCodeEditor.setTheme(theme);
+    }
     try {
       window.localStorage.setItem(THEME_KEY, theme);
     } catch (err) {}
@@ -3210,6 +3219,185 @@
     });
   }
 
+  /* ------------------------------------------------------------------ */
+  /* CodeMirror 6 Workspace Editor & Visual Diff (VAL-UI-EDITOR-001)     */
+  /* ------------------------------------------------------------------ */
+
+  var CODEMIRROR_THEMES = {
+    'aqvn-dark': {
+      background: '#0f172a',
+      foreground: '#f1f5f9',
+      activeLine: 'rgba(56, 189, 248, 0.08)',
+      selection: '#1e293b',
+      gutterBackground: '#0f172a',
+      gutterForeground: '#64748b'
+    },
+    'oled-black': {
+      background: '#000000',
+      foreground: '#ffffff',
+      activeLine: 'rgba(255, 255, 255, 0.06)',
+      selection: '#1f2937',
+      gutterBackground: '#000000',
+      gutterForeground: '#4b5563'
+    },
+    'cyberpunk-terminal': {
+      background: '#0d1117',
+      foreground: '#00ff9f',
+      activeLine: 'rgba(0, 255, 159, 0.08)',
+      selection: '#16382b',
+      gutterBackground: '#0d1117',
+      gutterForeground: '#1f2e27'
+    },
+    'clean-studio-light': {
+      background: '#f8fafc',
+      foreground: '#0f172a',
+      activeLine: 'rgba(37, 99, 235, 0.06)',
+      selection: '#e2e8f0',
+      gutterBackground: '#f8fafc',
+      gutterForeground: '#94a3b8'
+    }
+  };
+
+  function getCodeMirrorTheme(themeName) {
+    return CODEMIRROR_THEMES[themeName] || CODEMIRROR_THEMES['aqvn-dark'];
+  }
+
+  function parseUnifiedDiff(diffText) {
+    if (!diffText) return { original: '', modified: '' };
+    var origLines = [];
+    var modLines = [];
+    var lines = String(diffText).split('\n');
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('diff --git') || line.startsWith('index ')) {
+        continue;
+      }
+      if (line.startsWith('@@')) {
+        continue;
+      }
+      if (line.startsWith('-')) {
+        origLines.push(line.slice(1));
+      } else if (line.startsWith('+')) {
+        modLines.push(line.slice(1));
+      } else if (line.startsWith(' ')) {
+        origLines.push(line.slice(1));
+        modLines.push(line.slice(1));
+      } else {
+        origLines.push(line);
+        modLines.push(line);
+      }
+    }
+
+    return {
+      original: origLines.join('\n'),
+      modified: modLines.join('\n')
+    };
+  }
+
+  function initCodeMirrorEditor(content, filename, options) {
+    options = options || {};
+    var CodeMirrorClass = (typeof window !== 'undefined' && window.CodeMirror)
+      ? window.CodeMirror
+      : (typeof CodeMirror !== 'undefined' ? CodeMirror : (typeof globalThis !== 'undefined' && globalThis.CodeMirror ? globalThis.CodeMirror : null));
+    if (!CodeMirrorClass) return null;
+
+    try {
+      if (state.codeEditor) {
+        try { state.codeEditor.destroy(); } catch (e) {}
+        state.codeEditor = null;
+      }
+
+      var currentTheme = (typeof readTheme === 'function' ? readTheme() : 'aqvn-dark') || 'aqvn-dark';
+      var lang = (CodeMirrorClass.detectLanguage && filename) ? CodeMirrorClass.detectLanguage(filename) : (options.language || 'js');
+      var isReadOnly = options.readOnly !== undefined ? !!options.readOnly : false;
+
+      var mountTarget = dom.fileCodeEditor || dom.filePreviewBody;
+      var editor = null;
+
+      if (dom.fileCodeEditor && typeof dom.fileCodeEditor.setValue === 'function') {
+        if (isReadOnly) {
+          dom.fileCodeEditor.setAttribute('readonly', '');
+        } else {
+          dom.fileCodeEditor.removeAttribute('readonly');
+        }
+        dom.fileCodeEditor.setAttribute('theme', currentTheme);
+        dom.fileCodeEditor.setValue(content, filename);
+        editor = dom.fileCodeEditor.editorView;
+      } else if (typeof CodeMirrorClass.EditorView === 'function') {
+        editor = new CodeMirrorClass.EditorView({
+          state: CodeMirrorClass.EditorState.create({
+            doc: String(content || ''),
+            readOnly: isReadOnly,
+            extensions: [
+              CodeMirrorClass.lineNumbers(),
+              CodeMirrorClass.syntaxHighlighting(),
+              CodeMirrorClass.EditorView.updateListener.of(function (update) {
+                if (update.docChanged) {
+                  state.editorDirty = true;
+                  if (dom.fileCodeEditor) dom.fileCodeEditor.isDirty = true;
+                }
+              })
+            ]
+          }),
+          parent: mountTarget,
+          language: lang
+        });
+      }
+
+      state.codeEditor = editor;
+      state.editorDirty = false;
+      if (dom.fileCodeEditor) dom.fileCodeEditor.isDirty = false;
+
+      return editor;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function initCodeMirrorDiffViewer(title, diffText, originalText, modifiedText) {
+    var CodeMirrorClass = (typeof window !== 'undefined' && window.CodeMirror)
+      ? window.CodeMirror
+      : (typeof CodeMirror !== 'undefined' ? CodeMirror : (typeof globalThis !== 'undefined' && globalThis.CodeMirror ? globalThis.CodeMirror : null));
+    if (!CodeMirrorClass) return null;
+
+    try {
+      if (state.codeDiffViewer) {
+        try { state.codeDiffViewer.destroy(); } catch (e) {}
+        state.codeDiffViewer = null;
+      }
+
+      var orig = originalText;
+      var mod = modifiedText;
+      if (orig === undefined || mod === undefined) {
+        var parsed = parseUnifiedDiff(diffText);
+        orig = parsed.original;
+        mod = parsed.modified;
+      }
+
+      var currentTheme = (typeof readTheme === 'function' ? readTheme() : 'aqvn-dark') || 'aqvn-dark';
+      var mountTarget = dom.diffCodeEditor || dom.diffViewerBody;
+      var diffViewer = null;
+
+      if (dom.diffCodeEditor && typeof dom.diffCodeEditor.setDiff === 'function') {
+        dom.diffCodeEditor.setAttribute('theme', currentTheme);
+        dom.diffCodeEditor.setDiff(orig, mod, { title: title });
+        diffViewer = dom.diffCodeEditor.mergeView;
+      } else if (typeof CodeMirrorClass.MergeView === 'function') {
+        diffViewer = new CodeMirrorClass.MergeView({
+          a: { doc: String(orig || '') },
+          b: { doc: String(mod || ''), readOnly: false },
+          parent: mountTarget
+        });
+      }
+
+      state.codeDiffViewer = diffViewer;
+      return diffViewer;
+    } catch (err) {
+      return null;
+    }
+  }
+
   async function openFilePreview(file) {
     if (!dom.filePreviewModal) return;
     state.previewingFile = file;
@@ -3220,6 +3408,9 @@
     if (dom.filePreviewContent) {
       dom.filePreviewContent.innerHTML = '<p class="loading">Loading content...</p>';
       dom.filePreviewContent.hidden = false;
+    }
+    if (dom.fileCodeEditor) {
+      dom.fileCodeEditor.hidden = true;
     }
     if (dom.fileEditorTextarea) {
       dom.fileEditorTextarea.hidden = true;
@@ -3253,57 +3444,132 @@
       var res = await apiCall('files_read', { path: filePath });
       var text = (res && (typeof res.content === 'string' ? res.content : (res.data || ''))) || '';
       state.previewingFile.content = text;
+      state.editorDirty = false;
 
       if (/\.md$/i.test(filePath)) {
         dom.filePreviewContent.innerHTML = renderMarkdown(text);
+        if (dom.fileCodeEditor) dom.fileCodeEditor.hidden = true;
+        dom.filePreviewContent.hidden = false;
       } else {
         dom.filePreviewContent.innerHTML = '<pre><code>' + escapeHtml(text) + '</code></pre>';
-        if (typeof hljs !== 'undefined' && hljs.highlightElement) {
+        if (typeof hljs !== 'undefined' && hljs.highlightElement && dom.filePreviewContent.querySelector) {
           var codeEl = dom.filePreviewContent.querySelector('code');
           if (codeEl) hljs.highlightElement(codeEl);
+        }
+        var cmEditor = initCodeMirrorEditor(text, filePath, { readOnly: true });
+        if (cmEditor && dom.fileCodeEditor) {
+          dom.fileCodeEditor.hidden = false;
+          dom.filePreviewContent.hidden = true;
+        } else {
+          dom.filePreviewContent.hidden = false;
+          if (dom.fileCodeEditor) dom.fileCodeEditor.hidden = true;
         }
       }
     } catch (err) {
       dom.filePreviewContent.innerHTML = '<p class="error">Failed to load file: ' + escapeHtml(err.message || String(err)) + '</p>';
+      if (dom.fileCodeEditor) dom.fileCodeEditor.hidden = true;
+      dom.filePreviewContent.hidden = false;
     }
   }
 
   function closeFilePreview() {
+    if (state.editorDirty) {
+      var confirmDiscard = (typeof confirm === 'function')
+        ? confirm('You have unsaved changes in the editor. Discard changes?')
+        : true;
+      if (!confirmDiscard) return false;
+    }
+    if (state.codeEditor) {
+      try { state.codeEditor.destroy(); } catch (e) {}
+      state.codeEditor = null;
+    }
+    state.editorDirty = false;
+    if (dom.fileCodeEditor) {
+      dom.fileCodeEditor.isDirty = false;
+      dom.fileCodeEditor.hidden = true;
+    }
     if (dom.filePreviewModal) dom.filePreviewModal.hidden = true;
     if (dom.filePreviewContent) dom.filePreviewContent.innerHTML = '';
     state.previewingFile = null;
+    return true;
   }
 
   function toggleFileEditor() {
     if (!state.previewingFile) return;
-    var isEditing = !dom.fileEditorTextarea.hidden;
+    var isEditing = !dom.fileEditorTextarea.hidden || (state.codeEditor && !state.codeEditor.state.readOnly && dom.fileCodeEditor && !dom.fileCodeEditor.hidden && !dom.filePreviewSaveBtn.hidden);
     if (isEditing) {
+      if (state.editorDirty) {
+        var confirmDiscard = (typeof confirm === 'function')
+          ? confirm('Discard unsaved changes?')
+          : true;
+        if (!confirmDiscard) return;
+      }
       dom.fileEditorTextarea.hidden = true;
-      dom.filePreviewContent.hidden = false;
+      if (state.codeEditor) {
+        state.codeEditor.dispatch({ readOnly: true });
+        if (dom.fileCodeEditor) dom.fileCodeEditor.setAttribute('readonly', '');
+      } else {
+        dom.filePreviewContent.hidden = false;
+      }
+      state.editorDirty = false;
+      if (dom.fileCodeEditor) dom.fileCodeEditor.isDirty = false;
       dom.filePreviewEditBtn.textContent = 'Edit';
       dom.filePreviewSaveBtn.hidden = true;
     } else {
-      dom.fileEditorTextarea.value = state.previewingFile.content || '';
-      dom.fileEditorTextarea.hidden = false;
-      dom.filePreviewContent.hidden = true;
+      var content = state.previewingFile.content || '';
+      dom.fileEditorTextarea.value = content;
       dom.filePreviewEditBtn.textContent = 'Cancel';
       dom.filePreviewSaveBtn.hidden = false;
-      dom.fileEditorTextarea.focus();
+
+      if (state.codeEditor) {
+        state.codeEditor.dispatch({ readOnly: false });
+        if (dom.fileCodeEditor) {
+          dom.fileCodeEditor.removeAttribute('readonly');
+          dom.fileCodeEditor.hidden = false;
+          dom.fileCodeEditor.focus();
+        }
+        dom.filePreviewContent.hidden = true;
+        dom.fileEditorTextarea.hidden = true;
+      } else {
+        dom.fileEditorTextarea.hidden = false;
+        dom.filePreviewContent.hidden = true;
+        dom.fileEditorTextarea.focus();
+      }
     }
   }
 
   async function saveFileEditor() {
     if (!state.previewingFile) return;
     var filePath = state.previewingFile.path || state.previewingFile.name;
-    var newContent = dom.fileEditorTextarea.value;
+    var newContent = '';
+    if (state.codeEditor && state.codeEditor.state && state.codeEditor.state.doc) {
+      newContent = state.codeEditor.state.doc.toString();
+    } else if (dom.fileCodeEditor && dom.fileCodeEditor.value) {
+      newContent = dom.fileCodeEditor.value;
+    } else {
+      newContent = dom.fileEditorTextarea.value;
+    }
+
     try {
       await apiCall('files_write', { path: filePath, content: newContent });
       state.previewingFile.content = newContent;
-      toggleFileEditor();
+      state.editorDirty = false;
+      if (dom.fileCodeEditor) dom.fileCodeEditor.isDirty = false;
+      if (state.codeEditor) {
+        state.codeEditor.dispatch({ readOnly: true });
+        if (dom.fileCodeEditor) dom.fileCodeEditor.setAttribute('readonly', '');
+      } else {
+        dom.fileEditorTextarea.hidden = true;
+        dom.filePreviewContent.hidden = false;
+      }
+      dom.filePreviewEditBtn.textContent = 'Edit';
+      dom.filePreviewSaveBtn.hidden = true;
       openFilePreview(state.previewingFile);
       loadWorkspaceFiles(state.workspaceCurrentPath);
     } catch (err) {
-      alert('Save failed: ' + (err.message || String(err)));
+      if (typeof alert === 'function') {
+        alert('Save failed: ' + (err.message || String(err)));
+      }
     }
   }
 
@@ -3356,7 +3622,7 @@
     }
   }
 
-  function openDiffViewer(title, diffText) {
+  function openDiffViewer(title, diffText, originalText, modifiedText) {
     if (!dom.diffViewerModal) return;
     if (dom.diffViewerTitle) {
       dom.diffViewerTitle.textContent = title || 'Visual Diff';
@@ -3378,10 +3644,27 @@
         dom.diffViewerContent.appendChild(document.createTextNode('\n'));
       });
     }
+
+    var cmDiff = initCodeMirrorDiffViewer(title, diffText, originalText, modifiedText);
+    if (cmDiff && dom.diffCodeEditor) {
+      dom.diffCodeEditor.hidden = false;
+      if (dom.diffViewerContent) dom.diffViewerContent.hidden = true;
+    } else if (dom.diffViewerContent) {
+      dom.diffViewerContent.hidden = false;
+      if (dom.diffCodeEditor) dom.diffCodeEditor.hidden = true;
+    }
+
     dom.diffViewerModal.hidden = false;
   }
 
   function closeDiffViewer() {
+    if (state.codeDiffViewer) {
+      try { state.codeDiffViewer.destroy(); } catch (e) {}
+      state.codeDiffViewer = null;
+    }
+    if (dom.diffCodeEditor) {
+      dom.diffCodeEditor.hidden = true;
+    }
     if (dom.diffViewerModal) dom.diffViewerModal.hidden = true;
   }
 
@@ -3680,10 +3963,12 @@
     dom.closeFilePreviewBtn = byId('close-file-preview-btn');
     dom.filePreviewContent = byId('file-preview-content');
     dom.fileEditorTextarea = byId('file-editor-textarea');
+    dom.fileCodeEditor = byId('file-code-editor');
     dom.diffViewerModal = byId('diff-viewer-modal');
     dom.diffViewerTitle = byId('diff-viewer-title');
     dom.closeDiffViewerBtn = byId('close-diff-viewer-btn');
     dom.diffViewerContent = byId('diff-viewer-content');
+    dom.diffCodeEditor = byId('diff-code-editor');
     dom.toggleActivityBtn = byId('toggle-activity-btn');
     dom.activityBadgeCount = byId('activity-badge-count');
     dom.agentActivityDrawer = byId('agent-activity-drawer');

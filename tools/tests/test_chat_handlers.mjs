@@ -190,6 +190,8 @@ __harness__.exports = (function () {
     'switchSidebarTab', 'loadWorkspaceFiles', 'renderWorkspaceFiles', 'uploadWorkspaceFiles', 'uploadSingleFile', 'isBinaryFile', 'formatFileSize', 'formatFileTimestamp',
     'toggleTerminal', 'setTerminalCollapsed', 'appendTerminalOutput', 'clearTerminalOutput', 'sendTerminalCommand',
     'initXtermTerminal', 'fitTerminal', 'emitTerminalResize', 'getXtermTheme', 'XTERM_THEMES',
+    'initCodeMirrorEditor', 'initCodeMirrorDiffViewer', 'getCodeMirrorTheme', 'CODEMIRROR_THEMES',
+    'openFilePreview', 'closeFilePreview', 'toggleFileEditor', 'saveFileEditor', 'openDiffViewer', 'closeDiffViewer',
     'manualReconnect'
   ];
   var out = {};
@@ -354,7 +356,10 @@ __harness__.exports = (function () {
     'tab-sessions-btn', 'tab-workspace-btn', 'sessions-view', 'workspace-view',
     'workspace-file-list', 'workspace-upload-dropzone', 'workspace-refresh-btn',
     'terminal-drawer', 'toggle-terminal-btn', 'terminal-output', 'terminal-input',
-    'terminal-send-btn', 'terminal-clear-btn', 'terminal-close-btn'
+    'terminal-send-btn', 'terminal-clear-btn', 'terminal-close-btn',
+    'file-preview-modal', 'file-preview-title', 'file-preview-content', 'file-editor-textarea',
+    'file-code-editor', 'file-preview-edit-btn', 'file-preview-save-btn', 'close-file-preview-btn',
+    'diff-viewer-modal', 'diff-viewer-title', 'close-diff-viewer-btn', 'diff-viewer-content', 'diff-code-editor'
   ].forEach((id) => {
     dom[id] = getEl(id);
   });
@@ -5446,6 +5451,292 @@ describe('VAL-UI-XTERM-001: xterm.js WebGL Terminal Drawer Streaming', () => {
     // Test clear output
     clearTerminalOutput();
     assert.equal(writes.length, 0, 'Clear resets xterm buffer');
+  });
+});
+
+describe('VAL-UI-EDITOR-001: CodeMirror 6 Workspace Editor & Visual Diff Viewer', () => {
+  test('ui/vendor/codemirror.min.js and codemirror.css exist and export required classes', async () => {
+    const cmJsPath = new URL('../../ui/vendor/codemirror.min.js', import.meta.url);
+    const cmCssPath = new URL('../../ui/vendor/codemirror.css', import.meta.url);
+    assert.ok(fs.existsSync(cmJsPath), 'ui/vendor/codemirror.min.js must exist');
+    assert.ok(fs.existsSync(cmCssPath), 'ui/vendor/codemirror.css must exist');
+
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const cmBundle = req(cmJsPath.pathname);
+
+    assert.equal(typeof cmBundle.EditorView, 'function', 'exports EditorView class');
+    assert.equal(typeof cmBundle.EditorState, 'function', 'exports EditorState class');
+    assert.equal(typeof cmBundle.MergeView, 'function', 'exports MergeView class');
+    assert.equal(typeof cmBundle.detectLanguage, 'function', 'exports detectLanguage function');
+    assert.equal(typeof cmBundle.computeDiffChunks, 'function', 'exports computeDiffChunks function');
+
+    // Language detection check
+    assert.equal(cmBundle.detectLanguage('app.ts'), 'ts');
+    assert.equal(cmBundle.detectLanguage('main.rs'), 'rs');
+    assert.equal(cmBundle.detectLanguage('script.py'), 'py');
+    assert.equal(cmBundle.detectLanguage('config.json'), 'json');
+  });
+
+  test('ui/components/aqvn-code-editor.js encapsulates CodeMirror 6 Custom Element', () => {
+    const editorPath = new URL('../../ui/components/aqvn-code-editor.js', import.meta.url);
+    assert.ok(fs.existsSync(editorPath), 'ui/components/aqvn-code-editor.js must exist');
+    const editorCode = fs.readFileSync(editorPath, 'utf8');
+    assert.match(editorCode, /customElements\.define\('aqvn-code-editor'/, 'registers <aqvn-code-editor>');
+    assert.match(editorCode, /setValue|setDiff|revertChunk/, 'provides editor and diff controls');
+  });
+
+  test('ui/components/index.js exports AqvnCodeEditor and ui/index.html integrates CodeMirror assets', () => {
+    const indexPath = new URL('../../ui/components/index.js', import.meta.url);
+    const indexCode = fs.readFileSync(indexPath, 'utf8');
+    assert.match(indexCode, /aqvn-code-editor\.js/, 'imports aqvn-code-editor.js');
+    assert.match(indexCode, /AqvnCodeEditor/, 'exports AqvnCodeEditor in registry');
+
+    const html = readIndexHtml();
+    assert.match(html, /vendor\/codemirror\.css/, 'index.html links vendor/codemirror.css');
+    assert.match(html, /vendor\/codemirror\.min\.js/, 'index.html loads vendor/codemirror.min.js');
+    assert.match(html, /<aqvn-code-editor\s+id="file-code-editor"/, 'index.html declares #file-code-editor');
+    assert.match(html, /<aqvn-code-editor\s+id="diff-code-editor"/, 'index.html declares #diff-code-editor');
+  });
+
+  test('Opening file in Workspace drawer loads content directly into CodeMirror 6 editor with syntax highlighting', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, initCodeMirrorEditor, openFilePreview } = harness.exports;
+
+    const cmJsPath = new URL('../../ui/vendor/codemirror.min.js', import.meta.url);
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const cmBundle = req(cmJsPath.pathname);
+
+    harness.context.CodeMirror = cmBundle;
+
+    const rustSource = 'fn main() {\n    let msg = "Hello from AQVN Workspace";\n    println!("{}", msg);\n}';
+    const editor = initCodeMirrorEditor(rustSource, 'src/main.rs', { readOnly: true });
+
+    assert.ok(editor, 'CodeMirror EditorView initialized');
+    assert.equal(editor.state.doc.toString(), rustSource, 'Editor loaded with file content');
+    assert.equal(editor.language, 'rs', 'Syntax language mapped to Rust (rs)');
+    assert.equal(editor.state.doc.lineCount, 4, 'Correct line count calculated');
+    assert.equal(state.codeEditor, editor, 'Stored active editor in state.codeEditor');
+    assert.equal(state.editorDirty, false, 'Editor starts non-dirty on file open');
+  });
+
+  test('Theme switching updates CodeMirror themes across OKLCH palettes', () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { state, getCodeMirrorTheme, applyTheme, CODEMIRROR_THEMES } = harness.exports;
+
+    assert.ok(CODEMIRROR_THEMES, 'CODEMIRROR_THEMES dictionary defined');
+    assert.ok(CODEMIRROR_THEMES['aqvn-dark'], 'aqvn-dark theme palette defined');
+    assert.ok(CODEMIRROR_THEMES['oled-black'], 'oled-black theme palette defined');
+    assert.ok(CODEMIRROR_THEMES['cyberpunk-terminal'], 'cyberpunk-terminal theme palette defined');
+    assert.ok(CODEMIRROR_THEMES['clean-studio-light'], 'clean-studio-light theme palette defined');
+
+    assert.equal(getCodeMirrorTheme('cyberpunk-terminal').foreground, '#00ff9f', 'Cyberpunk theme has neon green foreground');
+    assert.equal(getCodeMirrorTheme('oled-black').background, '#000000', 'OLED theme has pitch black background');
+
+    applyTheme('cyberpunk-terminal');
+    assert.equal(state.theme, 'cyberpunk-terminal', 'Theme set to cyberpunk-terminal');
+  });
+
+  test('Side-by-side Visual Diff Viewer displays two-column comparison and chunk revert', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, initCodeMirrorDiffViewer, openDiffViewer, closeDiffViewer } = harness.exports;
+
+    const cmJsPath = new URL('../../ui/vendor/codemirror.min.js', import.meta.url);
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const cmBundle = req(cmJsPath.pathname);
+
+    harness.context.CodeMirror = cmBundle;
+    if (harness.context.window) harness.context.window.CodeMirror = cmBundle;
+
+    const origCode = 'line 1\nold line\nline 3';
+    const modCode = 'line 1\nnew line\nline 3';
+
+    const diffViewer = initCodeMirrorDiffViewer('Visual Patch', undefined, origCode, modCode);
+    assert.ok(diffViewer, 'MergeView initialized');
+    assert.ok(diffViewer.a, 'Original column editor exists');
+    assert.ok(diffViewer.b, 'Modified column editor exists');
+    assert.equal(diffViewer.a.state.doc.toString(), origCode, 'Original doc matches');
+    assert.equal(diffViewer.b.state.doc.toString(), modCode, 'Modified doc matches');
+    assert.equal(diffViewer.chunks.length, 1, 'Detected 1 diff chunk');
+    assert.equal(diffViewer.chunks[0].type, 'modify', 'Chunk type is modify');
+
+    // Test revert chunk
+    const reverted = diffViewer.revertChunk(0);
+    assert.equal(reverted, true, 'revertChunk succeeded');
+    assert.equal(diffViewer.b.state.doc.toString(), origCode, 'Modified doc restored to original code');
+
+    // Test openDiffViewer and closeDiffViewer
+    openDiffViewer('Visual Diff Review', '--- a\n+++ b\n-hello\n+world');
+    assert.equal(dom.diffViewerModal.hidden, false, 'diffViewerModal is open');
+    closeDiffViewer();
+    assert.equal(dom.diffViewerModal.hidden, true, 'diffViewerModal is closed');
+    assert.equal(state.codeDiffViewer, null, 'codeDiffViewer cleared on close');
+  });
+
+  test('Saving file editor safely writes new content to Workspace and clears dirty state', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, initCodeMirrorEditor, saveFileEditor, toggleFileEditor, closeFilePreview } = harness.exports;
+
+    const cmJsPath = new URL('../../ui/vendor/codemirror.min.js', import.meta.url);
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const cmBundle = req(cmJsPath.pathname);
+
+    harness.context.CodeMirror = cmBundle;
+    if (harness.context.window) harness.context.window.CodeMirror = cmBundle;
+
+    state.previewingFile = { path: 'src/config.json', name: 'config.json', content: '{"port": 55080}' };
+    const editor = initCodeMirrorEditor(state.previewingFile.content, state.previewingFile.path);
+
+    // Simulate user editing the code in CodeMirror
+    const updatedContent = '{"port": 55080, "host": "127.0.0.1"}';
+    editor.dispatch({ changes: updatedContent });
+    assert.equal(state.editorDirty, true, 'state.editorDirty flagged on document change');
+
+    let writtenPayload = null;
+    harness.context.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ ok: true, token: 'fake-csrf' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_write')) {
+        writtenPayload = JSON.parse(opts.body);
+        return new Response(JSON.stringify({ ok: true, success: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_read')) {
+        return new Response(JSON.stringify({ ok: true, content: updatedContent }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_list') || u.includes('/api/workspace_files')) {
+        return new Response(JSON.stringify({ ok: true, entries: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    // Save
+    await saveFileEditor();
+    assert.ok(writtenPayload, 'apiCall files_write triggered');
+    assert.equal(writtenPayload.path, 'src/config.json', 'Writes to correct path');
+    assert.equal(writtenPayload.content, updatedContent, 'Writes updated CodeMirror text');
+    assert.equal(state.editorDirty, false, 'Dirty state cleared after save');
+    assert.equal(state.previewingFile.content, updatedContent, 'Previewing file cache updated');
+
+    // Close preview resets editor state
+    const closed = closeFilePreview();
+    assert.equal(closed, true, 'File preview closed cleanly');
+    assert.equal(state.codeEditor, null, 'codeEditor instance destroyed on close');
+  });
+
+  test('openFilePreview loads text file directly into CodeMirror 6 and handles toggleFileEditor edit mode', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, openFilePreview, toggleFileEditor, closeFilePreview } = harness.exports;
+
+    const cmJsPath = new URL('../../ui/vendor/codemirror.min.js', import.meta.url);
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const cmBundle = req(cmJsPath.pathname);
+
+    harness.context.CodeMirror = cmBundle;
+    if (harness.context.window) harness.context.window.CodeMirror = cmBundle;
+
+    const pythonCode = 'def calculate_metrics():\n    return {"fcp": 32.5, "unit": "ms"}\n';
+    harness.context.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ ok: true, token: 'fake-csrf' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (u.includes('/api/files_read')) {
+        return new Response(JSON.stringify({ ok: true, content: pythonCode }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    await openFilePreview({ name: 'metrics.py', size: 120 });
+    assert.equal(dom.filePreviewModal.hidden, false, 'Modal opened');
+    assert.ok(state.codeEditor, 'CodeMirror editor instance created');
+    assert.equal(state.codeEditor.state.doc.toString(), pythonCode, 'Content loaded into CodeMirror');
+    assert.equal(state.codeEditor.language, 'py', 'Language detected as Python');
+    assert.equal(state.codeEditor.state.readOnly, true, 'Starts in read-only preview mode');
+    assert.equal(dom.fileCodeEditor.hidden, false, 'file-code-editor is visible');
+    assert.equal(dom.filePreviewContent.hidden, true, 'pre-formatted fallback is hidden when CodeMirror active');
+
+    // Toggle into Edit mode
+    toggleFileEditor();
+    assert.equal(state.codeEditor.state.readOnly, false, 'Switched to editable state');
+    assert.equal(dom.filePreviewEditBtn.textContent, 'Cancel', 'Edit button shows Cancel');
+    assert.equal(dom.filePreviewSaveBtn.hidden, false, 'Save button is displayed');
+
+    // Toggle back (Cancel)
+    toggleFileEditor();
+    assert.equal(state.codeEditor.state.readOnly, true, 'Reverted to read-only state');
+    assert.equal(dom.filePreviewEditBtn.textContent, 'Edit', 'Edit button shows Edit');
+    assert.equal(dom.filePreviewSaveBtn.hidden, true, 'Save button is hidden');
+
+    closeFilePreview();
+  });
+
+  test('Unsaved changes dirty state guard warns before discarding modifications', async () => {
+    const harness = createHarness();
+    harness.exports.init();
+    const { dom, state, initCodeMirrorEditor, closeFilePreview } = harness.exports;
+
+    const cmJsPath = new URL('../../ui/vendor/codemirror.min.js', import.meta.url);
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const cmBundle = req(cmJsPath.pathname);
+
+    harness.context.CodeMirror = cmBundle;
+    if (harness.context.window) harness.context.window.CodeMirror = cmBundle;
+
+    state.previewingFile = { path: 'test.js', name: 'test.js', content: 'console.log(1);' };
+    const editor = initCodeMirrorEditor(state.previewingFile.content, state.previewingFile.path);
+
+    // Make change
+    editor.dispatch({ changes: 'console.log(2);' });
+    assert.equal(state.editorDirty, true, 'Dirty state active');
+
+    // User cancels confirmation
+    harness.context.confirm = () => false;
+    let closed = closeFilePreview();
+    assert.equal(closed, false, 'Closing aborted when user rejects confirm');
+    assert.ok(state.codeEditor, 'Editor remains open');
+
+    // User accepts confirmation
+    harness.context.confirm = () => true;
+    closed = closeFilePreview();
+    assert.equal(closed, true, 'Closing succeeds when user confirms discard');
+    assert.equal(state.codeEditor, null, 'Editor cleared');
+    assert.equal(state.editorDirty, false, 'Dirty state cleared');
   });
 });
 

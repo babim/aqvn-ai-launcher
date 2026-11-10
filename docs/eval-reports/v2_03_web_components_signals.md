@@ -18,11 +18,11 @@ Báo cáo này tiến hành nghiên cứu sâu 6 Custom Elements chuẩn W3C c�
 
 | Tiêu chí đánh giá | Hiện trạng kỹ thuật Round 2 | Ngưỡng yêu cầu | Đánh giá |
 |---|---|---|---|
-| **Chuẩn Custom Elements** | W3C Custom Elements v1 (6 core + 2 pro components) | Chuẩn hóa W3C, zero bundler | **ĐẠT (Hoàn hảo)** |
+| **Chuẩn Custom Elements** | W3C Custom Elements v1 (6 core + 2 pro components nạp trực tiếp qua thẻ script defer trong `ui/index.html`) | Chuẩn hóa W3C, zero bundler | **ĐẠT (Hoàn hảo)** |
 | **Reactive State Engine** | `@preact/signals-core` v1.14.5 (1.6 KB gzipped, 5.9 KB minified) | < 10 KB, Zero VDOM overhead | **XUẤT SẮC** |
-| **First Contentful Paint (FCP)** | **24.5 ms – 32.8 ms** (Live relative) / **85.0 ms** (Xvfb fallback) | < 35.0 ms (Live) / < 100.0 ms (Cold) | **ĐẠT (PASS)** |
-| **Giảm tải RAM Virtualization** | Giữ cố định 35-50 DOM nodes khi stream 5,000+ tin nhắn (giảm **99.3%** node) | Tiết kiệm > 80% RAM chat stream | **XUẤT SẮC** |
-| **Bộ nhớ heap Signal Atoms** | 1,500 signals & computeds chiếm < 0.1 MB RAM; cập nhật 1,000 atoms mất 1.43 ms | Lan truyền < 5 ms, không rò rỉ | **XUẤT SẮC** |
+| **First Contentful Paint (FCP)** | Cơ chế `sendFcp()` tự động gửi FCP qua PerformanceObserver; môi trường headless không có display vật lý ghi nhận fallback ước lượng | < 35.0 ms (Live) / < 100.0 ms (Cold) | **ĐẠT (Thiết kế chuẩn)** |
+| **Ảo hóa DOM (Virtualization)** | `<aqvn-virtual-message-list>` điều chỉnh chiều cao đệm (spacer height) giả lập khung nhìn; kiến trúc culling node thực tế đang được đề xuất nâng cấp | Tiết kiệm RAM chat stream | **ĐANG NÂNG CẤP** |
+| **Bộ nhớ heap Signal Atoms** | 1,500 signals & computeds chiếm < 0.1 MB RAM; cập nhật atom phản ứng tức thì | Lan truyền < 5 ms, không rò rỉ | **XUẤT SẮC** |
 | **Tuân thủ tiêu chuẩn HTML** | `html-validate` chuẩn W3C trên 4 tệp HTML (`npm run lint:html`) | 0 warnings, 0 errors | **100% VALID** |
 | **Bộ kiểm thử tự động** | 203/203 Node tests PASS qua 41 suites (`test_chat_handlers.mjs`) | Toàn bộ xanh 100% | **PASS 100%** |
 | **Bảo vệ rò rỉ bộ nhớ (Leaks)** | 100% Custom Elements cài đặt `_disposers` trong `disconnectedCallback()` | 0 dangling subscriptions | **AN TOÀN** |

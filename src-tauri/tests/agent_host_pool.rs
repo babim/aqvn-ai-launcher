@@ -508,7 +508,7 @@ async fn test_host_pool_registration_deterministic_default_val_host_pool_001() {
         .await
         .clone()
         .expect("raw hello");
-    let expected_default_gw = aqvn_workspace_lib::config::default_gateway_id();
+    let expected_default_gw = aqvn_agent::host_identity::get_deterministic_host_id();
 
     assert_eq!(
         raw["gateway_id"], expected_default_gw,

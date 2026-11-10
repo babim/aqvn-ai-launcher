@@ -147,6 +147,39 @@ function createElementMock(id) {
       delete attributes[name];
     },
     hasAttribute: (name) => name in attributes,
+    querySelectorAll: (sel) => {
+      const results = [];
+      function traverse(node) {
+        if (!node || !node.children) return;
+        for (const child of node.children) {
+          if (sel === 'article' || sel === 'article.msg') {
+            if (child.tagName === 'ARTICLE' || (child.className && child.className.includes('msg'))) {
+              results.push(child);
+            }
+          } else if (sel.startsWith('.')) {
+            const cls = sel.slice(1);
+            if ((child.className && child.className.includes(cls)) || (child.classList && child.classList.contains(cls))) {
+              results.push(child);
+            }
+          } else if (sel.startsWith('#')) {
+            const elId = sel.slice(1);
+            if (child.id === elId) results.push(child);
+          } else if (child.tagName && child.tagName.toLowerCase() === sel.toLowerCase()) {
+            results.push(child);
+          }
+          traverse(child);
+        }
+      }
+      traverse(element);
+      return results;
+    },
+    querySelector: (sel) => {
+      const list = element.querySelectorAll ? element.querySelectorAll(sel) : [];
+      return list[0] || null;
+    },
+    getElementsByTagName: (tag) => {
+      return element.querySelectorAll ? element.querySelectorAll(tag) : [];
+    },
     listeners
   };
   // Real DOM: assigning innerHTML replaces the subtree. Mirror that so
@@ -5979,6 +6012,198 @@ describe('VAL-OUTBOX-PERSIST-002: Durable Offline Outbox Persistence', () => {
     assert.equal(harness.store['aqvn_outbox'], undefined, 'Storage key must be cleared');
   });
 });
+
+describe('VAL-PROD-CULL-001: True Viewport DOM Line Culling', () => {
+  test('aqvn-virtual-message-list unmounts/detaches message nodes outside viewport keeping DOM < 60', async () => {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const virtualListMod = req('../../ui/components/aqvn-virtual-message-list.js');
+    const AqvnVirtualMessageList = virtualListMod.AqvnVirtualMessageList || virtualListMod.default?.AqvnVirtualMessageList;
+    assert.equal(typeof AqvnVirtualMessageList, 'function', 'AqvnVirtualMessageList must be exported');
+
+    const vList = new AqvnVirtualMessageList();
+    const container = createElementMock('messages');
+    container.clientHeight = 600;
+    container.scrollTop = 0;
+    vList._container = container;
+    vList._setupVirtualViewport();
+
+    // Create 200 message article nodes
+    const articles = [];
+    for (let i = 0; i < 200; i++) {
+      const art = createElementMock(`msg-${i}`);
+      art.tagName = 'ARTICLE';
+      art.className = 'msg msg-user';
+      art.dataset = { id: `log-${i}` };
+      art.setAttribute('data-id', `log-${i}`);
+      container.appendChild(art);
+      articles.push(art);
+    }
+
+    assert.equal(container.children.filter(c => c.tagName === 'ARTICLE').length, 200, 'All 200 articles initially in container');
+
+    // Trigger viewport culling pass
+    const mountedCount = vList.cullViewport();
+
+    // Verification 1: mounted DOM nodes strictly < 60
+    assert.ok(mountedCount < 60, `Mounted DOM count (${mountedCount}) must be strictly < 60`);
+    assert.ok(mountedCount >= 10, `Mounted DOM count (${mountedCount}) must have overscan visible window`);
+
+    const mountedInDom = container.children.filter(c => c.tagName === 'ARTICLE');
+    assert.equal(mountedInDom.length, mountedCount, 'Mounted articles in container matches getMountedNodeCount');
+    assert.ok(mountedInDom.length < 60, 'Actual article elements in container must be < 60');
+
+    // Verification 2: Nodes outside viewport are detached (parentNode === null)
+    const detachedArticles = articles.filter(a => a.parentNode === null);
+    assert.equal(detachedArticles.length, 200 - mountedCount, 'Out-of-viewport nodes must be unmounted/detached from container');
+    assert.ok(detachedArticles.length > 140, 'Majority of 200 nodes must be detached from DOM');
+
+    // Verification 3: Spacers exist and have appropriate vertical offsets
+    assert.ok(vList._spacerTop, 'Top spacer must exist');
+    assert.ok(vList._spacerBottom, 'Bottom spacer must exist');
+    assert.equal(vList._spacerTop.style.height, '0px', 'Top spacer height is 0 at top');
+    assert.ok(parseInt(vList._spacerBottom.style.height, 10) > 0, 'Bottom spacer height compensates unmounted items');
+  });
+
+  test('aqvn-virtual-message-list re-mounts nodes and unmounts previous when scrolled', async () => {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const virtualListMod = req('../../ui/components/aqvn-virtual-message-list.js');
+    const AqvnVirtualMessageList = virtualListMod.AqvnVirtualMessageList;
+
+    const vList = new AqvnVirtualMessageList();
+    const container = createElementMock('messages');
+    container.clientHeight = 600;
+    container.scrollTop = 0;
+    vList._container = container;
+    vList._setupVirtualViewport();
+
+    for (let i = 0; i < 200; i++) {
+      const art = createElementMock(`msg-${i}`);
+      art.tagName = 'ARTICLE';
+      art.className = 'msg';
+      art.dataset = { id: `log-${i}` };
+      art.setAttribute('data-id', `log-${i}`);
+      container.appendChild(art);
+    }
+
+    // Initial culling at scrollTop = 0
+    vList.cullViewport();
+    const firstArticle = vList._allNodes[0];
+    assert.equal(firstArticle.parentNode, container, 'First article initially mounted at scrollTop = 0');
+
+    // Scroll down to 5000px
+    vList.setScrollTop(5000);
+    const mountedCountAfterScroll = vList.getMountedNodeCount();
+    assert.ok(mountedCountAfterScroll < 60, `Mounted count after scroll (${mountedCountAfterScroll}) must remain < 60`);
+
+    // First article is now out of viewport and must be detached
+    assert.equal(firstArticle.parentNode, null, 'First article must be detached when scrolled far down');
+
+    // Middle article should now be mounted
+    const middleIndex = Math.floor(5000 / 72);
+    const middleArticle = vList._allNodes[middleIndex];
+    assert.ok(middleArticle, 'Middle article exists in tracked list');
+    assert.equal(middleArticle.parentNode, container, 'Middle article must be mounted in container');
+    assert.ok(parseInt(vList._spacerTop.style.height, 10) > 0, 'Top spacer height must be non-zero after scroll');
+  });
+});
+
+describe('VAL-PROD-WORKER-002: Off-Main-Thread Web Worker Syntax Highlighting', () => {
+  test('ui/workers/syntax-worker.js exists and exports tokenizer engine', async () => {
+    const workerPath = new URL('../../ui/workers/syntax-worker.js', import.meta.url);
+    assert.ok(fs.existsSync(workerPath), 'ui/workers/syntax-worker.js must exist on disk');
+
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const workerModule = req(workerPath.pathname);
+
+    assert.equal(typeof workerModule.handleWorkerMessage, 'function', 'syntax-worker must export handleWorkerMessage');
+    assert.equal(typeof workerModule.tokenizeLine, 'function', 'syntax-worker must export tokenizeLine');
+    assert.equal(typeof workerModule.highlightLine, 'function', 'syntax-worker must export highlightLine');
+    assert.equal(typeof workerModule.highlightBatch, 'function', 'syntax-worker must export highlightBatch');
+    assert.equal(typeof workerModule.detectLanguage, 'function', 'syntax-worker must export detectLanguage');
+    assert.ok(workerModule.KEYWORDS, 'syntax-worker must export KEYWORDS dictionary');
+  });
+
+  test('syntax-worker handles message payload and tokenizes multiple programming languages', async () => {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const worker = req('../../ui/workers/syntax-worker.js');
+
+    // JavaScript
+    const jsRes = worker.handleWorkerMessage({
+      id: 'msg-1',
+      text: 'const answer = 42;\nfunction calculate() {\n  return answer * 2;\n}',
+      language: 'js'
+    });
+    assert.equal(jsRes.id, 'msg-1');
+    assert.equal(jsRes.success, true);
+    assert.equal(jsRes.lineCount, 4);
+    assert.match(jsRes.lines[0], /tok-keyword.*const.*tok-variable.*answer.*tok-number.*42/, 'JS tokenizes keyword, variable, number');
+    assert.match(jsRes.lines[1], /tok-function.*calculate/, 'JS tokenizes function');
+
+    // Rust
+    const rsRes = worker.handleWorkerMessage({
+      id: 'msg-2',
+      text: 'pub fn handle_request(count: u64) -> bool {\n  let mut valid = true;\n  valid\n}',
+      language: 'rs'
+    });
+    assert.equal(rsRes.id, 'msg-2');
+    assert.equal(rsRes.success, true);
+    assert.match(rsRes.lines[0], /tok-keyword.*pub.*tok-keyword.*fn.*tok-function.*handle_request/, 'Rust tokenizes keywords and function');
+    assert.match(rsRes.lines[1], /tok-keyword.*let.*tok-keyword.*mut.*tok-keyword.*true/, 'Rust tokenizes let mut true');
+
+    // Python
+    const pyRes = worker.handleWorkerMessage({
+      id: 'msg-3',
+      text: '# Python worker test\ndef compute():\n  return True',
+      language: 'py'
+    });
+    assert.equal(pyRes.id, 'msg-3');
+    assert.match(pyRes.lines[0], /tok-comment.*# Python worker test/, 'Python tokenizes comment');
+    assert.match(pyRes.lines[1], /tok-keyword.*def.*tok-function.*compute/, 'Python tokenizes def and function');
+  });
+
+  test('syntax-worker processes large 5,000-line synthetic source without main thread blocking', async () => {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const worker = req('../../ui/workers/syntax-worker.js');
+
+    // Generate 5,000 lines of source code
+    const lines = [];
+    for (let i = 0; i < 5000; i++) {
+      lines.push(`const var_${i} = ${i}; // Line ${i} definition`);
+    }
+
+    const t0 = performance.now();
+    const result = worker.handleWorkerMessage({
+      id: 'bench-5000',
+      lines,
+      language: 'js'
+    });
+    const duration = performance.now() - t0;
+
+    assert.equal(result.id, 'bench-5000');
+    assert.equal(result.success, true);
+    assert.equal(result.lines.length, 5000, 'Must highlight all 5,000 lines');
+    assert.ok(duration < 500, `Highlighting 5,000 lines took ${duration.toFixed(2)}ms (expected < 500ms)`);
+  });
+
+  test('CodeMirror 6 integrates createSyntaxWorker and AqvnCodeEditor exposes syntaxWorker', async () => {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const CodeMirror = req('../../ui/vendor/codemirror.min.js');
+    const { AqvnCodeEditor } = req('../../ui/components/aqvn-code-editor.js');
+
+    assert.equal(typeof CodeMirror.createSyntaxWorker, 'function', 'CodeMirror exports createSyntaxWorker helper');
+    assert.equal(typeof CodeMirror.EditorView.prototype.applyHighlightedLines, 'function', 'EditorView supports applyHighlightedLines');
+
+    const editor = new AqvnCodeEditor();
+    assert.ok(editor.syntaxWorker !== undefined, 'AqvnCodeEditor exposes syntaxWorker property');
+  });
+});
+
 
 
 

@@ -7,7 +7,25 @@
 (function () {
   'use strict';
 
-  class AqvnCodeEditor extends HTMLElement {
+  var BaseElement = (typeof HTMLElement !== 'undefined') ? HTMLElement : class {
+    constructor() {
+      this.classList = {
+        add: function () {},
+        remove: function () {},
+        contains: function () { return false; }
+      };
+      this._attrs = {};
+    }
+    setAttribute(k, v) { this._attrs[k] = String(v); }
+    getAttribute(k) { return this._attrs[k] !== undefined ? this._attrs[k] : null; }
+    hasAttribute(k) { return this._attrs[k] !== undefined; }
+    removeAttribute(k) { delete this._attrs[k]; }
+    querySelector() { return null; }
+    querySelectorAll() { return []; }
+    dispatchEvent() { return true; }
+  };
+
+  class AqvnCodeEditor extends BaseElement {
     static get observedAttributes() {
       return ['mode', 'filename', 'language', 'readonly', 'theme', 'dirty'];
     }
@@ -20,6 +38,26 @@
       this._isDirty = false;
       this._filename = '';
       this._language = 'js';
+      this._syntaxWorker = null;
+    }
+
+    _initSyntaxWorker() {
+      if (this._syntaxWorker) return this._syntaxWorker;
+      var CodeMirror = (typeof window !== 'undefined' && window.CodeMirror) || (typeof globalThis !== 'undefined' && globalThis.CodeMirror);
+      if (CodeMirror && typeof CodeMirror.createSyntaxWorker === 'function') {
+        this._syntaxWorker = CodeMirror.createSyntaxWorker('workers/syntax-worker.js');
+      } else if (typeof Worker !== 'undefined') {
+        try {
+          this._syntaxWorker = new Worker('workers/syntax-worker.js');
+        } catch (e) {
+          this._syntaxWorker = null;
+        }
+      }
+      return this._syntaxWorker;
+    }
+
+    get syntaxWorker() {
+      return this._syntaxWorker || this._initSyntaxWorker();
     }
 
     connectedCallback() {
@@ -150,7 +188,8 @@
           ]
         }),
         parent: this,
-        language: this._language
+        language: this._language,
+        worker: this._initSyntaxWorker()
       });
     }
 
@@ -214,6 +253,10 @@
     }
 
     destroy() {
+      if (this._syntaxWorker) {
+        try { if (typeof this._syntaxWorker.terminate === 'function') this._syntaxWorker.terminate(); } catch (e) {}
+        this._syntaxWorker = null;
+      }
       if (this._view) {
         try { this._view.destroy(); } catch (e) {}
         this._view = null;

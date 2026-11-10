@@ -406,6 +406,23 @@ A comprehensive architectural audit, deep UI/UX capability research, and multi-p
 - `openspec_drafts_core_security.md` — Actionable OpenSpec change proposals (Core Workspace, Anti-Replay, AST Guard, Multi-Host Pool).
 - `openspec_drafts_ui_telemetry.md` — Actionable OpenSpec change proposals (Component Shell, xterm.js, CodeMirror 6, Telemetry Radar).
 
+### 3. Cargo Workspace & Modernized Subsystems Implemented
+- **Cargo Multi-Crate Workspace**:
+  - `crates/aqvn-core`: Common protocol schemas, IPC models, configuration types, and telemetry primitives.
+  - `crates/aqvn-rfc`: RFC host bridge HTTP server with HMAC-SHA256 constant-time verification and 300s sliding-window anti-replay cache.
+  - `crates/aqvn-ssh`: Dedicated SSH listener (`russh`), RSA-OAEP authentication, and AST Shell Command Guard.
+  - `crates/aqvn-proxy`: Axum loopback bridge proxy, cookie jar, CSRF engine, and WebSocket tunnels.
+  - `crates/aqvn-connector`: Outbound gateway client, Multi-Host Pool coordinator, and remote ops handlers.
+  - `crates/aqvn-agent`: Standalone headless Linux daemon (2.33 MB, zero GUI dependencies) with deterministic machine ID and systemd watchdog integration.
+  - `src-tauri/`: Thin desktop GUI wrapper handling window lifecycle, system tray, accelerators, and native webview.
+- **Modernized UI Shell**:
+  - W3C Custom Elements: `<aqvn-shell>`, `<aqvn-topbar>`, `<aqvn-sidebar>`, `<aqvn-chat-pane>`, `<aqvn-canvas-pane>`, and `<aqvn-terminal-drawer>`.
+  - Centralized Reactive Signals Store (`@preact/signals-core`, 1.6 KB) replacing monolithic state objects.
+  - Virtualized Message List (`<aqvn-virtual-message-list>`) with windowed viewport DOM rendering.
+  - `xterm.js` WebGL Terminal Drawer with FitAddon auto-resize and 60fps ANSI streaming.
+  - CodeMirror 6 Workspace in-app code editor with syntax highlighting and side-by-side visual diffing.
+  - Adaptive Telemetry Radar sparklines and resilient atomic IndexedDB offline outbox queueing.
+
 ---
 
 ## License & Whitelabel Notice

@@ -1,0 +1,41 @@
+services:
+  # Standalone headless agent daemon
+  aqvn-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    image: net.aqvn.workspace/agent:latest
+    container_name: aqvn-agent-node
+    restart: unless-stopped
+    environment:
+      - AQVN_SERVER=https://a0.matmagoc.com
+      - AQVN_TOKEN=
+      - AQVN_LABEL=docker-node-01
+      - AQVN_SCOPES=files,code_execution
+      - AQVN_WORKSPACE=/home/aqvn/Workspace
+    volumes:
+      - agent-workspace:/home/aqvn/Workspace
+      - agent-config:/home/aqvn/.config/net.aqvn.workspace
+    networks:
+      - aqvn-net
+
+  # Static Web Components UI server
+  aqvn-ui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ui
+    image: net.aqvn.workspace/ui:latest
+    container_name: aqvn-workspace-ui
+    restart: unless-stopped
+    ports:
+      - "3105:80"
+    networks:
+      - aqvn-net
+
+volumes:
+  agent-workspace:
+  agent-config:
+
+networks:
+  aqvn-net:
+    driver: bridge

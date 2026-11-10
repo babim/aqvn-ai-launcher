@@ -64,3 +64,28 @@ tasks:
     desc: Run benchmark suite (release binary size, RSS, FCP, cold start)
     cmds:
       - bash tools/benchmark.sh
+
+  docker:build:agent:
+    desc: Build Docker image for headless agent daemon
+    cmds:
+      - docker build -t net.aqvn.workspace/agent:latest -f docker/Dockerfile.agent .
+
+  docker:build:ui:
+    desc: Build Docker image for static Web Components UI
+    cmds:
+      - docker build -t net.aqvn.workspace/ui:latest -f docker/Dockerfile.ui .
+
+  docker:up:
+    desc: Start multi-host agent and UI stack via docker-compose
+    cmds:
+      - docker compose -f docker/docker-compose.yml up -d
+
+  docker:down:
+    desc: Stop docker-compose services
+    cmds:
+      - docker compose -f docker/docker-compose.yml down
+
+  docker:logs:
+    desc: Follow docker-compose logs
+    cmds:
+      - docker compose -f docker/docker-compose.yml logs -f

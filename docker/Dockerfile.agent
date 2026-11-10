@@ -1,0 +1,56 @@
+# Multi-stage Dockerfile for AQVN Standalone Headless Agent (aqvn-agent)
+# Target: Minimal, hardened, zero-GUI production container (~15MB image footprint)
+
+# Stage 1: Build binary using official Rust bookworm-slim
+FROM rust:1.97-slim-bookworm AS builder
+
+WORKDIR /usr/src/ai-launcher
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace manifests
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+COPY src-tauri/Cargo.toml src-tauri/
+
+# Build standalone aqvn-agent in release mode with size optimization
+RUN cargo build --release -p aqvn-agent
+
+# Stage 2: Minimal runtime container
+FROM debian:bookworm-slim AS runtime
+
+LABEL org.opencontainers.image.title="AQVN Headless Agent" \
+      org.opencontainers.image.description="Standalone headless daemon and multi-host pool agent for AQVN Workspace" \
+      org.opencontainers.image.vendor="AQ Viet Nam Information Technology JSC" \
+      org.opencontainers.image.licenses="Proprietary"
+
+# Install essential runtime utilities and SSL certs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    procps \
+    iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root aqvn user and workspace directory
+RUN groupadd -g 1000 aqvn && \
+    useradd -u 1000 -g aqvn -m -s /bin/bash aqvn && \
+    mkdir -p /home/aqvn/Workspace /home/aqvn/.config/net.aqvn.workspace && \
+    chown -R aqvn:aqvn /home/aqvn
+
+# Copy compiled binary from builder
+COPY --from=builder /usr/src/ai-launcher/target/release/aqvn-agent /usr/local/bin/aqvn-agent
+
+USER aqvn
+WORKDIR /home/aqvn
+
+# Healthcheck verifying daemon liveness
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD /usr/local/bin/aqvn-agent --help > /dev/null || exit 1
+
+ENTRYPOINT ["/usr/local/bin/aqvn-agent"]
+CMD ["start"]

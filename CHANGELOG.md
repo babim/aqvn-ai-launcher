@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `crates/aqvn-connector`: Outbound gateway client, Multi-Host Pool coordinator, and remote ops handlers.
   - `crates/aqvn-agent`: Standalone headless Linux daemon (2.33 MB, zero GUI dependencies).
   - `src-tauri/`: Lightweight GUI wrapper managing webview lifecycle, window title sync, system tray, and accelerators.
+- **Post-Modernization Comprehensive Audit & Next-Gen Roadmap (Round 2, `change235-change242`)**:
+  - `change235`: Detailed structural and DAG dependency audit of the 6 member crates (`v2_01_crates_architecture.md`).
+  - `change236`: CBM graph scan across 7,066 nodes / 22,980 edges with complexity hot-spot analysis (`v2_02_cbm_graph_coverage.md`).
+  - `change237`: Custom Elements lifecycle, fine-grained Signals reactivity, and DOM virtualization analysis (`v2_03_web_components_signals.md`).
+  - `change238`: Empirical benchmarks of xterm.js WebGL rendering, FitAddon auto-resize, and CodeMirror 6 diff performance (`v2_04_terminal_editor_ux.md`).
+  - `change239`: In-depth security verification of RFC AntiReplayWindow, Bash AST tokenizer, and HITL fail-closed semantics (`v2_05_security_ast_replay.md`).
+  - `change240`: MultiHostPoolHub empirical dispatch benchmark, uniform jitter entropy, and release size gate verification (`v2_06_pool_telemetry_benchmarks.md`).
+  - `change241`: Master Production Hardening Blueprint covering eBPF kernel confinement, CRDT Loro sync, and WASI plugins (`v2_production_hardening_blueprint.md`).
+  - `change242`: Master Roadmap v2.0 and actionable draft change specifications `change243` through `change248` (`v2_master_roadmap_openspec.md`).
 - **RFC Anti-Replay Sliding Window (`change226`)**: Enhanced `POST /api/rfc` on port 55080 with Timestamp and Nonce validation enforced via an in-memory sliding-window cache (TTL 300s, max 10,000 nonces), rejecting duplicate nonces and drifted timestamps with HTTP 401/403 (`VAL-SEC-REPLAY-001`).
 - **SSH PTY AST Command Guard & Tokenizer (`change227`)**: Replaced crude regex denylist in `crates/aqvn-ssh` with a full Bash AST parser and lexer, 3-tier security classification (Safe, Sensitive, Dangerous), obfuscation de-normalizer, and 30s timeout fail-closed Human-in-the-Loop approval gate (`VAL-SEC-AST-001`).
 - **Deterministic Machine Identity & Systemd Watchdog (`change228`)**: Extended `aqvn-agent` with persistent deterministic identity generation via SHA-256 (`/etc/machine-id` + primary MAC), periodic `sd_notify` watchdog heartbeat support (`WATCHDOG=1`), and automated user/system privilege resolution (`VAL-AGENT-ID-001`).

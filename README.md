@@ -423,6 +423,16 @@ A comprehensive architectural audit, deep UI/UX capability research, and multi-p
   - CodeMirror 6 Workspace in-app code editor with syntax highlighting and side-by-side visual diffing.
   - Adaptive Telemetry Radar sparklines and resilient atomic IndexedDB offline outbox queueing.
 
+### 4. Production Hardening & Next-Gen Master Roadmap (Round 2)
+- `docs/eval-reports/v2_01_crates_architecture.md` — In-depth architectural audit of the 6 member crates and DAG dependency boundaries.
+- `docs/eval-reports/v2_02_cbm_graph_coverage.md` — Codebase Memory (CBM) scan (7,066 nodes, 22,980 edges) and characterization test matrix.
+- `docs/eval-reports/v2_03_web_components_signals.md` — Custom Elements lifecycle, Signals fine-grained reactivity, and DOM virtualization analysis.
+- `docs/eval-reports/v2_04_terminal_editor_ux.md` — Empirical benchmark of xterm.js WebGL rendering, FitAddon, and CodeMirror 6 diff performance.
+- `docs/eval-reports/v2_05_security_ast_replay.md` — Security audit of RFC AntiReplayWindow, Bash AST tokenizer, and HITL fail-closed gate.
+- `docs/eval-reports/v2_06_pool_telemetry_benchmarks.md` — Empirical multi-host pool dispatching, heartbeat jitter entropy, and release size gates.
+- `docs/proposals/v2_production_hardening_blueprint.md` — Blueprint for eBPF sandbox, Distributed CRDT workspace sync, and WASM plugins.
+- `docs/proposals/v2_master_roadmap_openspec.md` — Actionable draft changes `change243` to `change248` for future expansion.
+
 ---
 
 ## License & Whitelabel Notice

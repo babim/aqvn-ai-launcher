@@ -112,6 +112,19 @@ impl Sandbox {
         }
         Err(SandboxError::Denied(requested.to_string()))
     }
+
+    /// Converts the configured sandbox roots into a kernel Landlock/Seccomp confinement profile.
+    pub fn to_confinement(&self) -> crate::confinement::ConfinementProfile {
+        let roots = self
+            .canonical_roots()
+            .unwrap_or_else(|_| self.roots.clone());
+        crate::confinement::ConfinementProfile::from_allowed_paths(&roots)
+    }
+
+    /// Applies Landlock LSM and Seccomp-BPF confinement for this sandbox.
+    pub fn apply_kernel_confinement(&self) -> Result<(), crate::confinement::ConfinementError> {
+        self.to_confinement().apply()
+    }
 }
 
 /// Returns `candidate` when its deepest existing ancestor resolves inside
@@ -316,8 +329,11 @@ mod tests {
         assert_eq!(sandbox.roots(), [home.join("Workspace")]);
     }
 
+    static TEST_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_home_dir_userprofile_fallback() {
+        let _lock = TEST_ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let prev_home = std::env::var_os("HOME");
         let prev_profile = std::env::var_os("USERPROFILE");
 

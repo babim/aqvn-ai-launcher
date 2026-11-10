@@ -159,6 +159,7 @@ struct ChannelState {
 pub struct ClientHandler {
     password: String,
     cwd: PathBuf,
+    allowed_paths: Vec<String>,
     channels: HashMap<ChannelId, ChannelState>,
     pending_geometry: HashMap<ChannelId, (u32, u32)>,
     peer_ip: IpAddr,
@@ -175,9 +176,11 @@ impl ClientHandler {
     }
 
     pub fn with_lockout(config: &AppConfig, peer_ip: IpAddr, lockout: LockoutTracker) -> Self {
+        let allowed_paths = config.unified_allowed_paths();
         Self {
             password: config.ssh_password.clone(),
-            cwd: session_cwd(&config.unified_allowed_paths()),
+            cwd: session_cwd(&allowed_paths),
+            allowed_paths,
             channels: HashMap::new(),
             pending_geometry: HashMap::new(),
             peer_ip,
@@ -197,6 +200,10 @@ impl ClientHandler {
         &self.cwd
     }
 
+    pub fn allowed_paths(&self) -> &[String] {
+        &self.allowed_paths
+    }
+
     fn password_matches(&self, candidate: &str) -> bool {
         if self.password.is_empty() || candidate.is_empty() {
             return false;
@@ -212,7 +219,8 @@ impl ClientHandler {
         rows: u32,
         session: &mut Session,
     ) -> Result<(), russh::Error> {
-        let shell = shell::spawn(&self.cwd, cols, rows).map_err(|_| russh::Error::Inconsistent)?;
+        let shell = shell::spawn_with_confinement(&self.cwd, cols, rows, &self.allowed_paths)
+            .map_err(|_| russh::Error::Inconsistent)?;
         let Some(output) = shell.take_output() else {
             return Err(russh::Error::Inconsistent);
         };

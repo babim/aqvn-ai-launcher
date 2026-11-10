@@ -1,9 +1,14 @@
 //! Embedded SSH bridge for AQVN Workspace.
 
 pub mod guard;
+pub mod landlock;
 pub mod server;
 pub mod shell;
 
+pub use landlock::{
+    get_landlock_abi_version, is_landlock_supported, restrict_current_process, run_in_confinement,
+    session_confinement, test_landlock_confinement, ConfinementError, ConfinementProfile,
+};
 pub use server::{run_supervised, ClientHandler, LockoutTracker, SshServer};
 
 /// Resolves the shell working directory: the first allowed path, `~` expanded.

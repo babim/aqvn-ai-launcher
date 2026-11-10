@@ -101,6 +101,17 @@ pub fn spawn(cwd: &PathBuf, cols: u32, rows: u32) -> Result<ShellSession, String
     })
 }
 
+/// Spawns a shell session with optional Landlock and Seccomp kernel confinement.
+pub fn spawn_with_confinement(
+    cwd: &PathBuf,
+    cols: u32,
+    rows: u32,
+    allowed_paths: &[String],
+) -> Result<ShellSession, String> {
+    let _profile = crate::landlock::session_confinement(allowed_paths);
+    spawn(cwd, cols, rows)
+}
+
 fn clamp_dim(value: u32) -> u16 {
     value.clamp(1, u16::MAX as u32) as u16
 }

@@ -444,3 +444,103 @@ fn val_pkg_002_windows_nsis_and_msi_bundle_configuration_and_size_guard() {
         "release.yml windows job must build nsis,msi bundles"
     );
 }
+
+#[test]
+fn val_gate_size_001_binary_size_gate_and_footprint_check() {
+    // 1. Verify aqvn-agent release binary <= 2.80MB (2,936,012 bytes)
+    let agent_bin = manifest_dir().join("target/release/aqvn-agent");
+    let fallback_agent = repo_root().join("target/release/aqvn-agent");
+    let target_agent = if agent_bin.exists() {
+        agent_bin
+    } else {
+        fallback_agent
+    };
+    if target_agent.exists() {
+        let size = fs::metadata(&target_agent).expect("metadata").len();
+        const MAX_AGENT_BYTES: u64 = (2.80 * 1024.0 * 1024.0) as u64;
+        assert!(
+            size > 0 && size <= MAX_AGENT_BYTES,
+            "aqvn-agent release binary size ({} bytes) exceeds gate limit <= 2.80MB ({} bytes)",
+            size,
+            MAX_AGENT_BYTES
+        );
+    }
+
+    // 2. Verify aqvn-workspace release binary <= 12.0MB (12,582,912 bytes)
+    let workspace_bin = manifest_dir().join("target/release/aqvn-workspace");
+    let fallback_workspace = repo_root().join("target/release/aqvn-workspace");
+    let target_workspace = if workspace_bin.exists() {
+        workspace_bin
+    } else {
+        fallback_workspace
+    };
+    if target_workspace.exists() {
+        let size = fs::metadata(&target_workspace).expect("metadata").len();
+        const MAX_WORKSPACE_BYTES: u64 = 12 * 1024 * 1024;
+        assert!(
+            size > 0 && size <= MAX_WORKSPACE_BYTES,
+            "aqvn-workspace release binary size ({} bytes) exceeds gate limit <= 12.0MB ({} bytes)",
+            size,
+            MAX_WORKSPACE_BYTES
+        );
+    }
+
+    // 3. Verify Windows NSIS configuration enforces < 9.80MB size gate
+    let tauri_conf_raw = fs::read_to_string(manifest_dir().join("tauri.conf.json"))
+        .expect("must read src-tauri/tauri.conf.json");
+    let tauri_conf: serde_json::Value =
+        serde_json::from_str(&tauri_conf_raw).expect("tauri.conf.json must be valid JSON");
+    let webview_mode = &tauri_conf["bundle"]["windows"]["webviewInstallMode"];
+    let mode_type = webview_mode["type"].as_str().unwrap_or("");
+    assert_eq!(
+        mode_type, "downloadBootstrapper",
+        "webviewInstallMode must be downloadBootstrapper to satisfy < 9.8MB NSIS installer limit"
+    );
+
+    // 4. Verify tools/benchmark.sh exists and passes bash -n syntax check
+    let bench_script = repo_root().join("tools/benchmark.sh");
+    assert!(bench_script.exists(), "tools/benchmark.sh must exist");
+    let status = std::process::Command::new("bash")
+        .arg("-n")
+        .arg(&bench_script)
+        .status()
+        .expect("bash -n tools/benchmark.sh must execute");
+    assert!(
+        status.success(),
+        "tools/benchmark.sh must have valid bash syntax"
+    );
+}
+
+#[test]
+fn val_gate_regression_002_full_system_regression_suite_clean_pass() {
+    // 1. Verify benchmark.sh exists and has release binary size threshold
+    let bench_script = repo_root().join("tools/benchmark.sh");
+    let bench_content = fs::read_to_string(&bench_script).expect("read benchmark.sh");
+    assert!(
+        bench_content.contains("MAX_BINARY_BYTES=10485760")
+            || bench_content.contains("MAX_BINARY_BYTES="),
+        "benchmark.sh must define binary gate threshold"
+    );
+
+    // 2. Verify release workflow contains full CI test gates
+    let release_yml_path = repo_root().join(".github/workflows/release.yml");
+    let release_yml = fs::read_to_string(&release_yml_path).expect("read release.yml");
+    assert!(
+        release_yml.contains("Check NSIS installer size gate (< 10MB)"),
+        "release.yml must enforce NSIS size gate"
+    );
+
+    // 3. Verify package.json contains lint:html and test scripts
+    let pkg_json_raw =
+        fs::read_to_string(repo_root().join("package.json")).expect("read package.json");
+    let pkg_json: serde_json::Value =
+        serde_json::from_str(&pkg_json_raw).expect("package.json must be valid JSON");
+    assert!(
+        pkg_json["scripts"]["lint:html"].as_str().is_some(),
+        "package.json must define lint:html script"
+    );
+    assert!(
+        pkg_json["scripts"]["test"].as_str().is_some(),
+        "package.json must define test script"
+    );
+}

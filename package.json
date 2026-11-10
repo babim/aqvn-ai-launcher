@@ -3,7 +3,8 @@
   "private": true,
   "description": "Lint toolchain for the AQVN workspace UI documents",
   "scripts": {
-    "lint:html": "html-validate ui/index.html ui/settings.html ui/help.html ui/about.html"
+    "lint:html": "html-validate ui/index.html ui/settings.html ui/help.html ui/about.html",
+    "test": "node --test tools/tests/test_chat_handlers.mjs"
   },
   "devDependencies": {
     "html-validate": "11.18.0"

@@ -219,6 +219,7 @@ impl PtySession {
             .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_with_options(
         &mut self,
         command: &str,

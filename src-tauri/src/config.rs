@@ -7,7 +7,6 @@
 //!   ssh_port = 55022
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Manager, Runtime};

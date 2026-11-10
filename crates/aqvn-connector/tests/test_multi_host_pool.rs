@@ -8,7 +8,7 @@ use aqvn_connector::pool::{
     POOL_MSG_HEARTBEAT_PING, POOL_MSG_HEARTBEAT_PONG, POOL_MSG_TASK_DISPATCH,
 };
 use std::collections::HashSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 #[tokio::test]
@@ -459,4 +459,105 @@ async fn test_multi_host_pool_stale_node_pruning() {
     assert_eq!(node1.status, NodeStatus::Online);
     assert_eq!(node2.status, NodeStatus::Offline);
     assert_eq!(hub.online_node_count().await, 1);
+}
+
+#[tokio::test]
+async fn test_multi_host_pool_telemetry_benchmarks_val_v2_bench_002() {
+    // 1. Empirical Jitter Distribution Benchmark (1,000 samples)
+    let base_interval_ms = 10_000u64;
+    let jitter_ratio = 0.20f64;
+    let config = HeartbeatJitterConfig::new(base_interval_ms, jitter_ratio);
+
+    assert_eq!(config.min_interval_ms, 8_000);
+    assert_eq!(config.max_interval_ms, 12_000);
+
+    let mut samples: Vec<f64> = Vec::with_capacity(1_000);
+    for _ in 0..1_000 {
+        let ms = config.next_interval().as_millis() as f64;
+        assert!(ms >= 8_000.0 && ms <= 12_000.0);
+        samples.push(ms);
+    }
+
+    let mean: f64 = samples.iter().sum::<f64>() / (samples.len() as f64);
+    let variance: f64 =
+        samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (samples.len() as f64);
+    let std_dev: f64 = variance.sqrt();
+
+    // Verify mean is tightly centered around 10,000ms (+/- 250ms)
+    assert!(
+        (mean - 10_000.0).abs() < 250.0,
+        "Mean jitter interval {mean} must be close to base 10000ms"
+    );
+    // Verify standard deviation indicates uniform non-deterministic dispersion
+    // For uniform distribution on [-2000, 2000], theoretical stddev is 4000 / sqrt(12) ~ 1154.7ms
+    assert!(
+        std_dev > 900.0 && std_dev < 1400.0,
+        "Standard deviation {std_dev}ms confirms healthy anti-storm entropy"
+    );
+
+    // 2. Ping/Pong RTT Tracking & Moving Average Benchmark
+    let hub = MultiHostPoolHub::new("aqvn-bench-hub");
+    let (tx1, mut rx1) = mpsc::channel(1500);
+    let (tx2, mut rx2) = mpsc::channel(1500);
+
+    let reg1 = NodeRegistration::new(
+        "node-alpha",
+        "Alpha Host",
+        vec!["files".into(), "exec".into()],
+    );
+    let reg2 = NodeRegistration::new("node-beta", "Beta Host", vec!["browser".into()]);
+
+    hub.register_node(reg1, tx1).await.unwrap();
+    hub.register_node(reg2, tx2).await.unwrap();
+
+    let simulated_latencies_alpha = [12, 14, 18, 11, 15, 20, 13, 16];
+    for &lat in &simulated_latencies_alpha {
+        hub.record_heartbeat("node-alpha", lat, None).await.unwrap();
+    }
+
+    let node_a = hub.get_node("node-alpha").await.unwrap();
+    assert_eq!(node_a.metrics.heartbeat_count, 8);
+    assert_eq!(node_a.metrics.min_latency_ms, 11);
+    assert_eq!(node_a.metrics.max_latency_ms, 20);
+    let expected_avg_a = (12 + 14 + 18 + 11 + 15 + 20 + 13 + 16) as f64 / 8.0;
+    assert!((node_a.metrics.avg_latency_ms - expected_avg_a).abs() < 0.001);
+
+    // 3. High-Throughput Targeted Task Routing Benchmark (1,000 dispatches)
+    let start_bench = Instant::now();
+    for i in 0..1_000 {
+        let task = TaskPayload::new(
+            format!("bench-task-{i}"),
+            "eval_operation",
+            serde_json::json!({ "iter": i }),
+        );
+        let target = match i % 4 {
+            0 => RouteTarget::Node("node-alpha".to_string()),
+            1 => RouteTarget::Capability("browser".to_string()),
+            2 => RouteTarget::LowestLatency,
+            _ => RouteTarget::RoundRobin,
+        };
+        let res = hub.dispatch_task(target, task).await.unwrap();
+        assert!(!res.target_node_id.is_empty());
+    }
+    let elapsed = start_bench.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "1,000 task dispatches must complete under 2.0s, took {:?}",
+        elapsed
+    );
+
+    // Verify messages delivered into receiver channels
+    let mut received_1 = 0;
+    while rx1.try_recv().is_ok() {
+        received_1 += 1;
+    }
+    let mut received_2 = 0;
+    while rx2.try_recv().is_ok() {
+        received_2 += 1;
+    }
+    assert_eq!(
+        received_1 + received_2,
+        1_000,
+        "All 1,000 dispatched tasks must reach nodes"
+    );
 }

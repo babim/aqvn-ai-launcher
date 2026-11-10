@@ -6204,6 +6204,48 @@ describe('VAL-PROD-WORKER-002: Off-Main-Thread Web Worker Syntax Highlighting', 
   });
 });
 
+describe('VAL-PROD-ALLOC-003: High-Performance Memory Allocator Integration & PGO Pipeline', () => {
+  test('mimalloc is declared in aqvn-agent and aqvn-workspace crate manifests', () => {
+    const agentTomlPath = new URL('../../crates/aqvn-agent/Cargo.toml', import.meta.url);
+    const agentToml = fs.readFileSync(agentTomlPath, 'utf8');
+    assert.match(agentToml, /mimalloc\s*=\s*\{/, 'crates/aqvn-agent/Cargo.toml must declare mimalloc dependency');
+
+    const tauriTomlPath = new URL('../../src-tauri/Cargo.toml', import.meta.url);
+    const tauriToml = fs.readFileSync(tauriTomlPath, 'utf8');
+    assert.match(tauriToml, /mimalloc\s*=\s*\{/, 'src-tauri/Cargo.toml must declare mimalloc dependency');
+  });
+
+  test('mimalloc is configured as global allocator in binary entry points', () => {
+    const agentMainPath = new URL('../../crates/aqvn-agent/src/main.rs', import.meta.url);
+    const agentMain = fs.readFileSync(agentMainPath, 'utf8');
+    assert.match(agentMain, /#\[global_allocator\]/, 'crates/aqvn-agent/src/main.rs must have #[global_allocator]');
+    assert.match(agentMain, /mimalloc::MiMalloc/, 'crates/aqvn-agent/src/main.rs must use mimalloc::MiMalloc');
+
+    const tauriMainPath = new URL('../../src-tauri/src/main.rs', import.meta.url);
+    const tauriMain = fs.readFileSync(tauriMainPath, 'utf8');
+    assert.match(tauriMain, /#\[global_allocator\]/, 'src-tauri/src/main.rs must have #[global_allocator]');
+    assert.match(tauriMain, /mimalloc::MiMalloc/, 'src-tauri/src/main.rs must use mimalloc::MiMalloc');
+
+    const tauriAgentBinPath = new URL('../../src-tauri/src/bin/agent.rs', import.meta.url);
+    const tauriAgentBin = fs.readFileSync(tauriAgentBinPath, 'utf8');
+    assert.match(tauriAgentBin, /#\[global_allocator\]/, 'src-tauri/src/bin/agent.rs must have #[global_allocator]');
+    assert.match(tauriAgentBin, /mimalloc::MiMalloc/, 'src-tauri/src/bin/agent.rs must use mimalloc::MiMalloc');
+  });
+
+  test('Taskfile.yml defines bench and PGO optimization pipeline tasks', () => {
+    const taskfilePath = new URL('../../Taskfile.yml', import.meta.url);
+    const taskfile = fs.readFileSync(taskfilePath, 'utf8');
+    assert.match(taskfile, /bench:/, 'Taskfile.yml must define bench task');
+    assert.match(taskfile, /build:fast:/, 'Taskfile.yml must define build:fast task');
+    assert.match(taskfile, /build:pgo:/, 'Taskfile.yml must define build:pgo task');
+    assert.match(taskfile, /build:pgo:instrument:/, 'Taskfile.yml must define build:pgo:instrument task');
+    assert.match(taskfile, /build:pgo:collect:/, 'Taskfile.yml must define build:pgo:collect task');
+    assert.match(taskfile, /build:pgo:merge:/, 'Taskfile.yml must define build:pgo:merge task');
+    assert.match(taskfile, /build:pgo:optimize:/, 'Taskfile.yml must define build:pgo:optimize task');
+    assert.match(taskfile, /build:pgo:bolt:/, 'Taskfile.yml must define build:pgo:bolt task');
+  });
+});
+
 
 
 

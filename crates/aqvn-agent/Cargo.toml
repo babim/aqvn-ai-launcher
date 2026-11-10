@@ -13,6 +13,7 @@ libc = "0.2"
 sha2 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal"] }
+mimalloc = { version = "0.1", default-features = false }
 
 [[bin]]
 name = "aqvn-agent"

@@ -544,3 +544,84 @@ fn val_gate_regression_002_full_system_regression_suite_clean_pass() {
         "package.json must define test script"
     );
 }
+
+#[test]
+fn val_prod_alloc_003_mimalloc_and_pgo_pipeline_integration() {
+    // 1. Verify mimalloc is configured in crates/aqvn-agent/Cargo.toml
+    let agent_cargo_toml = fs::read_to_string(repo_root().join("crates/aqvn-agent/Cargo.toml"))
+        .expect("must read crates/aqvn-agent/Cargo.toml");
+    assert!(
+        agent_cargo_toml.contains("mimalloc"),
+        "crates/aqvn-agent/Cargo.toml must declare mimalloc dependency"
+    );
+
+    // 2. Verify mimalloc is configured in src-tauri/Cargo.toml
+    let tauri_cargo_toml = fs::read_to_string(manifest_dir().join("Cargo.toml"))
+        .expect("must read src-tauri/Cargo.toml");
+    assert!(
+        tauri_cargo_toml.contains("mimalloc"),
+        "src-tauri/Cargo.toml must declare mimalloc dependency"
+    );
+
+    // 3. Verify global allocator configured in binary crates
+    let agent_main = fs::read_to_string(repo_root().join("crates/aqvn-agent/src/main.rs"))
+        .expect("must read crates/aqvn-agent/src/main.rs");
+    assert!(
+        agent_main.contains("#[global_allocator]") && agent_main.contains("mimalloc::MiMalloc"),
+        "crates/aqvn-agent/src/main.rs must configure mimalloc as global allocator"
+    );
+
+    let tauri_main = fs::read_to_string(manifest_dir().join("src/main.rs"))
+        .expect("must read src-tauri/src/main.rs");
+    assert!(
+        tauri_main.contains("#[global_allocator]") && tauri_main.contains("mimalloc::MiMalloc"),
+        "src-tauri/src/main.rs must configure mimalloc as global allocator"
+    );
+
+    let tauri_bin_agent = fs::read_to_string(manifest_dir().join("src/bin/agent.rs"))
+        .expect("must read src-tauri/src/bin/agent.rs");
+    assert!(
+        tauri_bin_agent.contains("#[global_allocator]")
+            && tauri_bin_agent.contains("mimalloc::MiMalloc"),
+        "src-tauri/src/bin/agent.rs must configure mimalloc as global allocator"
+    );
+
+    // 4. Verify Taskfile.yml supports bench and PGO pipeline tasks
+    let taskfile =
+        fs::read_to_string(repo_root().join("Taskfile.yml")).expect("must read Taskfile.yml");
+    assert!(
+        taskfile.contains("bench:"),
+        "Taskfile.yml must define bench task"
+    );
+    assert!(
+        taskfile.contains("build:pgo:"),
+        "Taskfile.yml must define build:pgo task"
+    );
+    assert!(
+        taskfile.contains("build:pgo:instrument:"),
+        "Taskfile.yml must define build:pgo:instrument task"
+    );
+    assert!(
+        taskfile.contains("build:pgo:optimize:"),
+        "Taskfile.yml must define build:pgo:optimize task"
+    );
+
+    // 5. If release binary exists, verify size < 2.5MB (2,621,440 bytes)
+    let agent_bin = repo_root().join("target/release/aqvn-agent");
+    let fallback_agent = manifest_dir().join("target/release/aqvn-agent");
+    let target_agent = if agent_bin.exists() {
+        agent_bin
+    } else {
+        fallback_agent
+    };
+    if target_agent.exists() {
+        let size = fs::metadata(&target_agent).expect("metadata").len();
+        const MAX_PGO_AGENT_BYTES: u64 = 2621440; // 2.5 MB
+        assert!(
+            size > 0 && size <= MAX_PGO_AGENT_BYTES,
+            "aqvn-agent release binary size ({} bytes) must be <= 2.5MB ({} bytes)",
+            size,
+            MAX_PGO_AGENT_BYTES
+        );
+    }
+}

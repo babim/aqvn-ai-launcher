@@ -3,6 +3,10 @@
 //! Executes as a standalone CLI daemon without GUI or display server requirements.
 //! Delegates directly to `aqvn_agent` workspace crate.
 
+#[cfg(not(target_os = "android"))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     aqvn_agent::run_cli().await

@@ -1801,7 +1801,7 @@ mod tests {
         assert_eq!(resolve_working_directory(abs_path), PathBuf::from(abs_path));
     }
 
-    static TEST_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub(crate) static TEST_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn test_resolve_systemd_unit_path_val_agent_cli_004() {
@@ -2100,6 +2100,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn test_run_status_renders_service_unit_diagnostic_val_pkg_003() {
         let temp_dir =
             env::temp_dir().join(format!("test_status_service_diag_{}", std::process::id()));
@@ -2110,9 +2111,8 @@ mod tests {
         let settings_path = temp_dir.join("settings.json");
         let settings = AgentSettings::default();
 
-        let lock = TEST_ENV_MUTEX.lock().unwrap();
+        let _lock = TEST_ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         env::set_var("AQVN_SYSTEMD_UNIT_PATH", &unit_path);
-        drop(lock);
 
         // When not installed
         let mut output = Vec::new();
@@ -2133,9 +2133,7 @@ mod tests {
         assert!(text_post.contains("Service Unit:"));
         assert!(text_post.contains("user, Installed"));
 
-        let lock = TEST_ENV_MUTEX.lock().unwrap();
         env::remove_var("AQVN_SYSTEMD_UNIT_PATH");
-        drop(lock);
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 

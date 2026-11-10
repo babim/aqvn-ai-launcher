@@ -124,11 +124,11 @@ mod tests {
     use super::*;
     use std::os::unix::net::UnixDatagram;
 
-    static WATCHDOG_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[test]
     fn test_sd_notify_mock_socket() {
-        let _lock = WATCHDOG_TEST_MUTEX.lock().unwrap();
+        let _lock = crate::tests::TEST_ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
         let temp_dir = std::env::temp_dir().join(format!("test_sd_notify_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -162,7 +162,9 @@ mod tests {
 
     #[test]
     fn test_watchdog_interval_computation() {
-        let _lock = WATCHDOG_TEST_MUTEX.lock().unwrap();
+        let _lock = crate::tests::TEST_ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
         std::env::set_var("WATCHDOG_USEC", "30000000"); // 30s
         let interval = watchdog_interval().expect("interval calculated");

@@ -65,6 +65,83 @@ tasks:
     cmds:
       - bash tools/benchmark.sh
 
+  bench:pgo:
+    desc: Run benchmark suite on PGO-optimized binaries
+    cmds:
+      - task: build:pgo
+      - bash tools/benchmark.sh
+
+  build:fast:
+    desc: Fast incremental check and compilation for rapid development
+    cmds:
+      - CARGO_INCREMENTAL=1 cargo check --workspace
+
+  build:pgo:
+    desc: Run full Profile-Guided Optimization (PGO) and BOLT pipeline for release binaries
+    cmds:
+      - task: build:pgo:clean
+      - task: build:pgo:instrument
+      - task: build:pgo:collect
+      - task: build:pgo:merge
+      - task: build:pgo:optimize
+      - task: build:pgo:bolt
+
+  build:pgo:clean:
+    desc: Clean temporary PGO profile artifacts
+    cmds:
+      - rm -rf /tmp/pgo-data target/pgo-data
+      - mkdir -p /tmp/pgo-data
+
+  build:pgo:instrument:
+    desc: Build instrumented release binaries for PGO profile generation
+    cmds:
+      - RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release -p aqvn-agent --bin aqvn-agent
+      - RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release -p aqvn-workspace --bin aqvn-workspace
+
+  build:pgo:collect:
+    desc: Run representative workload to collect execution profile data
+    cmds:
+      - ./target/release/aqvn-agent --version || true
+      - ./target/release/aqvn-agent --help || true
+      - bash tools/benchmark.sh || true
+
+  build:pgo:merge:
+    desc: Merge collected PGO profiles using llvm-profdata
+    cmds:
+      - |
+        if command -v llvm-profdata >/dev/null 2>&1; then
+          llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data
+          echo "PGO profile merged successfully to /tmp/pgo-data/merged.profdata"
+        else
+          echo "llvm-profdata not found, skipping merge"
+        fi
+
+  build:pgo:optimize:
+    desc: Build release binaries using collected PGO profile
+    cmds:
+      - |
+        if [ -f /tmp/pgo-data/merged.profdata ]; then
+          RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata" cargo build --release -p aqvn-agent --bin aqvn-agent
+          RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata" cargo build --release -p aqvn-workspace --bin aqvn-workspace
+        else
+          echo "Merged profdata not found, building standard release"
+          cargo build --release -p aqvn-agent --bin aqvn-agent
+          cargo build --release -p aqvn-workspace --bin aqvn-workspace
+        fi
+
+  build:pgo:bolt:
+    desc: Run post-link LLVM BOLT optimization on ELF binaries
+    cmds:
+      - |
+        if command -v llvm-bolt >/dev/null 2>&1; then
+          echo "Running LLVM BOLT optimization on target/release/aqvn-agent..."
+          llvm-bolt target/release/aqvn-agent -o target/release/aqvn-agent.bolt --reorder-blocks=ext-tsp --reorder-functions=hfsort+ --split-functions --split-all-cold
+          mv target/release/aqvn-agent.bolt target/release/aqvn-agent
+          echo "BOLT optimization completed successfully"
+        else
+          echo "llvm-bolt not available on host system (optional post-link step), skipping"
+        fi
+
   docker:build:agent:
     desc: Build Docker image for headless agent daemon
     cmds:

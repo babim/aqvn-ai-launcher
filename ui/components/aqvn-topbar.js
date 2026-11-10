@@ -65,6 +65,32 @@
               if (cpuVal && metrics.cpu !== undefined) cpuVal.textContent = metrics.cpu + '%';
               if (ramVal && metrics.ramMb !== undefined) ramVal.textContent = metrics.ramMb + ' MB';
               if (latVal && metrics.latencyMs !== undefined) latVal.textContent = metrics.latencyMs + ' ms';
+
+              const renderBars = (container, history, max, fairThresh, poorThresh) => {
+                if (!container || !Array.isArray(history) || !history.length) return;
+                container.innerHTML = '';
+                const m = max || Math.max.apply(null, [100].concat(history));
+                history.forEach((val) => {
+                  const bar = document.createElement('div');
+                  const isPoor = val >= poorThresh;
+                  const isFair = val >= fairThresh;
+                  bar.className = 'sparkline-bar' + (isPoor ? ' poor' : (isFair ? ' fair' : ''));
+                  const pct = Math.max(10, Math.min(100, Math.round((val / m) * 100)));
+                  bar.style.height = pct + '%';
+                  container.appendChild(bar);
+                });
+              };
+              if (metrics.cpuHistory) {
+                renderBars(this.querySelector('#telemetry-cpu-sparkline'), metrics.cpuHistory, 100, 60, 85);
+              }
+              if (metrics.ramHistory) {
+                const maxRam = Math.max.apply(null, [1024].concat(metrics.ramHistory));
+                renderBars(this.querySelector('#telemetry-ram-sparkline'), metrics.ramHistory, maxRam, maxRam * 0.7, maxRam * 0.85);
+              }
+              if (metrics.pingHistory) {
+                const maxLat = Math.max.apply(null, [100].concat(metrics.pingHistory));
+                renderBars(this.querySelector('#telemetry-latency-sparkline'), metrics.pingHistory, maxLat, 50, 150);
+              }
             })
           );
         }

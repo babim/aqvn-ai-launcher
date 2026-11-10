@@ -332,6 +332,9 @@
 
     if (state.busy !== wasBusy) {
       updateTrayBusy(state.busy);
+      if (typeof rescheduleAdaptivePolling === 'function') {
+        rescheduleAdaptivePolling();
+      }
       if (wasBusy && !state.busy) {
         if (isTaskChimeEnabled()) {
           playTaskChime();
@@ -550,6 +553,14 @@
     }
 
     attach();
+
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', function () {
+        if (typeof rescheduleAdaptivePolling === 'function') {
+          rescheduleAdaptivePolling();
+        }
+      });
+    }
   }
 
   function installFocusModeStyles() {
@@ -578,7 +589,7 @@
 
     function inject() {
       var root = document.head || document.body || document.documentElement;
-      if (!root || typeof document.createElement !== 'function') return;
+      if (!root || typeof root.appendChild !== 'function' || typeof document.createElement !== 'function') return;
       if (document.getElementById && document.getElementById('aqvn-focus-mode-style')) return;
       var style = document.createElement('style');
       style.id = 'aqvn-focus-mode-style';
@@ -1032,8 +1043,42 @@
     proxyPort: null,
     activeProfile: null,
     cpuPercent: null,
-    ramMb: null
+    ramMb: null,
+    totalRamMb: null,
+    cpuHistory: [],
+    ramHistory: [],
+    latencyHistory: []
   };
+
+  /* Helper to render sparklines */
+  function renderSparklineBar(containerEl, history, options) {
+    if (!containerEl) return;
+    containerEl.innerHTML = '';
+    if (!Array.isArray(history) || !history.length) return;
+    var max = options && options.max ? options.max : Math.max.apply(null, [100].concat(history));
+    if (max <= 0) max = 100;
+    history.forEach(function (val) {
+      var bar;
+      if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+        bar = document.createElement('div');
+      } else if (containerEl.ownerDocument && typeof containerEl.ownerDocument.createElement === 'function') {
+        bar = containerEl.ownerDocument.createElement('div');
+      } else {
+        bar = { className: '', style: {}, title: '' };
+      }
+      var isPoor = options && options.poorThreshold ? val >= options.poorThreshold : val > 150;
+      var isFair = options && options.fairThreshold ? val >= options.fairThreshold : val > 50;
+      bar.className = 'sparkline-bar' + (isPoor ? ' poor' : (isFair ? ' fair' : ''));
+      var pct = Math.max(10, Math.min(100, Math.round((val / max) * 100)));
+      bar.style.height = pct + '%';
+      bar.title = val + (options && options.unit ? options.unit : '');
+      if (typeof containerEl.appendChild === 'function') {
+        containerEl.appendChild(bar);
+      } else if (Array.isArray(containerEl.children)) {
+        containerEl.children.push(bar);
+      }
+    });
+  }
 
   function computeAgentState() {
     if (!state.busy) return 'Idle';
@@ -1066,7 +1111,14 @@
       ram: ramStr,
       latency: diag.latency,
       agentState: agentState,
-      status: diag.status
+      status: diag.status,
+      cpuPercent: diagnosticsState.cpuPercent,
+      ramMb: diagnosticsState.ramMb,
+      latencyMs: diagnosticsState.latencyMs,
+      cpuHistory: diagnosticsState.cpuHistory.slice(),
+      ramHistory: diagnosticsState.ramHistory.slice(),
+      latencyHistory: diagnosticsState.latencyHistory.slice(),
+      adaptiveInterval: getAdaptivePollingInterval()
     };
   }
 
@@ -1087,6 +1139,21 @@
       if (stateEl.dataset) stateEl.dataset.state = metrics.agentState.toLowerCase();
     }
 
+    var cpuSparklineEl = document.getElementById && document.getElementById('telemetry-cpu-sparkline');
+    if (cpuSparklineEl) {
+      renderSparklineBar(cpuSparklineEl, diagnosticsState.cpuHistory, { max: 100, unit: '%', fairThreshold: 60, poorThreshold: 85 });
+    }
+    var ramSparklineEl = document.getElementById && document.getElementById('telemetry-ram-sparkline');
+    if (ramSparklineEl) {
+      var maxRam = diagnosticsState.totalRamMb || Math.max.apply(null, [1024].concat(diagnosticsState.ramHistory));
+      renderSparklineBar(ramSparklineEl, diagnosticsState.ramHistory, { max: maxRam, unit: ' MB', fairThreshold: maxRam * 0.7, poorThreshold: maxRam * 0.85 });
+    }
+    var latSparklineEl = document.getElementById && document.getElementById('telemetry-latency-sparkline');
+    if (latSparklineEl) {
+      var maxLat = Math.max.apply(null, [100].concat(diagnosticsState.latencyHistory));
+      renderSparklineBar(latSparklineEl, diagnosticsState.latencyHistory, { max: maxLat, unit: ' ms', fairThreshold: 50, poorThreshold: 150 });
+    }
+
     var diagCpuEl = document.getElementById && document.getElementById('diagnostics-cpu');
     if (diagCpuEl) diagCpuEl.textContent = metrics.cpu;
     var diagRamEl = document.getElementById && document.getElementById('diagnostics-ram');
@@ -1095,14 +1162,116 @@
     if (diagStateEl) diagStateEl.textContent = metrics.agentState;
   }
 
+  /* ------------------------------------------------------------------ */
+  /* VAL-TELEM-RADAR-001: Adaptive Polling Engine                      */
+  /* ------------------------------------------------------------------ */
+
+  var ADAPTIVE_INTERVAL_FAST_MS = 1000;    // Thinking / Executing
+  var ADAPTIVE_INTERVAL_NORMAL_MS = 5000;  // Idle (visible)
+  var ADAPTIVE_INTERVAL_SLOW_MS = 15000;   // Background / Hidden
+
+  var adaptivePollingState = {
+    timerId: null,
+    active: false,
+    pollFn: null,
+    currentIntervalMs: ADAPTIVE_INTERVAL_NORMAL_MS
+  };
+
+  function getAdaptivePollingInterval(options) {
+    options = options || {};
+    var isHidden = false;
+    if (typeof options.isHidden === 'boolean') {
+      isHidden = options.isHidden;
+    } else if (typeof document !== 'undefined') {
+      isHidden = Boolean(document.hidden || document.visibilityState === 'hidden');
+    }
+    if (isHidden) {
+      return ADAPTIVE_INTERVAL_SLOW_MS;
+    }
+
+    var agentState = options.agentState || computeAgentState();
+    if (agentState === 'Thinking' || agentState === 'Executing') {
+      return ADAPTIVE_INTERVAL_FAST_MS;
+    }
+    return ADAPTIVE_INTERVAL_NORMAL_MS;
+  }
+
+  function safeSetTimeout(fn, delay) {
+    if (typeof setTimeout !== 'undefined') return setTimeout(fn, delay);
+    if (typeof window !== 'undefined' && typeof window.setTimeout !== 'undefined') return window.setTimeout(fn, delay);
+    if (typeof globalThis !== 'undefined' && typeof globalThis.setTimeout !== 'undefined') return globalThis.setTimeout(fn, delay);
+    return null;
+  }
+  function safeClearTimeout(id) {
+    if (typeof clearTimeout !== 'undefined') return clearTimeout(id);
+    if (typeof window !== 'undefined' && typeof window.clearTimeout !== 'undefined') return window.clearTimeout(id);
+    if (typeof globalThis !== 'undefined' && typeof globalThis.clearTimeout !== 'undefined') return globalThis.clearTimeout(id);
+  }
+
+  function rescheduleAdaptivePolling() {
+    if (!adaptivePollingState.active || !adaptivePollingState.pollFn) return;
+    var nextInterval = getAdaptivePollingInterval();
+    if (nextInterval !== adaptivePollingState.currentIntervalMs) {
+      adaptivePollingState.currentIntervalMs = nextInterval;
+      if (adaptivePollingState.timerId) {
+        safeClearTimeout(adaptivePollingState.timerId);
+        adaptivePollingState.timerId = safeSetTimeout(function () {
+          runAdaptiveTick();
+        }, nextInterval);
+      }
+    }
+  }
+
+  function runAdaptiveTick() {
+    if (!adaptivePollingState.active || !adaptivePollingState.pollFn) return;
+    try {
+      adaptivePollingState.pollFn();
+    } catch (e) {}
+    var interval = getAdaptivePollingInterval();
+    adaptivePollingState.currentIntervalMs = interval;
+    adaptivePollingState.timerId = safeSetTimeout(function () {
+      runAdaptiveTick();
+    }, interval);
+  }
+
+  function startAdaptivePolling(pollFn) {
+    if (typeof pollFn === 'function') {
+      adaptivePollingState.pollFn = pollFn;
+    }
+    adaptivePollingState.active = true;
+    var interval = getAdaptivePollingInterval();
+    adaptivePollingState.currentIntervalMs = interval;
+    if (adaptivePollingState.timerId) {
+      safeClearTimeout(adaptivePollingState.timerId);
+    }
+    adaptivePollingState.timerId = safeSetTimeout(function () {
+      runAdaptiveTick();
+    }, interval);
+    return interval;
+  }
+
+  function stopAdaptivePolling() {
+    adaptivePollingState.active = false;
+    if (adaptivePollingState.timerId) {
+      safeClearTimeout(adaptivePollingState.timerId);
+      adaptivePollingState.timerId = null;
+    }
+  }
+
   function updateTelemetry(metrics) {
     if (metrics && typeof metrics === 'object') {
       if (metrics.cpu !== undefined) diagnosticsState.cpuPercent = metrics.cpu;
       if (metrics.cpu_usage_percent !== undefined) diagnosticsState.cpuPercent = metrics.cpu_usage_percent;
+      if (diagnosticsState.cpuPercent !== null && diagnosticsState.cpuPercent !== undefined) {
+        diagnosticsState.cpuHistory.push(Math.round(Number(diagnosticsState.cpuPercent)));
+        if (diagnosticsState.cpuHistory.length > 20) diagnosticsState.cpuHistory.shift();
+      }
+
       if (metrics.ram !== undefined) diagnosticsState.ramMb = metrics.ram;
       if (metrics.ram_mb !== undefined) diagnosticsState.ramMb = metrics.ram_mb;
       if (metrics.total_ram_mb !== undefined) {
         var total = Number(metrics.total_ram_mb);
+        diagnosticsState.totalRamMb = total;
         var avail = Number(metrics.available_ram_mb != null ? metrics.available_ram_mb : metrics.free_ram_mb);
         if (!isNaN(total) && !isNaN(avail) && total >= avail) {
           diagnosticsState.ramMb = total - avail;
@@ -1110,7 +1279,35 @@
           diagnosticsState.ramMb = total;
         }
       }
+      if (diagnosticsState.ramMb !== null && diagnosticsState.ramMb !== undefined) {
+        diagnosticsState.ramHistory.push(Math.round(Number(diagnosticsState.ramMb)));
+        if (diagnosticsState.ramHistory.length > 20) diagnosticsState.ramHistory.shift();
+      }
+
       if (metrics.latency !== undefined) diagnosticsState.latencyMs = metrics.latency;
+      if (metrics.latency_ms !== undefined) diagnosticsState.latencyMs = metrics.latency_ms;
+      if (diagnosticsState.latencyMs !== null && diagnosticsState.latencyMs !== undefined) {
+        diagnosticsState.latencyHistory.push(Math.round(Number(diagnosticsState.latencyMs)));
+        if (diagnosticsState.latencyHistory.length > 20) diagnosticsState.latencyHistory.shift();
+      }
+
+      // Sync signals if present
+      if (typeof window !== 'undefined' && window.AqvnSignals) {
+        var sig = window.AqvnSignals;
+        if (sig.hostMetrics) {
+          sig.hostMetrics.value = {
+            cpu: Math.round(Number(diagnosticsState.cpuPercent || 0)),
+            ramMb: Math.round(Number(diagnosticsState.ramMb || 0)),
+            latencyMs: Math.round(Number(diagnosticsState.latencyMs || 0)),
+            cpuHistory: diagnosticsState.cpuHistory.slice(),
+            ramHistory: diagnosticsState.ramHistory.slice(),
+            pingHistory: diagnosticsState.latencyHistory.slice()
+          };
+        }
+        if (sig.pingHistory) {
+          sig.pingHistory.value = diagnosticsState.latencyHistory.slice();
+        }
+      }
     }
     updateTelemetryDom();
     updateDiagnosticsModalDom();
@@ -1506,6 +1703,10 @@
     getDiagnosticsMetrics: resolveDiagnosticsMetrics,
     getTelemetryMetrics: resolveTelemetryMetrics,
     updateTelemetry: updateTelemetry,
+    getAdaptivePollingInterval: getAdaptivePollingInterval,
+    startAdaptivePolling: startAdaptivePolling,
+    stopAdaptivePolling: stopAdaptivePolling,
+    rescheduleAdaptivePolling: rescheduleAdaptivePolling,
     updateDiagnostics: function (metrics) {
       if (metrics) {
         if (metrics.status) setConnectionStatus(metrics.status);

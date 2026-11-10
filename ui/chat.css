@@ -2478,3 +2478,29 @@ body.focus-mode #chat-pane {
 
 .sparkline-bar.fair { background: #facc15; }
 .sparkline-bar.poor { background: var(--danger); }
+
+/* Topbar Telemetry Sparklines (VAL-TELEM-RADAR-001) */
+.telemetry-sparkline {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 14px;
+  width: 24px;
+  padding: 1px 2px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.telemetry-sparkline .sparkline-bar {
+  flex: 1;
+  min-width: 2px;
+  background: var(--ok);
+  border-radius: 1px;
+  transition: height 0.2s ease;
+}
+
+.telemetry-sparkline .sparkline-bar.fair { background: #facc15; }
+.telemetry-sparkline .sparkline-bar.poor { background: var(--danger); }
+

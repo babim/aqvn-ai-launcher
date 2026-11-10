@@ -90,6 +90,7 @@
     <link rel="stylesheet" href="vendor/codemirror.css">
     <script src="vendor/signals-core.min.js"></script>
     <script src="state/signals.js"></script>
+    <script src="state/resilient-outbox.js"></script>
     <script src="vendor/socket.io.min.js"></script>
     <script src="bridge.js"></script>
     <script defer src="vendor/xterm.min.js"></script>
@@ -151,15 +152,18 @@
           <span id="telemetry-cpu" class="telemetry-indicator" title="CPU Usage">
             <span class="telemetry-label">CPU</span>
             <span id="telemetry-cpu-val" class="telemetry-value">--%</span>
+            <span id="telemetry-cpu-sparkline" class="telemetry-sparkline" title="CPU History"></span>
           </span>
           <span class="telemetry-divider">|</span>
           <span id="telemetry-ram" class="telemetry-indicator" title="Memory RSS / Used">
             <span class="telemetry-label">RAM</span>
             <span id="telemetry-ram-val" class="telemetry-value">-- MB</span>
+            <span id="telemetry-ram-sparkline" class="telemetry-sparkline" title="RAM History"></span>
           </span>
           <span class="telemetry-divider">|</span>
           <span id="telemetry-latency" class="telemetry-indicator" title="Ping Latency">
             <span id="telemetry-latency-val" class="telemetry-value">-- ms</span>
+            <span id="telemetry-latency-sparkline" class="telemetry-sparkline" title="Latency History"></span>
           </span>
           <span id="telemetry-agent-state" class="telemetry-agent-state" data-state="idle">Idle</span>
         </button>

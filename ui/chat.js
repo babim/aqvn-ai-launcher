@@ -717,7 +717,7 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Offline outbox                                                     */
+  /* Offline outbox (VAL-OUTBOX-PERSIST-002)                           */
   /* ------------------------------------------------------------------ */
 
   var OUTBOX_KEY = 'aqvn_outbox';
@@ -726,6 +726,43 @@
   var OUTBOX_MAX_BYTES = 256 * 1024;
   /* The drain in flight, so overlapping flushes cannot resend a batch. */
   var outboxFlush = null;
+
+  var OUTBOX_DB_NAME = 'aqvn_offline_db';
+  var OUTBOX_STORE_NAME = 'outbox';
+
+  function syncIndexedDBOutput(entry, action) {
+    var idb = typeof indexedDB !== 'undefined' ? indexedDB : (typeof window !== 'undefined' ? window.indexedDB : null);
+    if (!idb) return;
+    try {
+      var req = idb.open(OUTBOX_DB_NAME, 1);
+      req.onupgradeneeded = function (e) {
+        var db = e.target.result;
+        if (!db.objectStoreNames.contains(OUTBOX_STORE_NAME)) {
+          var store = db.createObjectStore(OUTBOX_STORE_NAME, { keyPath: 'message_id' });
+          store.createIndex('status', 'status', { unique: false });
+        }
+      };
+      req.onsuccess = function (e) {
+        var db = e.target.result;
+        try {
+          var tx = db.transaction([OUTBOX_STORE_NAME], 'readwrite');
+          var store = tx.objectStore(OUTBOX_STORE_NAME);
+          if (action === 'put' && entry) {
+            store.put(entry);
+          } else if (action === 'delete' && entry) {
+            store.delete(typeof entry === 'string' ? entry : entry.message_id);
+          } else if (action === 'clear') {
+            store.clear();
+          } else if (action === 'claim' && Array.isArray(entry)) {
+            entry.forEach(function (it) {
+              it.status = 'inflight';
+              store.put(it);
+            });
+          }
+        } catch (err) {}
+      };
+    } catch (err) {}
+  }
 
   function readOutbox() {
     try {
@@ -743,12 +780,13 @@
               window.localStorage.removeItem('aqvn_outbox_inflight');
               var seen = {};
               list.forEach(function(e) { if (e && e.message_id) seen[e.message_id] = true; });
-              inflightList.forEach(function(item) {
+              for (var i = inflightList.length - 1; i >= 0; i--) {
+                var item = inflightList[i];
                 if (item && item.message_id && !seen[item.message_id]) {
                   list.unshift(item);
                   seen[item.message_id] = true;
                 }
-              });
+              }
               writeOutbox(list);
             }
           } catch (e) {
@@ -771,6 +809,7 @@
         window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(list));
       } else {
         window.localStorage.removeItem(OUTBOX_KEY);
+        syncIndexedDBOutput(null, 'clear');
       }
       return true;
     } catch (err) {
@@ -786,7 +825,8 @@
       text: text,
       context: state.context || '',
       message_id: messageId || uuid(),
-      queued_at: Date.now()
+      queued_at: Date.now(),
+      status: 'queued'
     };
     if (JSON.stringify([entry]).length > OUTBOX_MAX_BYTES) {
       return { stored: false, dropped: 0, error: 'the message is too large to queue' };
@@ -808,13 +848,24 @@
       dropped += 1;
       payload = JSON.stringify(list);
     }
-    return { stored: writeOutbox(list), dropped: dropped, error: '' };
+    var stored = writeOutbox(list);
+    if (stored) {
+      syncIndexedDBOutput(entry, 'put');
+    }
+    return { stored: stored, dropped: dropped, error: '' };
   }
 
   /* Put unclaimed entries back in front of anything queued during the drain. */
   function requeueOutbox(remaining) {
     var current = readOutbox();
-    return writeOutbox(remaining.concat(current));
+    var ok = writeOutbox(remaining.concat(current));
+    if (ok && Array.isArray(remaining)) {
+      remaining.forEach(function (item) {
+        item.status = 'queued';
+        syncIndexedDBOutput(item, 'put');
+      });
+    }
+    return ok;
   }
 
   /* Storage refused the write: the row must stop claiming a queued delivery. */
@@ -879,6 +930,7 @@
     }
     try {
       window.localStorage.setItem('aqvn_outbox_inflight', JSON.stringify(list));
+      syncIndexedDBOutput(list, 'claim');
     } catch (e) {}
     if (!writeOutbox([])) {
       showChatError('Outbox unavailable: browser storage cannot be updated.');
@@ -906,6 +958,7 @@
         function (result) {
           sent += 1;
           markQueuedSent(item.message_id);
+          syncIndexedDBOutput(item.message_id, 'delete');
           if (result && result.context && result.context !== state.context) {
             state.context = result.context;
           }
@@ -1301,7 +1354,12 @@
             showChatError(err.message);
           }
         });
-      state.pollTimer = window.setTimeout(tick, 600);
+      var delay = 600;
+      var bridge = getContainerBridge();
+      if (bridge && typeof bridge.getAdaptivePollingInterval === 'function') {
+        delay = bridge.getAdaptivePollingInterval();
+      }
+      state.pollTimer = window.setTimeout(tick, delay);
     };
     state.pollTimer = window.setTimeout(tick, 0);
   }
@@ -2325,17 +2383,59 @@
       }
     }
 
-    if (dom.latencySparkline) {
-      dom.latencySparkline.innerHTML = '';
-      var max = Math.max.apply(null, [100].concat(state.latencyHistory));
-      state.latencyHistory.forEach(function(lat) {
+    function renderBars(container, history, max) {
+      if (!container) return;
+      container.innerHTML = '';
+      history.forEach(function(lat) {
         var bar = document.createElement('div');
         bar.className = 'sparkline-bar' + (lat > 150 ? ' poor' : (lat > 50 ? ' fair' : ''));
         var pct = Math.max(10, Math.min(100, Math.round((lat / max) * 100)));
         bar.style.height = pct + '%';
         bar.title = lat + ' ms';
-        dom.latencySparkline.appendChild(bar);
+        container.appendChild(bar);
       });
+    }
+
+    var max = Math.max.apply(null, [100].concat(state.latencyHistory));
+    if (dom.latencySparkline) {
+      renderBars(dom.latencySparkline, state.latencyHistory, max);
+    }
+    if (dom.topbarLatencySparkline) {
+      renderBars(dom.topbarLatencySparkline, state.latencyHistory, max);
+    }
+  }
+
+  function updateResourceSparklines(cpu, ram) {
+    if (typeof state.cpuHistory === 'undefined') state.cpuHistory = [];
+    if (typeof state.ramHistory === 'undefined') state.ramHistory = [];
+
+    if (typeof cpu === 'number' && !isNaN(cpu)) {
+      state.cpuHistory.push(cpu);
+      if (state.cpuHistory.length > 20) state.cpuHistory.shift();
+    }
+    if (typeof ram === 'number' && !isNaN(ram)) {
+      state.ramHistory.push(ram);
+      if (state.ramHistory.length > 20) state.ramHistory.shift();
+    }
+
+    function renderBars(container, history, max, fairThresh, poorThresh) {
+      if (!container) return;
+      container.innerHTML = '';
+      history.forEach(function (val) {
+        var bar = document.createElement('div');
+        bar.className = 'sparkline-bar' + (val >= poorThresh ? ' poor' : (val >= fairThresh ? ' fair' : ''));
+        var pct = Math.max(10, Math.min(100, Math.round((val / max) * 100)));
+        bar.style.height = pct + '%';
+        container.appendChild(bar);
+      });
+    }
+
+    if (dom.topbarCpuSparkline) {
+      renderBars(dom.topbarCpuSparkline, state.cpuHistory, 100, 60, 85);
+    }
+    if (dom.topbarRamSparkline) {
+      var maxRam = Math.max.apply(null, [1024].concat(state.ramHistory));
+      renderBars(dom.topbarRamSparkline, state.ramHistory, maxRam, maxRam * 0.7, maxRam * 0.85);
     }
   }
 
@@ -3996,6 +4096,9 @@
     dom.closeShortcutsBtn = byId('close-shortcuts-btn');
     dom.diagnosticsQuality = byId('diagnostics-quality');
     dom.latencySparkline = byId('latency-sparkline');
+    dom.topbarCpuSparkline = byId('telemetry-cpu-sparkline');
+    dom.topbarRamSparkline = byId('telemetry-ram-sparkline');
+    dom.topbarLatencySparkline = byId('telemetry-latency-sparkline');
     dom.terminalDrawer = byId('terminal-drawer');
     dom.terminalTabs = byId('terminal-tabs');
     dom.terminalAddTabBtn = byId('terminal-add-tab-btn');

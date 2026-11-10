@@ -1800,6 +1800,7 @@ function createContainerHarness(options = {}) {
       style: {}
     },
     getElementById: getEl,
+    createElement: (tag) => createElementMock(tag),
     querySelector: (selector) => {
       if (selector === '[aria-busy="true"]') {
         return options.ariaBusy ? createElementMock('busy-el') : null;
@@ -1831,6 +1832,8 @@ function createContainerHarness(options = {}) {
   const context = {
     console: customConsole,
     document: documentMock,
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
     location: {
       origin: 'http://localhost:3000',
       reload: () => {
@@ -5739,6 +5742,244 @@ describe('VAL-UI-EDITOR-001: CodeMirror 6 Workspace Editor & Visual Diff Viewer'
     assert.equal(state.editorDirty, false, 'Dirty state cleared');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* VAL-TELEM-RADAR-001: Adaptive Resource Telemetry Radar             */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-TELEM-RADAR-001: Adaptive Resource Telemetry Radar', () => {
+  test('VAL-TELEM-RADAR-001: Topbar exposes sparklines for CPU, RAM, and ping latency in index.html', () => {
+    const html = readIndexHtml();
+    assert.match(
+      html,
+      /id="telemetry-cpu-sparkline"/,
+      'ui/index.html must expose #telemetry-cpu-sparkline'
+    );
+    assert.match(
+      html,
+      /id="telemetry-ram-sparkline"/,
+      'ui/index.html must expose #telemetry-ram-sparkline'
+    );
+    assert.match(
+      html,
+      /id="telemetry-latency-sparkline"/,
+      'ui/index.html must expose #telemetry-latency-sparkline'
+    );
+
+    const css = fs.readFileSync(new URL('../../ui/chat.css', import.meta.url), 'utf8');
+    assert.match(
+      css,
+      /\.telemetry-sparkline\s*\{/,
+      'ui/chat.css must define .telemetry-sparkline'
+    );
+    assert.match(
+      css,
+      /\.sparkline-bar\.poor/,
+      'ui/chat.css must define poor threshold style'
+    );
+  });
+
+  test('VAL-TELEM-RADAR-001: updateTelemetry renders sparklines with normalized heights and threshold colors', () => {
+    const harness = createContainerHarness();
+    const { bridge, elements, document, createElement } = harness;
+
+    const cpuSparkline = createElement('telemetry-cpu-sparkline');
+    const ramSparkline = createElement('telemetry-ram-sparkline');
+    const latSparkline = createElement('telemetry-latency-sparkline');
+    const cpuVal = createElement('telemetry-cpu-val');
+    const ramVal = createElement('telemetry-ram-val');
+    const latVal = createElement('telemetry-latency-val');
+
+    elements['telemetry-cpu-sparkline'] = cpuSparkline;
+    elements['telemetry-ram-sparkline'] = ramSparkline;
+    elements['telemetry-latency-sparkline'] = latSparkline;
+    elements['telemetry-cpu-val'] = cpuVal;
+    elements['telemetry-ram-val'] = ramVal;
+    elements['telemetry-latency-val'] = latVal;
+
+    bridge.installDiagnostics(document);
+
+    // Initial sample - good metrics
+    bridge.updateTelemetry({
+      cpu: 30,
+      total_ram_mb: 16384,
+      available_ram_mb: 12288, // 4096 MB used
+      latency: 20
+    });
+
+    assert.equal(cpuVal.textContent, '30%');
+    assert.equal(ramVal.textContent, '4096 MB');
+    assert.equal(latVal.textContent, '20 ms');
+
+    assert.ok(cpuSparkline.children.length > 0, 'CPU sparkline must have bars rendered');
+    assert.ok(ramSparkline.children.length > 0, 'RAM sparkline must have bars rendered');
+    assert.ok(latSparkline.children.length > 0, 'Latency sparkline must have bars rendered');
+
+    // High stress sample - triggers poor thresholds (>85% CPU, >150ms latency)
+    bridge.updateTelemetry({
+      cpu: 92,
+      total_ram_mb: 16384,
+      available_ram_mb: 1024, // ~15360 MB used (>85%)
+      latency: 180
+    });
+
+    assert.equal(cpuVal.textContent, '92%');
+    assert.equal(latVal.textContent, '180 ms');
+
+    const lastCpuBar = cpuSparkline.children[cpuSparkline.children.length - 1];
+    assert.match(lastCpuBar.className, /poor/, 'High CPU (>85%) must have poor class');
+
+    const lastLatBar = latSparkline.children[latSparkline.children.length - 1];
+    assert.match(lastLatBar.className, /poor/, 'High latency (>150ms) must have poor class');
+
+    const metrics = bridge.getTelemetryMetrics();
+    assert.ok(Array.isArray(metrics.cpuHistory), 'metrics must expose cpuHistory array');
+    assert.ok(Array.isArray(metrics.ramHistory), 'metrics must expose ramHistory array');
+    assert.ok(Array.isArray(metrics.latencyHistory), 'metrics must expose latencyHistory array');
+    assert.equal(metrics.cpuHistory.length, 2);
+  });
+
+  test('VAL-TELEM-RADAR-001: Adaptive Polling adjusts polling interval dynamically by agent state and visibility', () => {
+    const harness = createContainerHarness();
+    const { bridge } = harness;
+
+    assert.equal(typeof bridge.getAdaptivePollingInterval, 'function');
+    assert.equal(typeof bridge.startAdaptivePolling, 'function');
+    assert.equal(typeof bridge.stopAdaptivePolling, 'function');
+
+    // 1. Idle state in active window: 5000ms
+    const idleInterval = bridge.getAdaptivePollingInterval({ agentState: 'Idle', isHidden: false });
+    assert.equal(idleInterval, 5000, 'Idle active window must poll at 5000ms');
+
+    // 2. Active processing states (Thinking / Executing): 1000ms fast polling
+    const thinkingInterval = bridge.getAdaptivePollingInterval({ agentState: 'Thinking', isHidden: false });
+    assert.equal(thinkingInterval, 1000, 'Thinking state must poll at 1000ms');
+
+    const executingInterval = bridge.getAdaptivePollingInterval({ agentState: 'Executing', isHidden: false });
+    assert.equal(executingInterval, 1000, 'Executing state must poll at 1000ms');
+
+    // 3. Background / hidden window: 15000ms slow polling (saves battery/cycles)
+    const hiddenInterval = bridge.getAdaptivePollingInterval({ agentState: 'Idle', isHidden: true });
+    assert.equal(hiddenInterval, 15000, 'Hidden window must poll at 15000ms');
+
+    const hiddenThinkingInterval = bridge.getAdaptivePollingInterval({ agentState: 'Thinking', isHidden: true });
+    assert.equal(hiddenThinkingInterval, 15000, 'Hidden takes precedence over thinking to conserve background resources');
+
+    // 4. Start / Stop timer lifecycle
+    let tickCount = 0;
+    const interval = bridge.startAdaptivePolling(() => { tickCount++; });
+    assert.ok(interval > 0, 'startAdaptivePolling must return positive interval');
+
+    bridge.stopAdaptivePolling();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* VAL-OUTBOX-PERSIST-002: Durable Offline Outbox Persistence         */
+/* ------------------------------------------------------------------ */
+
+describe('VAL-OUTBOX-PERSIST-002: Durable Offline Outbox Persistence', () => {
+  test('VAL-OUTBOX-PERSIST-002: ui/state/resilient-outbox.js exports resilient queue API', async () => {
+    const outboxModulePath = new URL('../../ui/state/resilient-outbox.js', import.meta.url);
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const outbox = req(outboxModulePath.pathname);
+
+    assert.equal(typeof outbox.queueOutbox, 'function', 'queueOutbox must be a function');
+    assert.equal(typeof outbox.readOutbox, 'function', 'readOutbox must be a function');
+    assert.equal(typeof outbox.writeOutbox, 'function', 'writeOutbox must be a function');
+    assert.equal(typeof outbox.claimInflightBatch, 'function', 'claimInflightBatch must be a function');
+    assert.equal(typeof outbox.completeInflightItem, 'function', 'completeInflightItem must be a function');
+    assert.equal(typeof outbox.recoverOrphanedInflight, 'function', 'recoverOrphanedInflight must be a function');
+    assert.equal(outbox.OUTBOX_MAX_ENTRIES, 50, 'Max entries must be 50');
+    assert.equal(outbox.OUTBOX_MAX_BYTES, 262144, 'Max bytes must be 256KB');
+  });
+
+  test('VAL-OUTBOX-PERSIST-002: Messages sent offline persist with atomic lock and deduplication', () => {
+    const harness = createHarness();
+    const { queueOutbox, readOutbox, state } = harness.exports;
+
+    // Enqueue 3 messages while offline
+    const res1 = queueOutbox('Offline message 1', 'msg-101');
+    assert.equal(res1.stored, true, 'Message 1 must be stored');
+
+    const res2 = queueOutbox('Offline message 2', 'msg-102');
+    assert.equal(res2.stored, true, 'Message 2 must be stored');
+
+    // Deduplication check: duplicate message_id must not double queue
+    const resDup = queueOutbox('Offline message 1 (dup)', 'msg-101');
+    assert.equal(resDup.stored, true, 'Duplicate message ID returns stored true');
+
+    const list = readOutbox();
+    assert.equal(list.length, 2, 'Queue must contain exactly 2 unique messages');
+    assert.equal(list[0].text, 'Offline message 1');
+    assert.equal(list[1].text, 'Offline message 2');
+    assert.equal(list[0].message_id, 'msg-101');
+  });
+
+  test('VAL-OUTBOX-PERSIST-002: Recovers orphaned inflight entries upon application reload or crash', () => {
+    const harness = createHarness();
+    const { readOutbox, writeOutbox } = harness.exports;
+
+    // Simulate orphaned items left in inflight key due to app crash / reload during drain
+    const crashItems = [
+      { message_id: 'crash-msg-1', text: 'interrupted task 1', queued_at: 1000, status: 'inflight' },
+      { message_id: 'crash-msg-2', text: 'interrupted task 2', queued_at: 1001, status: 'inflight' }
+    ];
+    harness.store['aqvn_outbox_inflight'] = JSON.stringify(crashItems);
+    writeOutbox([{ message_id: 'queued-msg-3', text: 'queued task 3', queued_at: 1002 }]);
+
+    // Calling readOutbox triggers orphan recovery
+    const recovered = readOutbox();
+
+    assert.equal(harness.store['aqvn_outbox_inflight'], undefined, 'Inflight key must be cleared upon recovery');
+    assert.equal(recovered.length, 3, 'Recovered queue must contain all 3 messages without data loss');
+    assert.equal(recovered[0].message_id, 'crash-msg-1', 'Orphaned inflight items must be prepended in order');
+    assert.equal(recovered[1].message_id, 'crash-msg-2');
+    assert.equal(recovered[2].message_id, 'queued-msg-3');
+  });
+
+  test('VAL-OUTBOX-PERSIST-002: Automatic flush delivers queued messages on network reconnect and clears storage', async () => {
+    const harness = createHarness();
+    const { queueOutbox, flushOutbox, readOutbox, state } = harness.exports;
+
+    queueOutbox('Message to deliver on reconnect', 'reconn-1');
+    assert.equal(readOutbox().length, 1);
+
+    state.csrfToken = 'csrf-test';
+    // Track API calls
+    const sentMessages = [];
+    harness.context.fetch = async (url, opts) => {
+      if (String(url).includes('/proxy/csrf')) {
+        return new Response(JSON.stringify({ token: 'csrf-test' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      const body = JSON.parse(opts.body || '{}');
+      sentMessages.push(body);
+      return new Response(JSON.stringify({ ok: true, context: 'ctx-new' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    // Simulate network reconnecting
+    state.online = true;
+    const sentCount = await flushOutbox();
+
+    assert.equal(sentCount, 1, 'Flush must report 1 message sent');
+    assert.equal(sentMessages.length, 1, 'API call must have been triggered');
+    assert.equal(sentMessages[0].text, 'Message to deliver on reconnect');
+    assert.equal(sentMessages[0].message_id, 'reconn-1');
+
+    // Storage is cleanly purged
+    const remaining = readOutbox();
+    assert.equal(remaining.length, 0, 'Outbox must be empty after successful flush');
+    assert.equal(harness.store['aqvn_outbox'], undefined, 'Storage key must be cleared');
+  });
+});
+
 
 
 

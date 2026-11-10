@@ -19,8 +19,12 @@ aws-lc-rs = { version = "1.19", features = ["prebuilt-nasm"] }
 zip = { version = "9.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 glob = "0.3"
 libc = "0.2"
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "logging"] }
+rustls-pki-types = "1.15"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["io-util"] }

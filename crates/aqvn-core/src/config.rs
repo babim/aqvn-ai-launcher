@@ -180,6 +180,18 @@ pub struct AppConfig {
     pub tls_ca_cert_path: Option<String>,
     #[serde(default)]
     pub tls_skip_verify: bool,
+    #[serde(default)]
+    pub mtls_enabled: bool,
+    #[serde(default = "default_mtls_cert_ttl_hours")]
+    pub mtls_cert_ttl_hours: u64,
+    #[serde(default)]
+    pub mtls_cert_path: Option<String>,
+    #[serde(default)]
+    pub mtls_key_path: Option<String>,
+}
+
+pub fn default_mtls_cert_ttl_hours() -> u64 {
+    24
 }
 
 impl Default for AppConfig {
@@ -218,6 +230,10 @@ impl Default for AppConfig {
             window_state: None,
             tls_ca_cert_path: None,
             tls_skip_verify: false,
+            mtls_enabled: false,
+            mtls_cert_ttl_hours: default_mtls_cert_ttl_hours(),
+            mtls_cert_path: None,
+            mtls_key_path: None,
         }
     }
 }

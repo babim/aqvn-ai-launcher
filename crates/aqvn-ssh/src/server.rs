@@ -484,6 +484,7 @@ fn non_zero(value: u32, fallback: u32) -> u32 {
     }
 }
 
+#[derive(Clone)]
 pub struct SshServer {
     config: AppConfig,
     lockout: LockoutTracker,
@@ -550,6 +551,59 @@ fn server_config() -> Result<Arc<russh::server::Config>, String> {
     }))
 }
 
+pub fn ssh_mtls_server_config(
+    config: &AppConfig,
+) -> Result<Option<Arc<rustls::ServerConfig>>, String> {
+    if !config.mtls_enabled {
+        return Ok(None);
+    }
+    let creds = aqvn_core::mtls::ClusterMtlsCredentials::provision_local(
+        "aqvn-ssh-server",
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        &config.gateway_id,
+        config.mtls_cert_ttl_hours,
+    )
+    .map_err(|e| format!("SSH mTLS credential error: {e}"))?;
+    Ok(Some(creds.server_config))
+}
+
+pub async fn serve_mtls_tunnel(
+    listener: TcpListener,
+    config: AppConfig,
+    tls_config: Arc<rustls::ServerConfig>,
+    lockout: LockoutTracker,
+) -> Result<(), String> {
+    if let Ok(address) = listener.local_addr() {
+        println!("SSH bridge listening on {address} (mTLS 1.3 tunnel enforced)");
+    }
+    let acceptor = tokio_rustls::TlsAcceptor::from(tls_config);
+    let server = SshServer::with_lockout(config, lockout);
+    let ssh_config = server_config()?;
+
+    loop {
+        let (tcp_stream, peer_addr) = listener
+            .accept()
+            .await
+            .map_err(|err| format!("SSH TCP accept error: {err}"))?;
+
+        let acceptor = acceptor.clone();
+        let ssh_config = ssh_config.clone();
+        let mut server_clone = server.clone();
+
+        tokio::spawn(async move {
+            match acceptor.accept(tcp_stream).await {
+                Ok(tls_stream) => {
+                    let handler = server_clone.new_client(Some(peer_addr));
+                    let _ = russh::server::run_stream(ssh_config, tls_stream, handler).await;
+                }
+                Err(err) => {
+                    eprintln!("SSH mTLS handshake failed from {peer_addr}: {err}");
+                }
+            }
+        });
+    }
+}
+
 pub async fn serve(listener: TcpListener, config: AppConfig) -> Result<(), String> {
     serve_with_lockout(listener, config, LockoutTracker::default()).await
 }
@@ -574,7 +628,13 @@ pub async fn run(config: AppConfig) -> Result<(), String> {
     let Some(listener) = bind_if_enabled(&config).await? else {
         return Ok(());
     };
-    serve(listener, config).await
+    if config.mtls_enabled {
+        let tls_config = ssh_mtls_server_config(&config)?
+            .ok_or_else(|| "SSH mTLS enabled but no server config generated".to_string())?;
+        serve_mtls_tunnel(listener, config, tls_config, LockoutTracker::default()).await
+    } else {
+        serve(listener, config).await
+    }
 }
 
 pub const INITIAL_BACKOFF: Duration = Duration::from_secs(1);

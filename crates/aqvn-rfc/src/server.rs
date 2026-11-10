@@ -11,6 +11,7 @@ use axum::{
     http::{header, HeaderValue, Method, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::any,
+    serve::ListenerExt,
     Json, Router,
 };
 use serde_json::Value;
@@ -354,6 +355,62 @@ pub async fn bind_if_enabled(config: &AppConfig) -> Result<Option<TcpListener>, 
     Ok(Some(listener))
 }
 
+pub struct TlsListener {
+    tcp: TcpListener,
+    acceptor: tokio_rustls::TlsAcceptor,
+}
+
+impl TlsListener {
+    pub fn new(tcp: TcpListener, tls_config: Arc<rustls::ServerConfig>) -> Self {
+        Self {
+            tcp,
+            acceptor: tokio_rustls::TlsAcceptor::from(tls_config),
+        }
+    }
+}
+
+impl axum::serve::Listener for TlsListener {
+    type Io = tokio_rustls::server::TlsStream<tokio::net::TcpStream>;
+    type Addr = SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            let (stream, addr) = match self.tcp.accept().await {
+                Ok(res) => res,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                }
+            };
+            match self.acceptor.accept(stream).await {
+                Ok(tls_stream) => return (tls_stream, addr),
+                Err(err) => {
+                    eprintln!("RFC mTLS handshake failed from {addr}: {err}");
+                    continue;
+                }
+            }
+        }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.tcp.local_addr()
+    }
+}
+
+pub fn mtls_server_config(config: &AppConfig) -> Result<Option<Arc<rustls::ServerConfig>>, String> {
+    if !config.mtls_enabled {
+        return Ok(None);
+    }
+    let creds = aqvn_core::mtls::ClusterMtlsCredentials::provision_local(
+        "aqvn-rfc-server",
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        &config.gateway_id,
+        config.mtls_cert_ttl_hours,
+    )
+    .map_err(|e| format!("RFC mTLS credential error: {e}"))?;
+    Ok(Some(creds.server_config))
+}
+
 pub async fn serve(listener: TcpListener, state: RfcState) -> std::io::Result<()> {
     if let Ok(address) = listener.local_addr() {
         println!("RFC server listening on http://{address}/api/rfc");
@@ -365,13 +422,37 @@ pub async fn serve(listener: TcpListener, state: RfcState) -> std::io::Result<()
     .await
 }
 
+pub async fn serve_mtls(
+    listener: TcpListener,
+    state: RfcState,
+    tls_config: Arc<rustls::ServerConfig>,
+) -> std::io::Result<()> {
+    if let Ok(address) = listener.local_addr() {
+        println!("RFC server listening on https://{address}/api/rfc (mTLS 1.3 enforced)");
+    }
+    let tls_listener = TlsListener::new(listener, tls_config).tap_io(|_| {});
+    axum::serve(
+        tls_listener,
+        router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+}
+
 pub async fn run(config: AppConfig) -> Result<(), String> {
     let Some(listener) = bind_if_enabled(&config).await? else {
         return Ok(());
     };
-    serve(listener, build_state(&config))
-        .await
-        .map_err(|err| format!("RFC server error: {err}"))
+    if config.mtls_enabled {
+        let tls_config = mtls_server_config(&config)?
+            .ok_or_else(|| "mTLS enabled but no server config generated".to_string())?;
+        serve_mtls(listener, build_state(&config), tls_config)
+            .await
+            .map_err(|err| format!("RFC server error: {err}"))
+    } else {
+        serve(listener, build_state(&config))
+            .await
+            .map_err(|err| format!("RFC server error: {err}"))
+    }
 }
 
 pub const INITIAL_BACKOFF: Duration = Duration::from_secs(1);

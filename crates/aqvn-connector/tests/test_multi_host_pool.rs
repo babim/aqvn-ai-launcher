@@ -474,7 +474,7 @@ async fn test_multi_host_pool_telemetry_benchmarks_val_v2_bench_002() {
     let mut samples: Vec<f64> = Vec::with_capacity(1_000);
     for _ in 0..1_000 {
         let ms = config.next_interval().as_millis() as f64;
-        assert!(ms >= 8_000.0 && ms <= 12_000.0);
+        assert!((8_000.0..=12_000.0).contains(&ms));
         samples.push(ms);
     }
 

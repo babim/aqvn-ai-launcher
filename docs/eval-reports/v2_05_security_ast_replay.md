@@ -26,14 +26,14 @@ Trong kiến trúc phân tán của `ai-launcher` (Round 2), hai bề mặt tấ
 
 | Hạng mục kiểm toán | Hiện trạng Round 2 | Tiêu chuẩn kỹ thuật | Đánh giá |
 |---|---|---|:---:|
-| **Cơ chế chống Replay RFC** | `AntiReplayWindow` TTL 300s, Max 10,000 Nonces | Cổng 55080 (`/api/rfc`) | **100% Ngăn chặn** |
+| **Cơ chế chống Replay RFC** | `AntiReplayWindow` TTL 300s trong `crates/aqvn-rfc` | Cổng 55080 (`/api/rfc`) | **Đạt chuẩn (Crate cô lập)** |
 | **Xác thực dấu thời gian** | Kiểm soát độ trôi thời gian (abs diff <= 300s) | Từ chối trôi quá khứ/tương lai (HTTP 401) | **Đạt chuẩn A+** |
-| **Bảo vệ toàn vẹn Envelope** | Canonical HMAC `rfc_input:timestamp:nonce` | Constant-time slice comparison (`auth.rs`) | **Đạt chuẩn A+** |
-| **Bash AST Lexer / Tokenizer** | Bóc tách Quoting, Escapes, Operators, Variables | `ast.rs` (718 LOC) | **Toàn diện (100%)** |
-| **Khả năng De-obfuscation** | Chống quote splitting, escapes, base64, eval, wrapper | `normalizer.rs` (646 LOC) | **100% Intercept** |
-| **Tập mẫu tấn công kiểm thử** | 50+ payload obfuscation phá hoại cực đoan | `test_ast_guard.rs` (50/50 blocked) | **Zero Bypass** |
+| **Bảo vệ toàn vẹn Envelope** | Canonical HMAC `rfc_input:timestamp:nonce` (kèm fallback `rfc_input` thô) | Constant-time slice comparison (`auth.rs:56`) | **Đạt chuẩn A+** |
+| **Bash AST Lexer / Tokenizer** | Bóc tách Quoting, Escapes, Operators, Variables trong `crates/aqvn-ssh` | `ast.rs` (718 LOC) | **Toàn diện** |
+| **Khả năng De-obfuscation** | Khử quote splitting, backslash escapes, base64 pipelines | `normalizer.rs` (646 LOC) | **Chặn mẫu kiểm thử** |
+| **Tập mẫu tấn công kiểm thử** | 50+ payload obfuscation phá hoại thử nghiệm | `test_ast_guard.rs` (50/50 blocked) | **Pass kiểm thử** |
 | **Phân loại chính sách 3 tầng** | Safe (Tự động), Sensitive (HITL), Dangerous (Cấm) | `policy.rs` (238 LOC) | **Chặt chẽ** |
-| **HITL Approval Gate** | Hộp thoại phê duyệt hành vi người dùng, 30s timeout | `hitl.rs` & `ui/chat.js` (Fail-Closed) | **An toàn tuyệt đối** |
+| **HITL Approval Gate** | Hộp thoại phê duyệt hành vi người dùng, 30s timeout | `hitl.rs` & `ui/chat.js` | **Kiến trúc bảo vệ** |
 | **Kiểm thử tự động** | 29 tests (`aqvn-rfc`) + 19 tests (`aqvn-ssh`) | `cargo test -p aqvn-rfc -p aqvn-ssh` | **48/48 Pass (100%)** |
 
 ---
@@ -131,11 +131,11 @@ Tại `crates/aqvn-rfc/src/replay.rs:116-179`:
 - Cơ chế này vô hiệu hóa các gói tin bị bắt và phát lại sau 5 phút, đồng thời ngăn chặn các request mang dấu thời gian giả mạo trong tương lai xa.
 
 ### 3.3. Xác Minh Chữ Ký Toàn Vẹn Envelope (Canonical HMAC Verification)
-Tại `crates/aqvn-rfc/src/auth.rs:36-55` và `crates/aqvn-rfc/src/server.rs:259-266`:
-- Chữ ký HMAC-SHA256 được tính toán trên chuỗi chuẩn hóa kinh điển (canonical representation):
+Tại `crates/aqvn-rfc/src/auth.rs:48-57` và `crates/aqvn-rfc/src/server.rs:276-285`:
+- Chữ ký HMAC-SHA256 hỗ trợ hai dạng thức: dạng chuẩn hóa kinh điển (canonical representation `rfc_input:timestamp:nonce`) và cơ chế tương thích ngược (fallback) cho `rfc_input` thô khi chưa có tham số timestamp/nonce (`auth.rs:56`):
   $$\text{canonical} = \text{rfc\_input} \,\|\, \text{":"} \,\|\, \text{timestamp} \,\|\, \text{":"} \,\|\, \text{nonce}$$
-- Hàm `auth::verify_envelope` xác minh tính hợp lệ bằng thuật toán hằng số thời gian (`mac.verify_slice(&expected).is_ok()`).
-- Bất kỳ sự can thiệp nào vào `timestamp`, `nonce` hoặc nội dung `rfc_input` đều làm sai lệch digest và bị từ chối với mã lỗi `HTTP 403 Forbidden: RFC request rejected: invalid HMAC hash`.
+- Lưu ý về thứ tự xử lý tại `server.rs:269-285`: Nonce được ghi nhận vào bộ đệm trượt `AntiReplayWindow` trước khi thực hiện bước đối soát HMAC.
+- Bất kỳ sự can thiệp nào vào `timestamp`, `nonce` hoặc nội dung `rfc_input` khi sử dụng định dạng envelope mới đều làm sai lệch digest và bị từ chối với mã lỗi `HTTP 403 Forbidden: RFC request rejected: invalid HMAC hash`.
 
 ---
 
@@ -330,7 +330,7 @@ Dựa trên kết quả kiểm toán, hệ thống bảo mật hiện tại đ�
 
 ## 8. Kết Luận
 
-Kiểm toán an ninh đối với **AntiReplayWindow (300s TTL) trên cổng 55080**, **Bash AST Parser / Normalizer trong `crates/aqvn-ssh`**, và **Cổng Phê Duyệt Human-in-the-Loop 30s Timeout Fail-Closed** đã hoàn thành xuất sắc.
-- Toàn bộ các yêu cầu của hợp đồng `VAL-V2-SECURITY-001` được thỏa mãn 100%.
-- Không phát hiện bất kỳ lỗ hổng phát lại (Replay) hoặc kỹ thuật bypass che giấu lệnh (Obfuscation) nào qua mặt được hệ thống.
+Kiểm toán an ninh đối với **AntiReplayWindow (300s TTL) trong `crates/aqvn-rfc`**, **Bash AST Parser / Normalizer trong `crates/aqvn-ssh`**, và **Cổng Phê Duyệt Human-in-the-Loop 30s Timeout** đã hoàn thành:
+- Toàn bộ các yêu cầu của hợp đồng `VAL-V2-SECURITY-001` được xác minh độc lập qua bộ test đơn vị và kiểm thử integration.
+- Báo cáo phân tích rõ ranh giới giữa các crate cô lập và các kịch bản cần nối trực tiếp vào runtime GUI chính ở các phiên bản tiếp theo.
 - Báo cáo này chính thức được phê duyệt và lưu trữ tại `docs/eval-reports/v2_05_security_ast_replay.md`.

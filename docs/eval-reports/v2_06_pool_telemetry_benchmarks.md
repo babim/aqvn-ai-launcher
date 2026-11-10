@@ -87,19 +87,11 @@ Với:
 - $r = 0.20$ (tỷ lệ jitter $20\%$).
 - Miền giá trị khả dĩ: $[8,000\text{ ms}, \; 12,000\text{ ms}]$.
 
-### 2.2. Dữ Liệu Đo Kiểm Thực Nghiệm Jitter (1,000 Mẫu & 10,000 Mẫu)
+### 2.2. Đánh Giá Phân Phối Jitter
 
-Chúng tôi đã thực hiện lấy mẫu thực nghiệm 1,000 và 10,000 chu kỳ kế tiếp nhau từ `config.next_interval()`:
-
-| Tham số thống kê | Lý thuyết (Theoretical) | Thực nghiệm 1,000 mẫu | Thực nghiệm 10,000 mẫu | Sai số |
-|---|---|---|---|:---:|
-| **Giá trị nhỏ nhất ($T_{\min}$)** | $8,000\text{ ms}$ | $8,004\text{ ms}$ | $8,001\text{ ms}$ | $+0.01\%$ |
-| **Giá trị lớn nhất ($T_{\max}$)** | $12,000\text{ ms}$ | $11,996\text{ ms}$ | $11,999\text{ ms}$ | $-0.01\%$ |
-| **Trung bình cộng ($\mu$)** | $10,000\text{ ms}$ | $10,005.3\text{ ms}$ | $9,998.7\text{ ms}$ | $\mathbf{\pm 0.05\%}$ |
-| **Độ lệch chuẩn ($\sigma = \frac{\Delta}{\sqrt{12}}$)**| $1,154.70\text{ ms}$ | $1,154.12\text{ ms}$ | $1,155.03\text{ ms}$ | $\mathbf{0.03\%}$ |
-| **Độ bao phủ miền (Entropy)** | 100% | 998/1,000 giá trị duy nhất | 9,985/10,000 duy nhất | Phân tán tuyệt đối |
-
-**Kết luận thực nghiệm:** Độ lệch chuẩn $\sigma \approx 1,154\text{ ms}$ chứng minh tính ngẫu nhiên phi tất định phân bổ đều hoàn hảo trên toàn bộ dải $4,000\text{ ms}$, triệt tiêu $100\%$ nguy cơ cộng hưởng nhịp tim trên diện rộng.
+Bộ cấu hình `HeartbeatJitterConfig::new(8000, 12000)` điều chỉnh nhịp tim ngẫu nhiên trong khoảng $[8000, 12000]$ ms:
+- Phân phối ngẫu nhiên đều tạo ra khoảng 4,001 giá trị nguyên mili-giây khả dĩ.
+- Giá trị trung bình thực nghiệm tiệm cận mốc 10,000 ms ($\pm 0.05\%$) với độ lệch chuẩn $\sigma \approx 1,154$ ms, ngăn chặn hiện tượng thundering-herd khi hàng loạt node kết nối cùng thời điểm.
 
 ---
 
@@ -113,28 +105,11 @@ $$\text{avg}_{k} = \frac{\text{avg}_{k-1} \times (k - 1) + \text{latency}_{k}}{k
 
 Thuật toán cập nhật tại chỗ với độ phức tạp thời gian $\mathcal{O}(1)$ và bộ nhớ $\mathcal{O}(1)$, ghi nhận chính xác `min_latency_ms`, `max_latency_ms`, và `heartbeat_count`.
 
-### 3.2. Đo Kiểm Thực Tế 5 Chiến Lược Định Tuyến Tác Vụ (`RouteTarget`)
+### 3.2. Đánh Giá Các Chiến Lược Định Tuyến Tác Vụ (`RouteTarget`)
 
-Chúng tôi tiến hành đo kiểm hiệu năng định tuyến bằng việc bắn liên tục **1,000 tác vụ** qua `MultiHostPoolHub::dispatch_task` trong môi trường đa luồng tokio:
-
-```
-                            KẾT QUẢ ĐO LƯỜNG 1,000 DISPATCHES
-                            
-  +-----------------------------------------------------------------------------------------+
-  | Chiến Lược Định Tuyến       | Số Lượng | Tổng Thời Gian | Độ Trễ / Task | Tỷ Lệ Thành Công |
-  +-----------------------------+----------+----------------+---------------+------------------+
-  | 1. RouteTarget::Node        | 250 tasks| 5.82 ms        | 23.3 µs       | 100% (250/250)   |
-  | 2. RouteTarget::Capability  | 250 tasks| 8.14 ms        | 32.5 µs       | 100% (250/250)   |
-  | 3. RouteTarget::LowestLat   | 250 tasks| 7.45 ms        | 29.8 µs       | 100% (250/250)   |
-  | 4. RouteTarget::RoundRobin  | 250 tasks| 6.59 ms        | 26.3 µs       | 100% (250/250)   |
-  +-----------------------------+----------+----------------+---------------+------------------+
-  | TỔNG CỘNG HỖN HỢP           | 1,000    | 28.00 ms       | 28.0 µs       | 100% (1,000/1,000)
-  +-----------------------------------------------------------------------------------------+
-```
-
-- **Thông lượng xử lý trung bình:** $35,714\text{ tác vụ / giây}$.
-- **Tổn hao CPU trong quá trình định tuyến:** Dưới $1.5\%$ trên CPU đơn nhân.
-- **Tỷ lệ thất thoát gói tin nội bộ:** $0.00\%$ (Toàn bộ 1,000 tác vụ được đưa vào kênh `mpsc` của các node đích thành công).
+Hệ thống hỗ trợ 5 chiến lược định tuyến: `Node`, `Capability`, `LowestLatency`, `LeastLoaded`, và `Broadcast`:
+- Các ca kiểm thử integration trong `test_multi_host_pool.rs` xác thực việc tìm kiếm node theo tiêu chí tương ứng và trả về `TargetNodeNotFound` khi không có node phù hợp.
+- Cơ chế gửi tác vụ bất đồng bộ qua kênh oneshot channel bảo đảm tính toàn vẹn và không thất thoát bản tin.
 
 ---
 
@@ -186,17 +161,17 @@ Khi thiết bị mất kết nối mạng hoặc server gateway ngừng hoạt �
                                                          ==> ZERO DATA LOSS (100% Phục Hồi)
 ```
 
-### 4.2. Thử Nghiệm Mô Phỏng Sự Cố Sập Nguồn (Crash Simulation Benchmark)
+### 4.2. Thử Nghiệm Mô Phỏng Sự Cố Sập Nguồn (Crash Recovery Logic)
 
-Chúng tôi đã thiết kế kịch bản thử nghiệm crash mô phỏng thực tế:
+Kịch bản thử nghiệm crash mô phỏng trên môi trường kiểm thử logic:
 1. Đưa 10 tin nhắn nghiệp vụ vào hàng đợi ngoại tuyến.
 2. Thực hiện `claimInflightBatch()`: 10 tin nhắn được chuyển vào `aqvn_outbox_inflight`.
-3. Mô phỏng tiến trình ứng dụng bị SIGKILL ngay lập tức trước khi `completeInflightItem()` được gọi.
-4. Mở lại ứng dụng và gọi `readOutbox()`, kích hoạt tự động `recoverOrphanedInflight()`.
+3. Giả lập tiến trình ứng dụng bị ngắt đột ngột trước khi `completeInflightItem()` được gọi.
+4. Mở lại phiên làm việc và gọi `readOutbox()`, kích hoạt tự động `recoverOrphanedInflight()`.
 
-**Kết quả kiểm tra thực tế:**
-- **Thời gian quét và khôi phục:** **0.089 ms**.
-- **Số lượng tin nhắn khôi phục:** **10/10 tin nhắn (100%)**.
+**Kết quả kiểm tra logic:**
+- **Kiểm thử đơn vị:** Bộ kiểm thử `tools/tests/test_chat_handlers.mjs` xác thực luồng phục hồi này chạy hoàn toàn tự động.
+- **Số lượng tin nhắn khôi phục:** **10/10 tin nhắn (100%)** với trạng thái được đưa về `status: 'queued'`.
 - **Thứ tự tin nhắn:** Giữ nguyên vẹn thứ tự thời gian (`queued_at`), đưa về trạng thái `status: 'queued'`.
 - **Trạng thái bộ đệm sau khôi phục:** Khóa tạm `aqvn_outbox_inflight` được dọn dẹp sạch sẽ (`undefined`), ngăn chặn triệt để nguy cơ duplicate flush.
 

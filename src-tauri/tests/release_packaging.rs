@@ -169,7 +169,11 @@ fn val_agent_rel_001_headless_linux_release_binary() {
     );
 
     // 2. Check binary path
-    let bin_path = manifest_dir().join("target/release/aqvn-agent");
+    let bin_path = if repo_root().join("target/release/aqvn-agent").exists() {
+        repo_root().join("target/release/aqvn-agent")
+    } else {
+        manifest_dir().join("target/release/aqvn-agent")
+    };
     if !bin_path.exists() {
         let status = std::process::Command::new("cargo")
             .arg("build")
@@ -448,8 +452,8 @@ fn val_pkg_002_windows_nsis_and_msi_bundle_configuration_and_size_guard() {
 #[test]
 fn val_gate_size_001_binary_size_gate_and_footprint_check() {
     // 1. Verify aqvn-agent release binary <= 2.80MB (2,936,012 bytes)
-    let agent_bin = manifest_dir().join("target/release/aqvn-agent");
-    let fallback_agent = repo_root().join("target/release/aqvn-agent");
+    let agent_bin = repo_root().join("target/release/aqvn-agent");
+    let fallback_agent = manifest_dir().join("target/release/aqvn-agent");
     let target_agent = if agent_bin.exists() {
         agent_bin
     } else {
@@ -467,8 +471,8 @@ fn val_gate_size_001_binary_size_gate_and_footprint_check() {
     }
 
     // 2. Verify aqvn-workspace release binary <= 12.0MB (12,582,912 bytes)
-    let workspace_bin = manifest_dir().join("target/release/aqvn-workspace");
-    let fallback_workspace = repo_root().join("target/release/aqvn-workspace");
+    let workspace_bin = repo_root().join("target/release/aqvn-workspace");
+    let fallback_workspace = manifest_dir().join("target/release/aqvn-workspace");
     let target_workspace = if workspace_bin.exists() {
         workspace_bin
     } else {
@@ -624,4 +628,125 @@ fn val_prod_alloc_003_mimalloc_and_pgo_pipeline_integration() {
             MAX_PGO_AGENT_BYTES
         );
     }
+}
+
+#[test]
+fn val_prod_release_002_enterprise_release_quality_gate() {
+    // 1. Verify all 9 member crates registered in root workspace Cargo.toml
+    let root_cargo =
+        fs::read_to_string(repo_root().join("Cargo.toml")).expect("must read root Cargo.toml");
+    let required_members = [
+        "crates/aqvn-core",
+        "crates/aqvn-rfc",
+        "crates/aqvn-ssh",
+        "crates/aqvn-proxy",
+        "crates/aqvn-connector",
+        "crates/aqvn-agent",
+        "crates/aqvn-crdt",
+        "crates/aqvn-plugin",
+        "src-tauri",
+    ];
+    for member in required_members {
+        assert!(
+            root_cargo.contains(&format!("\"{member}\"")),
+            "root Cargo.toml workspace members must include {member}"
+        );
+    }
+
+    // 2. Verify root Cargo.toml release profile hardening (opt-level = \"z\", lto = true, strip = true)
+    assert!(
+        root_cargo.contains("[profile.release]"),
+        "root Cargo.toml must configure [profile.release]"
+    );
+    assert!(
+        root_cargo.contains("opt-level = \"z\""),
+        "root Cargo.toml must configure opt-level = 'z'"
+    );
+    assert!(
+        root_cargo.contains("lto = true"),
+        "root Cargo.toml must configure lto = true"
+    );
+    assert!(
+        root_cargo.contains("strip = true"),
+        "root Cargo.toml must configure strip = true"
+    );
+    assert!(
+        root_cargo.contains("panic = \"abort\""),
+        "root Cargo.toml must configure panic = 'abort'"
+    );
+
+    // 3. Verify Linux binary size gates (<12MB Linux Desktop, <2.8MB Linux Agent)
+    let agent_bin = repo_root().join("target/release/aqvn-agent");
+    let fallback_agent = manifest_dir().join("target/release/aqvn-agent");
+    let target_agent = if agent_bin.exists() {
+        agent_bin
+    } else {
+        fallback_agent
+    };
+    if target_agent.exists() {
+        let size = fs::metadata(&target_agent).expect("metadata").len();
+        const MAX_AGENT_BYTES: u64 = (2.80 * 1024.0 * 1024.0) as u64; // 2.80 MB (2,936,012 B)
+        assert!(
+            size > 0 && size <= MAX_AGENT_BYTES,
+            "aqvn-agent binary size ({} bytes) must be <= 2.80MB",
+            size
+        );
+    }
+
+    let workspace_bin = repo_root().join("target/release/aqvn-workspace");
+    let fallback_workspace = manifest_dir().join("target/release/aqvn-workspace");
+    let target_workspace = if workspace_bin.exists() {
+        workspace_bin
+    } else {
+        fallback_workspace
+    };
+    if target_workspace.exists() {
+        let size = fs::metadata(&target_workspace).expect("metadata").len();
+        const MAX_WORKSPACE_BYTES: u64 = 12 * 1024 * 1024; // 12.0 MB (12,582,912 B)
+        assert!(
+            size > 0 && size <= MAX_WORKSPACE_BYTES,
+            "aqvn-workspace binary size ({} bytes) must be <= 12.0MB",
+            size
+        );
+    }
+
+    // 4. Verify Windows NSIS size gate config (<9.8MB)
+    let tauri_conf_raw = fs::read_to_string(manifest_dir().join("tauri.conf.json"))
+        .expect("must read src-tauri/tauri.conf.json");
+    let tauri_conf: serde_json::Value =
+        serde_json::from_str(&tauri_conf_raw).expect("tauri.conf.json must be valid JSON");
+    assert_eq!(
+        tauri_conf["bundle"]["windows"]["webviewInstallMode"]["type"].as_str(),
+        Some("downloadBootstrapper"),
+        "webviewInstallMode must be downloadBootstrapper to satisfy < 9.8MB NSIS size gate"
+    );
+
+    // 5. Verify memory leak protection and resource sanitization assets
+    let zeroize_secret = fs::read_to_string(repo_root().join("crates/aqvn-core/src/secret.rs"))
+        .expect("must read crates/aqvn-core/src/secret.rs");
+    assert!(
+        zeroize_secret.contains("Zeroize") && zeroize_secret.contains("ZeroizeOnDrop"),
+        "crates/aqvn-core/src/secret.rs must implement Zeroize and ZeroizeOnDrop"
+    );
+
+    let plugin_config = fs::read_to_string(repo_root().join("crates/aqvn-plugin/src/config.rs"))
+        .expect("must read crates/aqvn-plugin/src/config.rs");
+    assert!(
+        plugin_config.contains("DEFAULT_FUEL_LIMIT: u64 = 10_000_000")
+            && plugin_config.contains("DEFAULT_EPOCH_TIMEOUT_MS: u64 = 500")
+            && plugin_config.contains("DEFAULT_MAX_MEMORY_BYTES"),
+        "crates/aqvn-plugin/src/config.rs must enforce fuel metering (10M), epoch timeout (500ms), and 32MB max memory"
+    );
+
+    let syntax_worker = repo_root().join("ui/workers/syntax-worker.js");
+    assert!(
+        syntax_worker.exists(),
+        "ui/workers/syntax-worker.js off-main-thread worker must exist"
+    );
+
+    let virtual_list = repo_root().join("ui/components/aqvn-virtual-message-list.js");
+    assert!(
+        virtual_list.exists(),
+        "ui/components/aqvn-virtual-message-list.js viewport culling component must exist"
+    );
 }

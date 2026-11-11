@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Windows WebView2 Origin Normalization**: The local loopback proxy (`src-tauri/src/proxy/server.rs`) accepts Microsoft Edge WebView2 origins (`http://tauri.localhost`, `https://tauri.localhost`, `http://127.0.0.1:<port>`, and `http://localhost:<port>`), preventing WebSocket connection rejections on Windows (`VAL-WIN-001`).
+- **Enterprise v2.0 Production Hardening & Completion (`change243-change249`)**:
+  - **True Viewport DOM Culling & Syntax Web Worker (`change243`)**: Upgraded `<aqvn-virtual-message-list>` to detach off-screen `<article>` DOM nodes (<60 nodes constant) and offloaded CodeMirror 6 tokenization to `ui/workers/syntax-worker.js` (`VAL-PROD-CULL-001`, `VAL-PROD-WORKER-002`).
+  - **Global `mimalloc` & PGO/BOLT Optimization (`change244`)**: Integrated `mimalloc` global allocator across `aqvn-agent` and `aqvn-workspace`, added PGO/BOLT optimization targets in `Taskfile.yml`, and hardened `TEST_ENV_MUTEX` (`VAL-PROD-ALLOC-003`).
+  - **Linux Landlock LSM & Seccomp-BPF Kernel Confinement (`change245`)**: Enforced kernel-level filesystem sandboxing (`EACCES` outside `allowed_paths`) and dangerous syscall blocking (`EPERM` via Seccomp-BPF) in `crates/aqvn-ssh` and `crates/aqvn-rfc` (`VAL-PROD-LANDLOCK-001`).
+  - **Zero-Trust mTLS 1.3 & OS Native Keyring Vault (`change246`)**: Added `KeyringVault` with ChaCha20-Poly1305 envelope encryption, Argon2id KDF, `ZeroizeOnDrop` memory hygiene, Ed25519 X.509 Local Root CA, SPIFFE SANs, and mTLS 1.3 listeners on RFC/SSH (`VAL-PROD-KEYRING-002`).
+  - **Distributed CRDT Workspace Engine (`crates/aqvn-crdt`, `change247`)**: Built Loro-based Movable Tree CRDT, bidirectional CodeMirror 6 Text CRDT buffer, Session Awareness, and SHA-256 snapshot store (`VAL-PROD-CRDT-001`).
+  - **Sandboxed WASM Plugin Runtime (`crates/aqvn-plugin`, `change248`)**: Integrated Wasmtime 26 Component Model (WASI Preview 2) with Fuel Metering (10M ops), Epoch Interruption (500ms), 32MB StoreLimits, and WIT plugin bindings (`VAL-PROD-WASM-001`).
+  - **Enterprise Release Quality Gates (`change249`)**: Verified full regression (212 Node tests, 535 Rust tests across 9 member crates), memory soak hygiene, clippy `-D warnings`, and release size thresholds (`aqvn-agent` 2.49 MB <= 2.80 MB, `aqvn-workspace` 11.16 MB <= 12.0 MB) (`VAL-PROD-RELEASE-002`).
 - **Multi-Crate Cargo Workspace Architecture (`change225`)**: Re-architected monolithic `src-tauri` into a root Cargo Workspace with 6 specialized member crates:
   - `crates/aqvn-core`: Common protocol schemas, IPC models, configuration types, and telemetry primitives.
   - `crates/aqvn-rfc`: RFC host bridge HTTP server with HMAC-SHA256 constant-time verification.

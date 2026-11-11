@@ -433,6 +433,14 @@ A comprehensive architectural audit, deep UI/UX capability research, and multi-p
 - `docs/proposals/v2_production_hardening_blueprint.md` — Blueprint for eBPF sandbox, Distributed CRDT workspace sync, and WASM plugins.
 - `docs/proposals/v2_master_roadmap_openspec.md` — Actionable draft changes `change243` to `change248` for future expansion.
 
+### 5. Enterprise v2.0 Production Hardening Implemented (`change243-change249`)
+- **True Viewport DOM Culling & Web Worker Syntax Highlighting (`change243`)**: Upgraded `<aqvn-virtual-message-list>` with dynamic windowed slicing detaching off-screen `<article>` nodes (<60 DOM nodes), and moved CodeMirror 6 highlighting off the main thread into `ui/workers/syntax-worker.js`.
+- **High-Performance `mimalloc` & PGO/BOLT Pipeline (`change244`)**: Integrated global `mimalloc` allocator into `aqvn-agent` (2.49 MB) and `aqvn-workspace` (11.16 MB), plus PGO/BOLT targets (`bench:pgo`, `build:fast`) in `Taskfile.yml`.
+- **Kernel-Level Confinement (`change245`)**: Implemented Linux Landlock LSM path confinement and Seccomp-BPF syscall filtering in `crates/aqvn-ssh` and `crates/aqvn-rfc`.
+- **Zero-Trust mTLS 1.3 & OS Native Keyring Vault (`change246`)**: Added native Secret Service / Kernel Keyring / Keychain / Encrypted File vault with ChaCha20-Poly1305 AEAD, Argon2id KDF, Zeroize RAM scrub, Ed25519 X.509 Local CA, and mutual TLS 1.3 tunnels on RFC 55080 and SSH 55022.
+- **Distributed CRDT Workspace (`crates/aqvn-crdt`, `change247`)**: Integrated Loro CRDT Movable Tree for conflict-free Workspace explorer synchronization, bidirectional CodeMirror 6 Text CRDT buffer, Session Awareness, and SHA-256 snapshot store.
+- **Sandboxed WASM Plugin Runtime (`crates/aqvn-plugin`, `change248`)**: Embedded Wasmtime 26 Component Model (WASI Preview 2) with Fuel Metering (10M units), Epoch Interruption (500ms timeout), and dynamic AST rule evaluation.
+
 ---
 
 ## License & Whitelabel Notice

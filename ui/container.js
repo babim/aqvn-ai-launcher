@@ -608,6 +608,7 @@
     if (typeof document === 'undefined' || !document.body) return false;
     installFocusModeStyles();
     var active = document.body.classList.toggle('aqvn-focus-mode');
+    document.body.classList.toggle('focus-mode', active);
     var input =
       (document.querySelector &&
         document.querySelector(

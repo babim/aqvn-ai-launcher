@@ -289,3 +289,13 @@ fn test_ast_guard_variable_obfuscation_bypass() {
     assert!(check("A=rm; B=' -rf /'; $A$B").is_some());
     assert!(check(r#"CMD="rm -rf /"; $CMD"#).is_some());
 }
+
+#[test]
+fn test_ast_guard_combined_flags_and_octal_escapes() {
+    // Combined shell option clusters (-lc, -ec)
+    assert!(check("bash -lc \"rm -rf /\"").is_some());
+    assert!(check("sh -ec \"rm -rf /\"").is_some());
+
+    // Timeout with zero-arg flag (--preserve-status)
+    assert!(check("timeout --preserve-status 10 rm -rf /").is_some());
+}

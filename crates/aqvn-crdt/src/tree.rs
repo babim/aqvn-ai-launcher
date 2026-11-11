@@ -222,9 +222,13 @@ impl WorkspaceMovableTree {
         self.tree().children(parent).unwrap_or_default()
     }
 
-    /// Get all active node IDs in the tree.
+    /// Get all active (non-deleted) node IDs in the tree.
     pub fn all_nodes(&self) -> Vec<TreeID> {
-        self.tree().nodes()
+        let tree = self.tree();
+        tree.nodes()
+            .into_iter()
+            .filter(|id| !tree.is_node_deleted(id).unwrap_or(true))
+            .collect()
     }
 
     /// Build a hierarchical tree representation.

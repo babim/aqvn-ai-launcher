@@ -15,7 +15,7 @@ services:
       - AQVN_WORKSPACE=/home/aqvn/Workspace
     volumes:
       - agent-workspace:/home/aqvn/Workspace
-      - agent-config:/home/aqvn/.config/net.aqvn.workspace
+      - agent-config:/home/aqvn/.config/net.aqvn.agent
     networks:
       - aqvn-net
 

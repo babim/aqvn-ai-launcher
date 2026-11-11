@@ -13,7 +13,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BINARY="$REPO_ROOT/src-tauri/target/release/aqvn-workspace"
+if [ -x "$REPO_ROOT/target/release/aqvn-workspace" ]; then
+  BINARY="$REPO_ROOT/target/release/aqvn-workspace"
+else
+  BINARY="$REPO_ROOT/src-tauri/target/release/aqvn-workspace"
+fi
 FCP_LOG="/tmp/aqvn-benchmark-fcp.json"
 
 # Gate thresholds

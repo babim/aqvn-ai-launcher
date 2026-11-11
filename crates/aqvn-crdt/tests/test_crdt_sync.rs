@@ -434,3 +434,51 @@ fn test_derive_peer_id_from_gateway_id() {
     assert!(crdt_cfg.peer_id > 0);
     assert_eq!(crdt_cfg.server_url, cfg.server_url);
 }
+
+#[test]
+fn test_text_crdt_utf16_emoji_offsets_and_tree_tombstones() {
+    // Non-BMP emoji "🚀" is 1 Unicode scalar but 2 UTF-16 code units
+    let buf = TextCrdtBuffer::new("🚀 hello world", 99);
+    assert_eq!(buf.len_unicode(), 13);
+    assert_eq!(buf.len_utf16(), 14);
+
+    // CodeMirror 6 reports UTF-16 offset: "🚀 " = 3 code units, "hello" = 5 code units [3..8]
+    buf.apply_codemirror_change(&CodeMirrorChangeSpec {
+        from: 3,
+        to: 8,
+        insert: "rust".to_string(),
+    })
+    .expect("apply utf16 change");
+    assert_eq!(buf.get_content(), "🚀 rust world");
+
+    // Multi-change transaction preserves offsets via reverse order
+    buf.apply_codemirror_changes(&[
+        CodeMirrorChangeSpec {
+            from: 0,
+            to: 2,
+            insert: "🦀".to_string(),
+        },
+        CodeMirrorChangeSpec {
+            from: 8,
+            to: 13,
+            insert: "crdt".to_string(),
+        },
+    ])
+    .expect("apply multi utf16 changes");
+    assert_eq!(buf.get_content(), "🦀 rust crdt");
+
+    // Tree tombstone exclusion check
+    let tree = WorkspaceMovableTree::new(Some(7));
+    let n1 = tree
+        .create_root_entry("keep.txt", false, "/keep.txt")
+        .expect("create keep");
+    let n2 = tree
+        .create_root_entry("drop.txt", false, "/drop.txt")
+        .expect("create drop");
+    assert_eq!(tree.all_nodes().len(), 2);
+
+    tree.delete_entry(n2).expect("delete drop");
+    let active = tree.all_nodes();
+    assert_eq!(active, vec![n1]);
+    assert_eq!(tree.find_by_path("/drop.txt"), None);
+}

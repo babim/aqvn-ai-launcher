@@ -453,6 +453,22 @@ fn parse_ansi_c_quote(chars: &[char], mut i: usize) -> Result<(String, usize), S
                     content.push('\\');
                     i += 2;
                 }
+                '0'..='7' => {
+                    // \NNN octal escape (up to 3 octal digits)
+                    let mut oct = String::new();
+                    let mut oi = i + 1;
+                    while oi < len && oi < i + 4 && matches!(chars[oi], '0'..='7') {
+                        oct.push(chars[oi]);
+                        oi += 1;
+                    }
+                    if let Ok(b) = u8::from_str_radix(&oct, 8) {
+                        content.push(b as char);
+                        i = oi;
+                    } else {
+                        content.push(chars[i + 1]);
+                        i += 2;
+                    }
+                }
                 '\'' => {
                     content.push('\'');
                     i += 2;

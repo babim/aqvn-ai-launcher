@@ -60,6 +60,12 @@ pub fn format_help() -> String {
 }
 
 fn default_server_url() -> String {
+    if let Ok(v) = env::var("AQVN_SERVER") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
     DEFAULT_SERVER_URL.to_string()
 }
 
@@ -78,6 +84,12 @@ fn default_host_label() -> String {
 }
 
 fn default_workspace_path() -> String {
+    if let Ok(v) = env::var("AQVN_WORKSPACE") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
     DEFAULT_WORKSPACE_PATH.to_string()
 }
 

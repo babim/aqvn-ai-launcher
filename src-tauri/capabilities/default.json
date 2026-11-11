@@ -41,6 +41,7 @@
     "allow-notify-task-complete",
     "allow-close-current-window",
     "allow-toggle-fullscreen",
-    "allow-clear-disk-cache"
+    "allow-clear-disk-cache",
+    "allow-reconnect-network"
   ]
 }

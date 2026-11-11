@@ -200,7 +200,7 @@ async fn test_run_supervised_with_reconnect_handles_signal() {
     let (gw_mgr, rx_reconnect) = GatewayManager::new();
     let watcher = ConfigWatcher::new(AppConfig {
         connector_enabled: false,
-        server_url: "http://[IP]:9".to_string(),
+        server_url: "http://127.0.0.1:9".to_string(),
         ..Default::default()
     });
 

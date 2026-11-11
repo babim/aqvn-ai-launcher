@@ -61,6 +61,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cleared 8 advisories: `zip` (RUSTSEC-2026-0367/0368/0369/0429, including one critical), `russh` (RUSTSEC-2026-0154), `russh-cryptovec` (RUSTSEC-2026-0153), `crypto-bigint` (RUSTSEC-2026-0387), and `rsa` (RUSTSEC-2023-0071, no patched version) by removing the crate entirely.
 
 ### Fixed
+- **Enterprise Runtime Security & Integration Hardening**:
+  - **RFC Server Nonce Ordering**: Authenticate HMAC envelope before recording nonces into `AntiReplayWindow` sliding cache, eliminating pre-authentication cache exhaustion DoS.
+  - **SSH Normalizer & Terminal Discipline**: Synchronized Ctrl-U (`\x15`) line clearing with PTY, unnested clustered shell options (`bash -lc`, `sh -ec`), parsed zero-argument timeout flags (`--preserve-status`), and decoded octal `\NNN` escapes in ANSI-C quotes.
+  - **Fail-Closed WASM Plugin Posture**: Enforced fail-closed `Block` verdict when WebAssembly AST modules lack required security rule exports or component WIT dispatches.
+  - **CRDT UTF-16 Code-Unit Offset Alignment**: Migrated `TextCrdtBuffer` to UTF-16 code units (`len_utf16`, `insert_utf16`, `delete_utf16`), eliminating cursor drift on non-BMP emojis and surrogate pairs in CodeMirror 6, while filtering deleted tombstone nodes in Movable Tree.
+  - **Headless Agent Environment Ingestion & Docker Build**: Added `AQVN_SERVER`, `AQVN_WORKSPACE`, `AQVN_TOKEN`, `AQVN_PASS`, `AQVN_SCOPES` variable ingestion in `crates/aqvn-agent`, resolved `Dockerfile.agent` workspace member resolution via target stubs and `ui/container.js` asset copy, and aligned Compose config volume to `/home/aqvn/.config/net.aqvn.agent`.
+  - **Tauri Capability Manifest & IPC**: Registered `reconnect_network` command in `build.rs` and granted `allow-reconnect-network` permission in `capabilities/default.json`.
+  - **CI & Release Packaging Parity**: Upgraded CI workflow and `Taskfile.yml` to test and lint `--workspace`, audit root `Cargo.lock`, package standalone `aqvn-agent` release tarball in `release.yml`, and aligned `tools/benchmark.sh` binary resolution.
+  - **Frontend UI & Action Approval Hardening**: Hardened `requestActionApproval` with 30-second timeout fail-closed security, exposed `window.requestActionApproval`, harmonized body `focus-mode` class, and bound live signals to theme and focus toggles.
 - **Clippy Lock Across Await & Formatting in Agent**: Dropped `TEST_ENV_MUTEX` guard before await points in `src-tauri/src/bin/agent.rs` to satisfy `clippy::await_holding_lock`, and formatted agent source and test files.
 - **OpenSpec Change 206 Archival**: Marked completed tasks in `openspec/changes/change206-fix-clippy-as-chunks/tasks.md` and archived directory into `openspec/changes/archive/` (`VAL-DEBT-001`).
 - **Single-Point UI Zoom Normalization**: Zoom is applied once on `documentElement` and any leftover `body` zoom is cleared, so `Ctrl`/`Cmd` `+`/`-` no longer compounds two zoom surfaces (`ui/chat.js`, `ui/container.js`).

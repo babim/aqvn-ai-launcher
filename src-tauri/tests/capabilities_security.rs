@@ -114,7 +114,7 @@ fn test_shell_allow_open_capability_scheme_scope() {
         "http URL should match"
     );
     assert!(
-        matches_scheme_rules("http://[IP]:55088"),
+        matches_scheme_rules("http://127.0.0.1:55088"),
         "http loopback URL should match"
     );
     assert!(
@@ -122,7 +122,7 @@ fn test_shell_allow_open_capability_scheme_scope() {
         "mailto URL should match"
     );
     assert!(
-        matches_scheme_rules("mailto:[EMAIL]?subject=Help"),
+        matches_scheme_rules("mailto:support@example.com?subject=Help"),
         "mailto query URL should match"
     );
 

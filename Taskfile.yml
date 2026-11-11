@@ -35,9 +35,9 @@ tasks:
 
   test:
     desc: Run Rust unit and integration tests
-    dir: src-tauri
     cmds:
-      - cargo test
+      - cargo test --workspace
+      - cargo test -p aqvn-agent -- --test-threads=1
 
   test:node:
     desc: Run Node.js container bridge and chat handler tests
@@ -55,10 +55,9 @@ tasks:
 
   lint:
     desc: Run clippy and format check
-    dir: src-tauri
     cmds:
-      - cargo clippy --all-targets -- -D warnings
-      - cargo fmt --check
+      - cargo clippy --workspace --all-targets -- -D warnings
+      - cargo fmt --check --all
 
   bench:
     desc: Run benchmark suite (release binary size, RSS, FCP, cold start)

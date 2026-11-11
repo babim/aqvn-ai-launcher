@@ -10,6 +10,7 @@ fn main() {
             "show_context_menu",
             "toggle_fullscreen",
             "clear_disk_cache",
+            "reconnect_network",
         ]));
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }

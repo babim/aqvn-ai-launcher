@@ -1558,7 +1558,7 @@ async fn test_bounded_memory_cache_lru_eviction() {
     assert_eq!(cache.max_memory_bytes(), 32 * 1024 * 1024);
     assert_eq!(cache.current_memory_bytes(), 0);
 
-    let origin = "http://[IP]:55088";
+    let origin = "http://127.0.0.1:55088";
 
     // 2. Insert two 12MB assets (total 24MB <= 32MB)
     let chunk_12mb = vec![0xAA; 12 * 1024 * 1024];

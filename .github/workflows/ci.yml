@@ -31,10 +31,10 @@ jobs:
           components: rustfmt, clippy
 
       - name: Check formatting (cargo fmt)
-        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+        run: cargo fmt --check --all
 
       - name: Lint with Clippy
-        run: cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Test Suite (Rust & Node)
@@ -58,7 +58,9 @@ jobs:
           node-version: '20'
 
       - name: Run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: |
+          cargo test --workspace
+          cargo test -p aqvn-agent -- --test-threads=1
 
       - name: Run Node.js tests
         run: |
@@ -101,4 +103,4 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Audit dependencies (0 vulnerabilities)
-        run: cargo audit --file src-tauri/Cargo.lock
+        run: cargo audit --file Cargo.lock

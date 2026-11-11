@@ -131,7 +131,10 @@ impl CrdtSnapshotStore {
         }
 
         let expected_digest = &raw[20..52];
-        let payload_len = u64::from_le_bytes(raw[52..60].try_into().unwrap()) as usize;
+        let payload_len_u64 = u64::from_le_bytes(raw[52..60].try_into().unwrap());
+        let payload_len = usize::try_from(payload_len_u64).map_err(|_| {
+            CrdtError::PersistenceError("snapshot payload length overflows usize".to_string())
+        })?;
 
         if raw.len() != HEADER_LEN + payload_len {
             return Err(CrdtError::PersistenceError(format!(

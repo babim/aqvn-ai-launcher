@@ -135,10 +135,20 @@ fn normalize_simple_command(
             }
         }
     } else if (program == "bash" || program == "sh" || program == "zsh" || program == "dash")
-        && (args.first().map(|s| s.as_str()) == Some("-c") || args.iter().any(|a| a == "-c"))
+        && args.iter().any(|a| {
+            a == "-c"
+                || (a.starts_with('-')
+                    && !a.starts_with("--")
+                    && a.chars().skip(1).any(|ch| ch == 'c'))
+        })
     {
-        // Extract script after -c
-        if let Some(pos) = args.iter().position(|a| a == "-c") {
+        // Extract script after -c (or combined flag cluster like -lc, -ec)
+        if let Some(pos) = args.iter().position(|a| {
+            a == "-c"
+                || (a.starts_with('-')
+                    && !a.starts_with("--")
+                    && a.chars().skip(1).any(|ch| ch == 'c'))
+        }) {
             if let Some(script) = args.get(pos + 1) {
                 if let Ok(nested_ast) = parse_shell_ast(script) {
                     let mut nested_vars = env_vars.clone();
@@ -395,6 +405,21 @@ pub fn decode_escapes(s: &str) -> String {
                     out.push('\\');
                     i += 2;
                 }
+                '0'..='7' => {
+                    let mut oct = String::new();
+                    let mut oi = i + 1;
+                    while oi < len && oi < i + 4 && matches!(chars[oi], '0'..='7') {
+                        oct.push(chars[oi]);
+                        oi += 1;
+                    }
+                    if let Ok(b) = u8::from_str_radix(&oct, 8) {
+                        out.push(b as char);
+                        i = oi;
+                    } else {
+                        out.push(chars[i + 1]);
+                        i += 2;
+                    }
+                }
                 other => {
                     out.push(other);
                     i += 2;
@@ -445,7 +470,13 @@ fn unwrap_wrappers(words: Vec<String>) -> (String, Vec<String>) {
             "timeout" => {
                 idx += 1;
                 while idx < words.len() && words[idx].starts_with('-') {
-                    idx += 2;
+                    let flag = words[idx].as_str();
+                    if flag == "-s" || flag == "--signal" || flag == "-k" || flag == "--kill-after"
+                    {
+                        idx += 2;
+                    } else {
+                        idx += 1;
+                    }
                 }
                 if idx < words.len() {
                     // duration argument

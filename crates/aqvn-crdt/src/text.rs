@@ -80,12 +80,26 @@ impl TextCrdtBuffer {
         self.doc.get_text(self.container_id.as_str())
     }
 
+    /// Length in UTF-16 code units (for CodeMirror 6 / JavaScript compatibility).
+    pub fn len_utf16(&self) -> usize {
+        self.text().len_utf16()
+    }
+
     /// Insert text at character index.
     pub fn insert(&self, pos: usize, content: &str) -> CrdtResult<()> {
         let text = self.text();
         let len = text.len_unicode();
         let safe_pos = pos.min(len);
         text.insert(safe_pos, content)?;
+        Ok(())
+    }
+
+    /// Insert text at UTF-16 code-unit index.
+    pub fn insert_utf16(&self, pos: usize, content: &str) -> CrdtResult<()> {
+        let text = self.text();
+        let len = text.len_utf16();
+        let safe_pos = pos.min(len);
+        text.insert_utf16(safe_pos, content)?;
         Ok(())
     }
 
@@ -101,6 +115,18 @@ impl TextCrdtBuffer {
         Ok(())
     }
 
+    /// Delete text range starting at UTF-16 `pos` with length `len`.
+    pub fn delete_utf16(&self, pos: usize, len: usize) -> CrdtResult<()> {
+        let text = self.text();
+        let total = text.len_utf16();
+        if pos >= total || len == 0 {
+            return Ok(());
+        }
+        let safe_len = len.min(total - pos);
+        text.delete_utf16(pos, safe_len)?;
+        Ok(())
+    }
+
     /// Replace text range `[pos..pos+len]` with `new_content`.
     pub fn replace(&self, pos: usize, len: usize, new_content: &str) -> CrdtResult<()> {
         self.delete(pos, len)?;
@@ -108,26 +134,28 @@ impl TextCrdtBuffer {
         Ok(())
     }
 
-    /// Apply a CodeMirror 6 ChangeSpec directly (`from`, `to`, `insert`).
+    /// Apply a CodeMirror 6 ChangeSpec directly (`from`, `to`, `insert`) using UTF-16 code units.
     pub fn apply_codemirror_change(&self, change: &CodeMirrorChangeSpec) -> CrdtResult<()> {
         let text = self.text();
-        let total = text.len_unicode();
+        let total = text.len_utf16();
         let from = change.from.min(total);
         let to = change.to.min(total).max(from);
         let delete_len = to - from;
 
         if delete_len > 0 {
-            text.delete(from, delete_len)?;
+            text.delete_utf16(from, delete_len)?;
         }
         if !change.insert.is_empty() {
-            text.insert(from, &change.insert)?;
+            text.insert_utf16(from, &change.insert)?;
         }
         Ok(())
     }
 
-    /// Apply a batch of CodeMirror 6 ChangeSpecs.
+    /// Apply a batch of CodeMirror 6 ChangeSpecs in reverse order to preserve offset positions.
     pub fn apply_codemirror_changes(&self, changes: &[CodeMirrorChangeSpec]) -> CrdtResult<()> {
-        for change in changes {
+        let mut sorted = changes.to_vec();
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.from));
+        for change in &sorted {
             self.apply_codemirror_change(change)?;
         }
         Ok(())
@@ -148,13 +176,13 @@ impl TextCrdtBuffer {
         self.text().len_unicode()
     }
 
-    /// Number of lines in the buffer.
+    /// Number of lines in the buffer matching CodeMirror 6.
     pub fn line_count(&self) -> usize {
         let content = self.get_content();
         if content.is_empty() {
             return 1;
         }
-        content.lines().count().max(1)
+        content.split('\n').count().max(1)
     }
 
     /// Retrieve a specific line (0-indexed).
@@ -163,7 +191,7 @@ impl TextCrdtBuffer {
         content.lines().nth(line_idx).map(|s| s.to_string())
     }
 
-    /// Compute minimal ChangeSpecs between an old text snapshot and current buffer content.
+    /// Compute minimal ChangeSpecs between an old text snapshot and current buffer content using UTF-16 code units.
     pub fn compute_diff_changes(&self, prev_content: &str) -> Vec<CodeMirrorChangeSpec> {
         let current = self.get_content();
         if prev_content == current {
@@ -171,28 +199,26 @@ impl TextCrdtBuffer {
         }
 
         let mut start = 0;
-        let prev_chars: Vec<char> = prev_content.chars().collect();
-        let curr_chars: Vec<char> = current.chars().collect();
+        let prev_u16: Vec<u16> = prev_content.encode_utf16().collect();
+        let curr_u16: Vec<u16> = current.encode_utf16().collect();
 
-        while start < prev_chars.len()
-            && start < curr_chars.len()
-            && prev_chars[start] == curr_chars[start]
+        while start < prev_u16.len() && start < curr_u16.len() && prev_u16[start] == curr_u16[start]
         {
             start += 1;
         }
 
-        let mut prev_end = prev_chars.len();
-        let mut curr_end = curr_chars.len();
+        let mut prev_end = prev_u16.len();
+        let mut curr_end = curr_u16.len();
 
         while prev_end > start
             && curr_end > start
-            && prev_chars[prev_end - 1] == curr_chars[curr_end - 1]
+            && prev_u16[prev_end - 1] == curr_u16[curr_end - 1]
         {
             prev_end -= 1;
             curr_end -= 1;
         }
 
-        let inserted: String = curr_chars[start..curr_end].iter().collect();
+        let inserted = String::from_utf16_lossy(&curr_u16[start..curr_end]);
         vec![CodeMirrorChangeSpec {
             from: start,
             to: prev_end,

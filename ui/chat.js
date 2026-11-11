@@ -2061,8 +2061,8 @@
     }
 
     if (!dom.agentApprovalModal) {
-      recordAgentActivity(tool, command, 'allowed', 'Auto-allowed (No approval UI)');
-      return Promise.resolve(true);
+      recordAgentActivity(tool, command, 'denied', 'Auto-denied: approval modal not present (fail-closed)');
+      return Promise.resolve(false);
     }
 
     if (dom.approvalToolName) dom.approvalToolName.textContent = tool;
@@ -2072,7 +2072,17 @@
     dom.agentApprovalModal.hidden = false;
 
     return new Promise(function(resolve) {
+      var timeoutId = setTimeout(function() {
+        if (state.pendingApprovalResolver) {
+          dom.agentApprovalModal.hidden = true;
+          state.pendingApprovalResolver = null;
+          recordAgentActivity(tool, command, 'denied', 'Operation rejected: Human approval timed out after 30s (fail-closed)');
+          resolve(false);
+        }
+      }, 30000);
+
       state.pendingApprovalResolver = function(allowed, forSession) {
+        clearTimeout(timeoutId);
         dom.agentApprovalModal.hidden = true;
         state.pendingApprovalResolver = null;
         if (allowed) {
@@ -2088,6 +2098,12 @@
       };
     });
   }
+
+  try {
+    if (typeof window !== 'undefined') {
+      window.requestActionApproval = requestActionApproval;
+    }
+  } catch (e) {}
 
   function exportAuditJson() {
     var content = JSON.stringify(state.auditTrail, null, 2);
@@ -2628,6 +2644,9 @@
   function setFocusMode(enabled) {
     state.focusMode = !!enabled;
     document.body.classList.toggle('focus-mode', state.focusMode);
+    if (window.AqvnSignals && window.AqvnSignals.focusMode) {
+      window.AqvnSignals.focusMode.value = state.focusMode;
+    }
     if (state.focusMode && dom.input && typeof dom.input.focus === 'function') {
       dom.input.focus();
     }
@@ -2717,6 +2736,9 @@
       theme = THEMES[0];
     }
     state.theme = theme;
+    if (window.AqvnSignals && window.AqvnSignals.currentTheme) {
+      window.AqvnSignals.currentTheme.value = theme;
+    }
     if (document.documentElement) {
       document.documentElement.setAttribute('data-theme', theme);
     }

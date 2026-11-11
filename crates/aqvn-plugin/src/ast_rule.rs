@@ -221,7 +221,11 @@ impl WasmAstRuleEvaluator {
         }
 
         let fuel = engine.get_consumed_fuel(store)?;
-        Ok(AstCheckResponse::allow(fuel))
+        Ok(AstCheckResponse::block(
+            "Fail-closed: module missing required AST security rule export",
+            100,
+            fuel,
+        ))
     }
 
     fn evaluate_component(
@@ -231,6 +235,10 @@ impl WasmAstRuleEvaluator {
         _req: &AstCheckRequest,
     ) -> PluginResult<AstCheckResponse> {
         let fuel = engine.get_consumed_fuel(store)?;
-        Ok(AstCheckResponse::allow(fuel))
+        Ok(AstCheckResponse::block(
+            "Fail-closed: component WIT AST security rule invocation not implemented",
+            100,
+            fuel,
+        ))
     }
 }

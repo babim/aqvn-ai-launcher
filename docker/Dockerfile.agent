@@ -16,6 +16,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY src-tauri/Cargo.toml src-tauri/
+COPY ui/container.js ui/container.js
+
+# Provide minimal target stubs for src-tauri workspace member resolution
+RUN mkdir -p src-tauri/src/bin && \
+    touch src-tauri/src/lib.rs && \
+    echo "fn main() {}" > src-tauri/src/main.rs && \
+    echo "fn main() {}" > src-tauri/src/bin/agent.rs
 
 # Build standalone aqvn-agent in release mode with size optimization
 RUN cargo build --release -p aqvn-agent

@@ -267,13 +267,6 @@ async fn handle_rfc(State(state): State<RfcState>, request: Request<Body>) -> Re
         }
     };
 
-    if let Err(err) = state.replay_guard.check_and_record(timestamp_secs, nonce) {
-        return text_error(
-            StatusCode::UNAUTHORIZED,
-            format!("RFC request rejected: {err}"),
-        );
-    }
-
     let hash = envelope
         .get("hash")
         .and_then(Value::as_str)
@@ -282,6 +275,13 @@ async fn handle_rfc(State(state): State<RfcState>, request: Request<Body>) -> Re
         return text_error(
             StatusCode::FORBIDDEN,
             "RFC request rejected: invalid HMAC hash",
+        );
+    }
+
+    if let Err(err) = state.replay_guard.check_and_record(timestamp_secs, nonce) {
+        return text_error(
+            StatusCode::UNAUTHORIZED,
+            format!("RFC request rejected: {err}"),
         );
     }
 

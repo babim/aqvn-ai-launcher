@@ -100,7 +100,7 @@ impl WorkspaceCrdtEngine {
             }
         }
 
-        let mut buffers = self.buffers.write().unwrap();
+        let mut buffers = self.buffers.write().unwrap_or_else(|e| e.into_inner());
         if let Some(buf) = buffers.get(&container_name) {
             return buf.clone();
         }

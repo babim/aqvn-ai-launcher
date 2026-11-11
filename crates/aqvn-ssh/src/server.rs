@@ -429,6 +429,8 @@ impl Handler for ClientHandler {
                 for &b in chunk {
                     if b == b'\x7f' || b == b'\x08' {
                         state.line.pop();
+                    } else if b == b'\x15' {
+                        state.line.clear();
                     } else {
                         state.line.push(b);
                     }
@@ -441,6 +443,8 @@ impl Handler for ClientHandler {
                 for &b in chunk {
                     if b == b'\x7f' || b == b'\x08' {
                         state.line.pop();
+                    } else if b == b'\x15' {
+                        state.line.clear();
                     } else {
                         state.line.push(b);
                     }

@@ -1,0 +1,16 @@
+[package]
+name = "aqvn-plugin"
+version = "0.1.9"
+edition = "2021"
+description = "Sandboxed WASM Component Model Plugin Runtime with Fuel Metering and Epoch Interruption for AQVN Native Workspace"
+
+[dependencies]
+aqvn-core = { path = "../aqvn-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+wasmtime = { version = "26.0", features = ["component-model"] }
+wasmtime-wasi = "26.0"
+
+[dev-dependencies]
+tempfile = "3"

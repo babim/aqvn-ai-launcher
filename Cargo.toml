@@ -7,6 +7,7 @@ members = [
     "crates/aqvn-connector",
     "crates/aqvn-agent",
     "crates/aqvn-crdt",
+    "crates/aqvn-plugin",
     "src-tauri",
 ]
 resolver = "2"

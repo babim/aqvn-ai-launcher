@@ -1,0 +1,57 @@
+package aqvn:plugin@0.1.0;
+
+/// Interface for custom AST guard and shell security rules.
+interface ast-guard {
+    /// Security classification for inspected commands.
+    enum rule-verdict {
+        allow,
+        require-approval,
+        block,
+    }
+
+    /// Command verification request payload.
+    record ast-check-request {
+        command: string,
+        normalized-tokens: list<string>,
+        session-user: option<string>,
+    }
+
+    /// Verification result returned by the sandboxed plugin.
+    record ast-check-response {
+        verdict: rule-verdict,
+        reason: string,
+        risk-score: u32,
+    }
+
+    /// Inspect a shell command AST and return a security verdict.
+    check-command: func(req: ast-check-request) -> ast-check-response;
+}
+
+/// Interface for dynamically loaded agent tools.
+interface agent-tool {
+    /// Metadata describing the tool.
+    record tool-info {
+        name: string,
+        description: string,
+        version: string,
+    }
+
+    /// Retrieve tool metadata.
+    get-info: func() -> tool-info;
+
+    /// Execute the tool with JSON parameters and return JSON output or error.
+    execute: func(params-json: string) -> result<string, string>;
+}
+
+/// Main component world combining WASI Preview 2 capabilities and AQVN plugin interfaces.
+world aqvn-plugin-world {
+    import wasi:clocks/monotonic-clock@0.2.0;
+    import wasi:clocks/wall-clock@0.2.0;
+    import wasi:filesystem/types@0.2.0;
+    import wasi:filesystem/preopens@0.2.0;
+    import wasi:cli/stdout@0.2.0;
+    import wasi:cli/stderr@0.2.0;
+
+    export ast-guard;
+    export agent-tool;
+}
